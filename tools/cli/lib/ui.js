@@ -195,11 +195,7 @@ class UI {
       }
 
       // Common actions
-      choices.push(
-        { name: 'Modify BMAD Installation', value: 'update' },
-        { name: 'Add / Update Custom Content', value: 'add-custom' },
-        { name: 'Rebuild Agents', value: 'compile' },
-      );
+      choices.push({ name: 'Modify BMAD Installation', value: 'update' });
 
       const promptResult = await inquirer.prompt([
         {
@@ -224,64 +220,6 @@ class UI {
         };
       }
 
-      // Handle add custom content separately
-      if (actionType === 'add-custom') {
-        customContentConfig = await this.promptCustomContentSource();
-        // After adding custom content, continue to select additional modules
-        const { installedModuleIds } = await this.getExistingInstallation(confirmedDirectory);
-
-        // Ask if user wants to add additional modules
-        const { wantsMoreModules } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'wantsMoreModules',
-            message: 'Do you want to add any additional modules?',
-            default: false,
-          },
-        ]);
-
-        let selectedModules = [];
-        if (wantsMoreModules) {
-          const moduleChoices = await this.getModuleChoices(installedModuleIds, customContentConfig);
-          selectedModules = await this.selectModules(moduleChoices);
-
-          // Process custom content selection
-          const selectedCustomContent = selectedModules.filter((mod) => mod.startsWith('__CUSTOM_CONTENT__'));
-
-          if (selectedCustomContent.length > 0) {
-            customContentConfig.selected = true;
-            customContentConfig.selectedFiles = selectedCustomContent.map((mod) => mod.replace('__CUSTOM_CONTENT__', ''));
-
-            // Convert to module IDs
-            const customContentModuleIds = [];
-            const customHandler = new CustomHandler();
-            for (const customFile of customContentConfig.selectedFiles) {
-              const customInfo = await customHandler.getCustomInfo(customFile);
-              if (customInfo) {
-                customContentModuleIds.push(customInfo.id);
-              }
-            }
-            selectedModules = [...selectedModules.filter((mod) => !mod.startsWith('__CUSTOM_CONTENT__')), ...customContentModuleIds];
-          }
-        }
-
-        return {
-          actionType: 'update',
-          directory: confirmedDirectory,
-          installCore: false, // Don't reinstall core
-          modules: selectedModules,
-          customContent: customContentConfig,
-        };
-      }
-
-      // Handle agent compilation separately
-      if (actionType === 'compile') {
-        return {
-          actionType: 'compile',
-          directory: confirmedDirectory,
-        };
-      }
-
       // If actionType === 'update', handle it with the new flow
       // Return early with modify configuration
       if (actionType === 'update') {
@@ -293,7 +231,7 @@ class UI {
           {
             type: 'confirm',
             name: 'changeModuleSelection',
-            message: 'Change which modules are installed?',
+            message: 'Modify official module selection (BMad Method, BMad Builder, Creative Innovation Suite)?',
             default: false,
           },
         ]);
@@ -305,6 +243,14 @@ class UI {
           selectedModules = await this.selectModules(moduleChoices, [...installedModuleIds]);
         } else {
           selectedModules = [...installedModuleIds];
+        }
+
+        // After module selection, ask about custom modules
+        const customModuleResult = await this.handleCustomModulesInModifyFlow(confirmedDirectory, selectedModules);
+
+        // Merge any selected custom modules
+        if (customModuleResult.selectedCustomModules.length > 0) {
+          selectedModules.push(...customModuleResult.selectedCustomModules);
         }
 
         // Get tool selection
@@ -337,7 +283,7 @@ class UI {
           ides: toolSelection.ides,
           skipIde: toolSelection.skipIde,
           coreConfig: coreConfig,
-          customContent: { hasCustomContent: false },
+          customContent: customModuleResult.customContentConfig,
           enableAgentVibes: enableTts,
           agentVibesInstalled: false,
         };
@@ -352,7 +298,7 @@ class UI {
       {
         type: 'confirm',
         name: 'wantsOfficialModules',
-        message: 'Will you be installing any official modules (BMad Method, BMad Builder, Creative Innovation Suite)?',
+        message: 'Will you be installing any official BMad modules (BMad Method, BMad Builder, Creative Innovation Suite)?',
         default: true,
       },
     ]);
@@ -368,7 +314,7 @@ class UI {
       {
         type: 'confirm',
         name: 'wantsCustomContent',
-        message: 'Will you be installing any locally stored custom content?',
+        message: 'Would you like to install a local custom module (this includes custom agents and workflows also)?',
         default: false,
       },
     ]);
@@ -734,14 +680,8 @@ class UI {
 
     // Add official modules
     const { ModuleManager } = require('../installers/lib/modules/manager');
-    // For new installations, don't scan project yet (will do after custom content is discovered)
-    // For existing installations, scan if user selected custom content
-    const shouldScanProject =
-      !isNewInstallation && customContentConfig && customContentConfig.hasCustomContent && customContentConfig.selected;
-    const moduleManager = new ModuleManager({
-      scanProjectForModules: shouldScanProject,
-    });
-    const { modules: availableModules, customModules: customModulesFromProject } = await moduleManager.listAvailable();
+    const moduleManager = new ModuleManager();
+    const { modules: availableModules, customModules: customModulesFromCache } = await moduleManager.listAvailable();
 
     // First, add all items to appropriate sections
     const allCustomModules = [];
@@ -749,14 +689,14 @@ class UI {
     // Add custom content items from directory
     allCustomModules.push(...customContentItems);
 
-    // Add custom modules from project scan (if scanning is enabled)
-    for (const mod of customModulesFromProject) {
+    // Add custom modules from cache
+    for (const mod of customModulesFromCache) {
       // Skip if this module is already in customContentItems (by path)
       const isDuplicate = allCustomModules.some((item) => item.path && mod.path && path.resolve(item.path) === path.resolve(mod.path));
 
       if (!isDuplicate) {
         allCustomModules.push({
-          name: `${chalk.cyan('✓')} ${mod.name} ${chalk.gray(`(${mod.source})`)}`,
+          name: `${chalk.cyan('✓')} ${mod.name} ${chalk.gray(`(cached)`)}`,
           value: mod.id,
           checked: isNewInstallation ? mod.defaultSelected || false : installedModuleIds.has(mod.id),
         });
@@ -803,7 +743,9 @@ class UI {
       },
     ]);
 
-    return moduleAnswer.modules || [];
+    const selected = moduleAnswer.modules || [];
+
+    return selected;
   }
 
   /**
@@ -1471,6 +1413,136 @@ class UI {
     }
 
     return customContentConfig;
+  }
+
+  /**
+   * Handle custom modules in the modify flow
+   * @param {string} directory - Installation directory
+   * @param {Array} selectedModules - Currently selected modules
+   * @returns {Object} Result with selected custom modules and custom content config
+   */
+  async handleCustomModulesInModifyFlow(directory, selectedModules) {
+    // Get existing installation to find custom modules
+    const { existingInstall } = await this.getExistingInstallation(directory);
+
+    // Check if there are any custom modules in cache
+    const { Installer } = require('../installers/lib/core/installer');
+    const installer = new Installer();
+    const { bmadDir } = await installer.findBmadDir(directory);
+
+    const cacheDir = path.join(bmadDir, '_config', 'custom');
+    const cachedCustomModules = [];
+
+    if (await fs.pathExists(cacheDir)) {
+      const entries = await fs.readdir(cacheDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const moduleYamlPath = path.join(cacheDir, entry.name, 'module.yaml');
+          if (await fs.pathExists(moduleYamlPath)) {
+            const yaml = require('yaml');
+            const content = await fs.readFile(moduleYamlPath, 'utf8');
+            const moduleData = yaml.parse(content);
+
+            cachedCustomModules.push({
+              id: entry.name,
+              name: moduleData.name || entry.name,
+              description: moduleData.description || 'Custom module from cache',
+              checked: selectedModules.includes(entry.name),
+              fromCache: true,
+            });
+          }
+        }
+      }
+    }
+
+    const result = {
+      selectedCustomModules: [],
+      customContentConfig: { hasCustomContent: false },
+    };
+
+    if (cachedCustomModules.length === 0) {
+      return result;
+    }
+
+    // Ask user about custom modules
+    console.log(chalk.cyan('\n⚙️  Custom Modules'));
+    console.log(chalk.dim('Found custom modules in your installation:'));
+
+    const { customAction } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'customAction',
+        message: 'What would you like to do with custom modules?',
+        choices: [
+          { name: 'Keep all existing custom modules', value: 'keep' },
+          { name: 'Select which custom modules to keep', value: 'select' },
+          { name: 'Add new custom modules', value: 'add' },
+          { name: 'Remove all custom modules', value: 'remove' },
+        ],
+        default: 'keep',
+      },
+    ]);
+
+    switch (customAction) {
+      case 'keep': {
+        // Keep all existing custom modules
+        result.selectedCustomModules = cachedCustomModules.map((m) => m.id);
+        console.log(chalk.dim(`Keeping ${result.selectedCustomModules.length} custom module(s)`));
+        break;
+      }
+
+      case 'select': {
+        // Let user choose which to keep
+        const choices = cachedCustomModules.map((m) => ({
+          name: `${m.name} ${chalk.gray(`(${m.id})`)}`,
+          value: m.id,
+        }));
+
+        const { keepModules } = await inquirer.prompt([
+          {
+            type: 'checkbox',
+            name: 'keepModules',
+            message: 'Select custom modules to keep:',
+            choices: choices,
+            default: cachedCustomModules.filter((m) => m.checked).map((m) => m.id),
+          },
+        ]);
+        result.selectedCustomModules = keepModules;
+        break;
+      }
+
+      case 'add': {
+        // First ask to keep existing ones
+        const { keepExisting } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'keepExisting',
+            message: 'Keep existing custom modules?',
+            default: true,
+          },
+        ]);
+
+        if (keepExisting) {
+          result.selectedCustomModules = cachedCustomModules.map((m) => m.id);
+        }
+
+        // Then prompt for new ones (reuse existing method)
+        const newCustomContent = await this.promptCustomContentSource();
+        if (newCustomContent.hasCustomContent && newCustomContent.selected) {
+          result.selectedCustomModules.push(...newCustomContent.selectedModuleIds);
+          result.customContentConfig = newCustomContent;
+        }
+        break;
+      }
+
+      case 'remove': {
+        // Remove all custom modules
+        console.log(chalk.yellow('All custom modules will be removed from the installation'));
+        break;
+      }
+    }
+
+    return result;
   }
 }
 
