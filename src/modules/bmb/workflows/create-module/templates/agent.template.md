@@ -18,7 +18,7 @@ agent:
     identity: |
       {agent-identity - multi-line description}
     communication_style: |
-      {communication-style - multi-line description}
+      {communication-style - 1-2 short sentences to describe chat style}
     principles:
       - '{agent-principle-1}'
       - '{agent-principle-2}'
@@ -27,9 +27,9 @@ agent:
 
   # Optional: Only include if agent needs memory/persistence
   critical_actions:
-    - 'Load COMPLETE file ./[agent-name]-sidecar/memories.md and integrate all past interactions'
-    - 'Load COMPLETE file ./[agent-name]-sidecar/instructions.md and follow ALL protocols'
-    - 'ONLY read/write files in ./[agent-name]-sidecar/ - this is our private workspace'
+    - 'Load COMPLETE file [bmad_memory]/[agent-name]-sidecar/memories.md and integrate all past interactions'
+    - 'Load COMPLETE file [bmad_memory]/[agent-name]-sidecar/instructions.md and follow ALL protocols'
+    - 'ONLY read/write files in [bmad_memory]/[agent-name]-sidecar/* - this is our private workspace'
 
   # Optional: Embedded prompts for common interactions
   prompts:
@@ -55,7 +55,7 @@ agent:
       triggers:
         - party-mode:
           input: SPM or fuzzy match start party mode
-          route: '{project-root}/.bmad/core/workflows/edit-agent/workflow.md'
+          route: '{project-root}/_bmad/core/workflows/edit-agent/workflow.md'
           data: what is being discussed or suggested with the command
           type: exec
         - expert-chat:
@@ -83,7 +83,7 @@ agent:
 
     # Workflow for complex processes
     - trigger: 'generate-report'
-      route: '{project-root}/.bmad/{custom_module}/workflows/report-gen/workflow.md'
+      route: '{project-root}/_bmad/{custom_module}/workflows/report-gen/workflow.md'
       description: 'Generate detailed report 📊'
 
     # Exec with internal prompt reference
@@ -98,7 +98,7 @@ agent:
 When creating expert agents in modules, create a sidecar folder:
 
 ```
-{custom_module_location}/{module_name}/agents/[agent-name]-sidecar/
+{bmb_creations_output_folder}/{module_name}/agents/[agent-name]-sidecar/
 ├── memories.md          # Persistent memory across sessions
 ├── instructions.md      # Agent-specific protocols
 ├── insights.md          # Important breakthroughs/realizations
@@ -156,7 +156,7 @@ Expert agents support three types of menu actions:
 
 ```yaml
 - trigger: 'generate-report'
-  route: '{project-root}/.bmad/{custom_module}/workflows/report-gen/workflow.md'
+  route: '{project-root}/_bmad/{custom_module}/workflows/report-gen/workflow.md'
   description: 'Generate report 📊'
 ```
 
@@ -166,14 +166,12 @@ Expert agents support three types of menu actions:
 ## Notes for Module Creation:
 
 1. **File Paths**:
-   - Agent files go in: `{custom_module_location}/{module_name}/agents/[agent-name]/[agent-name].yaml`
-   - Sidecar folders go in: `{custom_module_location}/{module_name}/agents/[agent-name]/[agent-name]-sidecar/`
+   - Agent files go in: `[bmb_creations_output_folder]/[module_name]/agents/[agent-name]/[agent-name].yaml`
+   - Sidecar folders go in: `[bmb_creations_output_folder]/[module_name]/agents/[agent-name]/[agent-name]-sidecar/`
 
 2. **Variable Usage**:
-   - `{agent_sidecar_folder}` resolves to the agents sidecar folder destination after installation
-   - `.bmad` resolves to .bmad
-   - `{custom_module}` resolves to custom/src/modules
-   - `{module}` is your module code/name
+   - `bmad_memory` resolves to the agents sidecar folder destination after installation
+   - `module` is your module code/name
 
 3. **Creating Sidecar Structure**:
    - When agent is created, also create the sidecar folder
@@ -268,7 +266,7 @@ Analyze the visual design with my signature dramatic flair
 menu: # Core interactions - multi: "[CH] Chat with Caravaggio or [SPM] Start Party Mode"
 triggers: - party-mode:
 input: SPM or fuzzy match start party mode
-route: "{project-root}/.bmad/core/workflows/edit-agent/workflow.md"
+route: "{project-root}/\_bmad/core/workflows/edit-agent/workflow.md"
 data: what's being discussed, plus custom party agents if specified
 type: exec - expert-chat:
 input: CH or fuzzy match validate agent
@@ -305,11 +303,11 @@ type: action
       triggers:
         - pitch-deck:
           input: PD or fuzzy match pitch deck
-          route: "{project-root}/.bmad/{custom_module}/workflows/pitch-deck/workflow.md"
+          route: "{project-root}/_bmad/{custom_module}/workflows/pitch-deck/workflow.md"
           description: 'Investor pitch deck 📈'
         - explainer:
           input: EX or fuzzy match explainer
-          route: "{project-root}/.bmad/{custom_module}/workflows/explainer/workflow.md"
+          route: "{project-root}/_bmad/{custom_module}/workflows/explainer/workflow.md"
           description: 'Video explainer 🎥'
 
     - trigger: 'save-project'
