@@ -10,14 +10,15 @@ const { CustomHandler } = require('../installers/lib/custom/handler');
  * UI utilities for the installer
  */
 class UI {
-  constructor() {}
-
   /**
    * Prompt for installation configuration
    * @returns {Object} Installation configuration
    */
   async promptInstall() {
     CLIUtils.displayLogo();
+
+    // Display changelog link
+    console.log(chalk.cyan('\n📋 Read the latest updates: https://github.com/bmad-code-org/BMAD-METHOD/blob/main/CHANGELOG.md\n'));
 
     const confirmedDirectory = await this.getConfirmedDirectory();
 
@@ -161,14 +162,8 @@ class UI {
       }
     }
 
-    // Always ask for custom content, but we'll handle it differently for new installs
     let customContentConfig = { hasCustomContent: false };
-    if (hasExistingInstall) {
-      // Existing installation - prompt to add/update custom content
-      customContentConfig = await this.promptCustomContentForExisting();
-    } else {
-      // New installation - we'll prompt after creating the directory structure
-      // For now, set a flag to indicate we should ask later
+    if (!hasExistingInstall) {
       customContentConfig._shouldAsk = true;
     }
 
@@ -246,7 +241,35 @@ class UI {
         }
 
         // After module selection, ask about custom modules
-        const customModuleResult = await this.handleCustomModulesInModifyFlow(confirmedDirectory, selectedModules);
+        console.log('');
+        const { changeCustomModules } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'changeCustomModules',
+            message: 'Modify custom module selection (add, update, or remove custom modules/agents/workflows)?',
+            default: false,
+          },
+        ]);
+
+        let customModuleResult = { selectedCustomModules: [], customContentConfig: { hasCustomContent: false } };
+        if (changeCustomModules) {
+          customModuleResult = await this.handleCustomModulesInModifyFlow(confirmedDirectory, selectedModules);
+        } else {
+          // Preserve existing custom modules if user doesn't want to modify them
+          const { Installer } = require('../installers/lib/core/installer');
+          const installer = new Installer();
+          const { bmadDir } = await installer.findBmadDir(confirmedDirectory);
+
+          const cacheDir = path.join(bmadDir, '_config', 'custom');
+          if (await fs.pathExists(cacheDir)) {
+            const entries = await fs.readdir(cacheDir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory()) {
+                customModuleResult.selectedCustomModules.push(entry.name);
+              }
+            }
+          }
+        }
 
         // Merge any selected custom modules
         if (customModuleResult.selectedCustomModules.length > 0) {
@@ -592,6 +615,13 @@ class UI {
 
     console.log(chalk.yellow('\nThank you for helping test the early release version of the new BMad Core and BMad Method!'));
     console.log(chalk.cyan('Stable Beta coming soon - please read the full README.md and linked documentation to get started!'));
+
+    // Add changelog link at the end
+    console.log(
+      chalk.magenta(
+        "\n📋 Want to see what's new? Check out the changelog: https://github.com/bmad-code-org/BMAD-METHOD/blob/main/CHANGELOG.md",
+      ),
+    );
   }
 
   /**
@@ -1141,146 +1171,6 @@ class UI {
   }
 
   /**
-   * Prompt for custom content for existing installations
-   * @returns {Object} Custom content configuration
-   */
-  async promptCustomContentForExisting() {
-    try {
-      // Skip custom content installation - always return false
-      return { hasCustomContent: false };
-
-      // TODO: Custom content installation temporarily disabled
-      // CLIUtils.displaySection('Custom Content', 'Add new custom agents, workflows, or modules to your installation');
-
-      // const { hasCustomContent } = await inquirer.prompt([
-      //   {
-      //     type: 'list',
-      //     name: 'hasCustomContent',
-      //     message: 'Do you want to add or update custom content?',
-      //     choices: [
-      //       {
-      //         name: 'No, continue with current installation only',
-      //         value: false,
-      //       },
-      //       {
-      //         name: 'Yes, I have custom content to add or update',
-      //         value: true,
-      //       },
-      //     ],
-      //     default: false,
-      //   },
-      // ]);
-
-      // if (!hasCustomContent) {
-      //   return { hasCustomContent: false };
-      // }
-
-      // TODO: Custom content installation temporarily disabled
-      // // Get directory path
-      // const { customPath } = await inquirer.prompt([
-      //   {
-      //     type: 'input',
-      //     name: 'customPath',
-      //     message: 'Enter directory to search for custom content (will scan subfolders):',
-      //     default: process.cwd(),
-      //     validate: async (input) => {
-      //       if (!input || input.trim() === '') {
-      //         return 'Please enter a directory path';
-      //       }
-
-      //       // Normalize and check if path exists
-      //       const expandedPath = CLIUtils.expandPath(input.trim());
-      //       const pathExists = await fs.pathExists(expandedPath);
-      //       if (!pathExists) {
-      //         return 'Directory does not exist';
-      //       }
-
-      //       // Check if it's actually a directory
-      //       const stats = await fs.stat(expandedPath);
-      //       if (!stats.isDirectory()) {
-      //         return 'Path must be a directory';
-      //       }
-
-      //       return true;
-      //     },
-      //     transformer: (input) => {
-      //       return CLIUtils.expandPath(input);
-      //     },
-      //   },
-      // ]);
-
-      // const resolvedPath = CLIUtils.expandPath(customPath);
-
-      // // Find custom content
-      // const customHandler = new CustomHandler();
-      // const customFiles = await customHandler.findCustomContent(resolvedPath);
-
-      // if (customFiles.length === 0) {
-      //   console.log(chalk.yellow(`\nNo custom content found in ${resolvedPath}`));
-
-      //   const { tryDifferent } = await inquirer.prompt([
-      //     {
-      //       type: 'confirm',
-      //       name: 'tryDifferent',
-      //       message: 'Try a different directory?',
-      //       default: true,
-      //     },
-      //   ]);
-
-      //   if (tryDifferent) {
-      //     return await this.promptCustomContentForExisting();
-      //   }
-
-      //   return { hasCustomContent: false };
-      // }
-
-      // // Display found items
-      // console.log(chalk.cyan(`\nFound ${customFiles.length} custom content file(s):`));
-      // const customContentItems = [];
-
-      // for (const customFile of customFiles) {
-      //   const customInfo = await customHandler.getCustomInfo(customFile);
-      //   if (customInfo) {
-      //     customContentItems.push({
-      //       name: `${chalk.cyan('✓')} ${customInfo.name} ${chalk.gray(`(${customInfo.relativePath})`)}`,
-      //       value: `__CUSTOM_CONTENT__${customFile}`,
-      //       checked: true,
-      //     });
-      //   }
-      // }
-
-      // // Add option to keep existing custom content
-      // console.log(chalk.yellow('\nExisting custom modules will be preserved unless you remove them'));
-
-      // const { selectedFiles } = await inquirer.prompt([
-      //   {
-      //     type: 'checkbox',
-      //     name: 'selectedFiles',
-      //     message: 'Select custom content to add:',
-      //     choices: customContentItems,
-      //     pageSize: 15,
-      //     validate: (answer) => {
-      //       if (answer.length === 0) {
-      //         return 'You must select at least one item';
-      //       }
-      //       return true;
-      //     },
-      //   },
-      // ]);
-
-      // return {
-      //   hasCustomContent: true,
-      //   customPath: resolvedPath,
-      //   selected: true,
-      //   selectedFiles: selectedFiles,
-      // };
-    } catch (error) {
-      console.error(chalk.red('Error configuring custom content:'), error);
-      return { hasCustomContent: false };
-    }
-  }
-
-  /**
    * Prompt user for custom content source location
    * @returns {Object} Custom content configuration
    */
@@ -1460,26 +1350,35 @@ class UI {
       customContentConfig: { hasCustomContent: false },
     };
 
-    if (cachedCustomModules.length === 0) {
-      return result;
-    }
-
     // Ask user about custom modules
     console.log(chalk.cyan('\n⚙️  Custom Modules'));
-    console.log(chalk.dim('Found custom modules in your installation:'));
+    if (cachedCustomModules.length > 0) {
+      console.log(chalk.dim('Found custom modules in your installation:'));
+    } else {
+      console.log(chalk.dim('No custom modules currently installed.'));
+    }
+
+    // Build choices dynamically based on whether we have existing modules
+    const choices = [];
+    if (cachedCustomModules.length > 0) {
+      choices.push(
+        { name: 'Keep all existing custom modules', value: 'keep' },
+        { name: 'Select which custom modules to keep', value: 'select' },
+        { name: 'Add new custom modules', value: 'add' },
+        { name: 'Remove all custom modules', value: 'remove' },
+      );
+    } else {
+      choices.push({ name: 'Add new custom modules', value: 'add' }, { name: 'Cancel (no custom modules)', value: 'cancel' });
+    }
 
     const { customAction } = await inquirer.prompt([
       {
         type: 'list',
         name: 'customAction',
-        message: 'What would you like to do with custom modules?',
-        choices: [
-          { name: 'Keep all existing custom modules', value: 'keep' },
-          { name: 'Select which custom modules to keep', value: 'select' },
-          { name: 'Add new custom modules', value: 'add' },
-          { name: 'Remove all custom modules', value: 'remove' },
-        ],
-        default: 'keep',
+        message:
+          cachedCustomModules.length > 0 ? 'What would you like to do with custom modules?' : 'Would you like to add custom modules?',
+        choices: choices,
+        default: cachedCustomModules.length > 0 ? 'keep' : 'add',
       },
     ]);
 
@@ -1512,19 +1411,9 @@ class UI {
       }
 
       case 'add': {
-        // First ask to keep existing ones
-        const { keepExisting } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'keepExisting',
-            message: 'Keep existing custom modules?',
-            default: true,
-          },
-        ]);
-
-        if (keepExisting) {
-          result.selectedCustomModules = cachedCustomModules.map((m) => m.id);
-        }
+        // By default, keep existing modules when adding new ones
+        // User chose "Add new" not "Replace", so we assume they want to keep existing
+        result.selectedCustomModules = cachedCustomModules.map((m) => m.id);
 
         // Then prompt for new ones (reuse existing method)
         const newCustomContent = await this.promptCustomContentSource();
@@ -1538,6 +1427,12 @@ class UI {
       case 'remove': {
         // Remove all custom modules
         console.log(chalk.yellow('All custom modules will be removed from the installation'));
+        break;
+      }
+
+      case 'cancel': {
+        // User cancelled - no custom modules
+        console.log(chalk.dim('No custom modules will be added'));
         break;
       }
     }
