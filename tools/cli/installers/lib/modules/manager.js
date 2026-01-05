@@ -809,9 +809,9 @@ class ModuleManager {
           const customizeData = yaml.parse(customizeContent);
           customizedFields = customizeData.customized_fields || [];
 
-          // Build answers object from customizations (filter empty values)
+          // Build answers object from customizations
           if (customizeData.persona) {
-            Object.assign(answers, filterCustomizationData(customizeData.persona));
+            answers.persona = customizeData.persona;
           }
           if (customizeData.agent?.metadata) {
             const filteredMetadata = filterCustomizationData(customizeData.agent.metadata);
@@ -824,6 +824,12 @@ class ModuleManager {
           }
           if (customizeData.memories && customizeData.memories.length > 0) {
             answers.memories = customizeData.memories;
+          }
+          if (customizeData.menu && customizeData.menu.length > 0) {
+            answers.menu = customizeData.menu;
+          }
+          if (customizeData.prompts && customizeData.prompts.length > 0) {
+            answers.prompts = customizeData.prompts;
           }
         }
 
@@ -839,8 +845,14 @@ class ModuleManager {
         // Compile with customizations if any
         const { xml } = await compileAgent(yamlContent, answers, agentName, relativePath, { config: this.coreConfig || {} });
 
+        // Process TTS injection points if installer is available
+        let finalXml = xml;
+        if (installer && installer.processTTSInjectionPoints) {
+          finalXml = installer.processTTSInjectionPoints(xml, targetMdPath);
+        }
+
         // Write the compiled agent
-        await fs.writeFile(targetMdPath, xml, 'utf8');
+        await fs.writeFile(targetMdPath, finalXml, 'utf8');
 
         // Handle sidecar copying if present
         if (hasSidecar) {

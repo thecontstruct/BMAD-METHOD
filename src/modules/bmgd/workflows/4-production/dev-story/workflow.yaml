@@ -9,28 +9,38 @@ user_name: "{config_source}:user_name"
 communication_language: "{config_source}:communication_language"
 user_skill_level: "{config_source}:user_skill_level"
 document_output_language: "{config_source}:document_output_language"
-story_dir: "{config_source}:sprint_artifacts"
+story_dir: "{config_source}:implementation_artifacts"
 date: system-generated
 
 story_file: "" # Explicit story path; auto-discovered if empty
 # Context file uses same story_key as story file (e.g., "1-2-user-authentication.context.xml")
 context_file: "{story_dir}/{{story_key}}.context.xml"
-sprint_artifacts: "{config_source}:sprint_artifacts"
-sprint_status: "{sprint_artifacts}/sprint-status.yaml || {output_folder}/sprint-status.yaml"
+implementation_artifacts: "{config_source}:implementation_artifacts"
+sprint_status: "{implementation_artifacts}/sprint-status.yaml || {implementation_artifacts}/sprint-status.yaml"
 
 # Smart input file references - handles both whole docs and sharded docs
 # Priority: Whole document first, then sharded version
 # Strategy: Load necessary context for story implementation
 input_file_patterns:
+  gdd:
+    description: "Game Design Document"
+    whole: "{output_folder}/*gdd*.md"
+    sharded: "{output_folder}/*gdd*/*.md"
+    load_strategy: "FULL_LOAD"
+  narrative:
+    description: "Narrative Design Document (if story-driven)"
+    whole: "{output_folder}/*narrative*.md"
+    sharded: "{output_folder}/*narrative*/*.md"
+    load_strategy: "FULL_LOAD"
   architecture:
-    description: "System architecture and decisions"
+    description: "Game architecture and technical decisions"
     whole: "{output_folder}/*architecture*.md"
     sharded: "{output_folder}/*architecture*/*.md"
     load_strategy: "FULL_LOAD"
   tech_spec:
     description: "Technical specification"
     whole: "{output_folder}/tech-spec*.md"
-    sharded: "{sprint_artifacts}/tech-spec-epic-*.md"
+    sharded: "{implementation_artifacts}/tech-spec-epic-*.md"
     load_strategy: "SELECTIVE_LOAD"
   ux_design:
     description: "UX design specification (if UI)"
@@ -49,8 +59,8 @@ input_file_patterns:
     load_strategy: "INDEX_GUIDED"
 
 # Workflow components
-installed_path: "{project-root}/_bmad/bmm/workflows/4-implementation/dev-story"
-instructions: "{installed_path}/instructions.md"
+installed_path: "{project-root}/_bmad/bmgd/workflows/4-production/dev-story"
+instructions: "{installed_path}/instructions.xml"
 validation: "{installed_path}/checklist.md"
 
 standalone: true
