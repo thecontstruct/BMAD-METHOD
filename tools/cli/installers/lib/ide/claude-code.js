@@ -13,6 +13,7 @@ const {
   resolveSubagentFiles,
 } = require('./shared/module-injections');
 const { getAgentsFromBmad, getAgentsFromDir } = require('./shared/bmad-artifacts');
+const prompts = require('../../../lib/prompts');
 
 /**
  * Claude Code IDE setup handler
@@ -26,61 +27,62 @@ class ClaudeCodeSetup extends BaseIdeSetup {
   }
 
   /**
-   * Collect configuration choices before installation
-   * @param {Object} options - Configuration options
-   * @returns {Object} Collected configuration
+   * Prompt for subagent installation location
+   * @returns {Promise<string>} Selected location ('project' or 'user')
    */
-  async collectConfiguration(options = {}) {
-    const config = {
-      subagentChoices: null,
-      installLocation: null,
-    };
-
-    const sourceModulesPath = getSourcePath('modules');
-    const modules = options.selectedModules || [];
-
-    for (const moduleName of modules) {
-      // Check for Claude Code sub-module injection config in SOURCE directory
-      const injectionConfigPath = path.join(sourceModulesPath, moduleName, 'sub-modules', 'claude-code', 'injections.yaml');
-
-      if (await this.exists(injectionConfigPath)) {
-        const yaml = require('yaml');
-
-        try {
-          // Load injection configuration
-          const configContent = await fs.readFile(injectionConfigPath, 'utf8');
-          const injectionConfig = yaml.parse(configContent);
-
-          // Ask about subagents if they exist and we haven't asked yet
-          if (injectionConfig.subagents && !config.subagentChoices) {
-            config.subagentChoices = await this.promptSubagentInstallation(injectionConfig.subagents);
-
-            if (config.subagentChoices.install !== 'none') {
-              // Ask for installation location
-              const { default: inquirer } = await import('inquirer');
-              const locationAnswer = await inquirer.prompt([
-                {
-                  type: 'list',
-                  name: 'location',
-                  message: 'Where would you like to install Claude Code subagents?',
-                  choices: [
-                    { name: 'Project level (.claude/agents/)', value: 'project' },
-                    { name: 'User level (~/.claude/agents/)', value: 'user' },
-                  ],
-                  default: 'project',
-                },
-              ]);
-              config.installLocation = locationAnswer.location;
-            }
-          }
-        } catch (error) {
-          console.log(chalk.yellow(`  Warning: Failed to process ${moduleName} features: ${error.message}`));
-        }
-      }
-    }
-
-    return config;
+  async promptInstallLocation() {
+    return prompts.select({
+      message: 'Where would you like to install Claude Code subagents?',
+      choices: [
+        { name: 'Project level (.claude/agents/)', value: 'project' },
+        { name: 'User level (~/.claude/agents/)', value: 'user' },
+      ],
+      default: 'project',
+    });
   }
+
+  // /**
+  //  * Collect configuration choices before installation
+  //  * @param {Object} options - Configuration options
+  //  * @returns {Object} Collected configuration
+  //  */
+  // async collectConfiguration(options = {}) {
+  //   const config = {
+  //     subagentChoices: null,
+  //     installLocation: null,
+  //   };
+
+  //   const sourceModulesPath = getSourcePath('modules');
+  //   const modules = options.selectedModules || [];
+
+  //   for (const moduleName of modules) {
+  //     // Check for Claude Code sub-module injection config in SOURCE directory
+  //     const injectionConfigPath = path.join(sourceModulesPath, moduleName, 'sub-modules', 'claude-code', 'injections.yaml');
+
+  //     if (await this.exists(injectionConfigPath)) {
+  //       const yaml = require('yaml');
+
+  //       try {
+  //         // Load injection configuration
+  //         const configContent = await fs.readFile(injectionConfigPath, 'utf8');
+  //         const injectionConfig = yaml.parse(configContent);
+
+  //         // Ask about subagents if they exist and we haven't asked yet
+  //         if (injectionConfig.subagents && !config.subagentChoices) {
+  //           config.subagentChoices = await this.promptSubagentInstallation(injectionConfig.subagents);
+
+  //           if (config.subagentChoices.install !== 'none') {
+  //             config.installLocation = await this.promptInstallLocation();
+  //           }
+  //         }
+  //       } catch (error) {
+  //         console.log(chalk.yellow(`  Warning: Failed to process ${moduleName} features: ${error.message}`));
+  //       }
+  //     }
+  //   }
+
+  //   return config;
+  // }
 
   /**
    * Cleanup old BMAD installation before reinstalling
@@ -302,24 +304,10 @@ class ClaudeCodeSetup extends BaseIdeSetup {
       }
 
       if (interactive && config.subagents && !choices) {
-        choices = await this.promptSubagentInstallation(config.subagents);
-
-        if (choices.install !== 'none') {
-          const { default: inquirer } = await import('inquirer');
-          const locationAnswer = await inquirer.prompt([
-            {
-              type: 'list',
-              name: 'location',
-              message: 'Where would you like to install Claude Code subagents?',
-              choices: [
-                { name: 'Project level (.claude/agents/)', value: 'project' },
-                { name: 'User level (~/.claude/agents/)', value: 'user' },
-              ],
-              default: 'project',
-            },
-          ]);
-          location = locationAnswer.location;
-        }
+        // choices = await this.promptSubagentInstallation(config.subagents);
+        // if (choices.install !== 'none') {
+        //   location = await this.promptInstallLocation();
+        // }
       }
 
       if (config.injections && choices && choices.install !== 'none') {
@@ -342,22 +330,16 @@ class ClaudeCodeSetup extends BaseIdeSetup {
    * Prompt user for subagent installation preferences
    */
   async promptSubagentInstallation(subagentConfig) {
-    const { default: inquirer } = await import('inquirer');
-
     // First ask if they want to install subagents
-    const { install } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'install',
-        message: 'Would you like to install Claude Code subagents for enhanced functionality?',
-        choices: [
-          { name: 'Yes, install all subagents', value: 'all' },
-          { name: 'Yes, let me choose specific subagents', value: 'selective' },
-          { name: 'No, skip subagent installation', value: 'none' },
-        ],
-        default: 'all',
-      },
-    ]);
+    const install = await prompts.select({
+      message: 'Would you like to install Claude Code subagents for enhanced functionality?',
+      choices: [
+        { name: 'Yes, install all subagents', value: 'all' },
+        { name: 'Yes, let me choose specific subagents', value: 'selective' },
+        { name: 'No, skip subagent installation', value: 'none' },
+      ],
+      default: 'all',
+    });
 
     if (install === 'selective') {
       // Show list of available subagents with descriptions
@@ -369,18 +351,14 @@ class ClaudeCodeSetup extends BaseIdeSetup {
         'document-reviewer.md': 'Document quality review',
       };
 
-      const { selected } = await inquirer.prompt([
-        {
-          type: 'checkbox',
-          name: 'selected',
-          message: 'Select subagents to install:',
-          choices: subagentConfig.files.map((file) => ({
-            name: `${file.replace('.md', '')} - ${subagentInfo[file] || 'Specialized assistant'}`,
-            value: file,
-            checked: true,
-          })),
-        },
-      ]);
+      const selected = await prompts.multiselect({
+        message: `Select subagents to install ${chalk.dim('(↑/↓ navigates multiselect, SPACE toggles, A to toggles All, ENTER confirm)')}:`,
+        options: subagentConfig.files.map((file) => ({
+          label: `${file.replace('.md', '')} - ${subagentInfo[file] || 'Specialized assistant'}`,
+          value: file,
+        })),
+        initialValues: subagentConfig.files,
+      });
 
       return { install: 'selective', selected };
     }

@@ -38,8 +38,10 @@ export default defineConfig({
       tagline: 'AI-driven agile development with specialized agents and workflows that scale from bug fixes to enterprise platforms.',
 
       logo: {
-        src: './public/img/logo.svg',
-        alt: 'BMAD Logo',
+        light: './public/img/bmad-light.png',
+        dark: './public/img/bmad-dark.png',
+        alt: 'BMAD Method',
+        replacesTitle: true,
       },
       favicon: '/favicon.ico',
 
@@ -146,6 +148,10 @@ export default defineConfig({
               autogenerate: { directory: 'explanation/features' },
             },
             {
+              label: 'TEA (Test Architect)',
+              autogenerate: { directory: 'explanation/tea' },
+            },
+            {
               label: 'Agents',
               autogenerate: { directory: 'explanation/agents' },
             },
@@ -190,6 +196,10 @@ export default defineConfig({
             {
               label: 'Configuration',
               autogenerate: { directory: 'reference/configuration' },
+            },
+            {
+              label: 'TEA (Test Architect)',
+              autogenerate: { directory: 'reference/tea' },
             },
             {
               label: 'Glossary',

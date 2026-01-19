@@ -1,4 +1,4 @@
-# BMad Method
+![BMad Method](banner-bmad-method.png)
 
 [![Version](https://img.shields.io/npm/v/bmad-method?color=blue&label=version)](https://www.npmjs.com/package/bmad-method)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -86,6 +86,8 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**BMad** and **BMAD-METHOD** are trademarks of BMad Code, LLC.
+**BMad** and **BMAD-METHOD** are trademarks of BMad Code, LLC. See [TRADEMARK.md](TRADEMARK.md) for details.
 
 [![Contributors](https://contrib.rocks/image?repo=bmad-code-org/BMAD-METHOD)](https://github.com/bmad-code-org/BMAD-METHOD/graphs/contributors)
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contributor information.

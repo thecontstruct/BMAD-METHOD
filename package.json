@@ -34,6 +34,7 @@
     "flatten": "node tools/flattener/main.js",
     "format:check": "prettier --check \"**/*.{js,cjs,mjs,json,yaml}\"",
     "format:fix": "prettier --write \"**/*.{js,cjs,mjs,json,yaml}\"",
+    "format:fix:staged": "prettier --write",
     "install:bmad": "node tools/cli/bmad-cli.js install",
     "lint": "eslint . --ext .js,.cjs,.mjs,.yaml --max-warnings=0",
     "lint:fix": "eslint . --ext .js,.cjs,.mjs,.yaml --fix",
@@ -54,20 +55,21 @@
   "lint-staged": {
     "*.{js,cjs,mjs}": [
       "npm run lint:fix",
-      "npm run format:fix"
+      "npm run format:fix:staged"
     ],
     "*.yaml": [
       "eslint --fix",
-      "npm run format:fix"
+      "npm run format:fix:staged"
     ],
     "*.json": [
-      "npm run format:fix"
+      "npm run format:fix:staged"
     ],
     "*.md": [
       "markdownlint-cli2"
     ]
   },
   "dependencies": {
+    "@clack/prompts": "^0.11.0",
     "@kayvan/markdown-tree-parser": "^1.6.1",
     "boxen": "^5.1.2",
     "chalk": "^4.1.2",
@@ -78,7 +80,6 @@
     "fs-extra": "^11.3.0",
     "glob": "^11.0.3",
     "ignore": "^7.0.5",
-    "inquirer": "^9.3.8",
     "js-yaml": "^4.1.0",
     "ora": "^5.4.1",
     "semver": "^7.6.3",
