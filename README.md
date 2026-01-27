@@ -32,10 +32,10 @@ Follow the installer prompts, then open your AI IDE (Claude Code, Cursor, Windsu
 
 > **Not sure what to do?** Run `/bmad-help` — it tells you exactly what's next and what's optional. You can also ask it questions like:
 
- - `/bmad-help How should I build a web app for for my TShirt Business that can scale to millions?`
+ - `/bmad-help How should I build a web app for my TShirt Business that can scale to millions?`
  - `/bmad-help I just finished the architecture, I am not sure what to do next`
 
-And the amazing this is BMad Help evolves depending on what modules you install also!
+And the amazing thing is BMad Help evolves depending on what modules you install also!
  - `/bmad-help Im interested in really exploring creative ways to demo BMad at work, what do you recommend to help plan a great slide deck and compelling narrative?`, and if you have the Creative Intelligence Suite installed, it will offer you different or complimentary advice than if you just have BMad Method Module installed!
 
 The workflows below show the fastest path to working code. You can also load agents directly for a more structured process, extensive planning, or to learn about agile development practices — the agents guide you with menus, explanations, and elicitation at each step.
@@ -59,7 +59,7 @@ Products, platforms, complex features — structured planning then build:
 5. `/sprint-planning` — initialize sprint tracking
 6. **Repeat per story:** `/create-story` → `/dev-story` → `/code-review`
 
-Every step tells you what's next. Optional phases (brainstorming, research, UX design) are available when you need them — ask `/bmad-help` anytime. For a detailed walkthrough, see the [Getting Started Tutorial](http://docs.bmad-method.org/tutorials/getting-started/getting-started-bmadv6/).
+Every step tells you what's next. Optional phases (brainstorming, research, UX design) are available when you need them — ask `/bmad-help` anytime. For a detailed walkthrough, see the [Getting Started Tutorial](http://docs.bmad-method.org/tutorials/getting-started/).
 
 ## Modules
 
@@ -78,8 +78,8 @@ BMad Method extends with official modules for specialized domains. Modules are a
 
 **[Full Documentation](http://docs.bmad-method.org)** — Tutorials, how-to guides, concepts, and reference
 
-- [Getting Started Tutorial](http://docs.bmad-method.org/tutorials/getting-started/getting-started-bmadv6/)
-- [Upgrading from Previous Versions](http://docs.bmad-method.org/how-to/installation/upgrade-to-v6/)
+- [Getting Started Tutorial](http://docs.bmad-method.org/tutorials/getting-started/)
+- [Upgrading from Previous Versions](http://docs.bmad-method.org/how-to/upgrade-to-v6/)
 
 ### For v4 Users
 
@@ -96,7 +96,7 @@ BMad Method extends with official modules for specialized domains. Modules are a
 
 BMad is free for everyone — and always will be. If you'd like to support development:
 
-- ⭐ Please click the star project icon at near the top right of this page
+- ⭐ Please click the star project icon near the top right of this page
 - ☕ [Buy Me a Coffee](https://buymeacoffee.com/bmad) — Fuel the development
 - 🏢 Corporate sponsorship — DM on Discord
 - 🎤 Speaking & Media — Available for conferences, podcasts, interviews (BM on Discord)
