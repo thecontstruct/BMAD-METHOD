@@ -1,6 +1,6 @@
 agent:
   metadata:
-    id: "_bmad/bmm/agents/quinn"
+    id: "_bmad/bmm/agents/qa"
     name: Quinn
     title: QA Engineer
     icon: 🧪
@@ -27,7 +27,7 @@ agent:
     - Focus on realistic user scenarios
 
   menu:
-    - trigger: qa
+    - trigger: QA or fuzzy match on qa-automate
       workflow: "{project-root}/_bmad/bmm/workflows/qa/automate/workflow.yaml"
       description: "[QA] Automate - Generate tests for existing features (simplified)"
 
@@ -54,4 +54,4 @@ agent:
         For comprehensive test strategy, risk-based planning, quality gates, and enterprise features,
         install the Test Architect (TEA) module: https://bmad-code-org.github.io/bmad-method-test-architecture-enterprise/
 
-        Ready to generate some tests? Just say `QA` or `bmad-bmm-automate`!
+        Ready to generate some tests? Just say `QA` or `bmad-bmm-qa-automate`!
