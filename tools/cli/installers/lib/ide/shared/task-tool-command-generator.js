@@ -1,7 +1,6 @@
 const path = require('node:path');
 const fs = require('fs-extra');
 const csv = require('csv-parse/sync');
-const chalk = require('chalk');
 const { toColonName, toColonPath, toDashPath, BMAD_FOLDER_NAME } = require('./path-utils');
 
 /**
@@ -224,7 +223,7 @@ Follow all instructions in the ${type} file exactly as written.
 
   /**
    * Generate task and tool commands using underscore format (Windows-compatible)
-   * Creates flat files like: bmad_bmm_bmad-help.md
+   * Creates flat files like: bmad_bmm_help.md
    *
    * @param {string} projectDir - Project directory
    * @param {string} bmadDir - BMAD installation directory
@@ -268,7 +267,7 @@ Follow all instructions in the ${type} file exactly as written.
 
   /**
    * Generate task and tool commands using underscore format (Windows-compatible)
-   * Creates flat files like: bmad_bmm_bmad-help.md
+   * Creates flat files like: bmad_bmm_help.md
    *
    * @param {string} projectDir - Project directory
    * @param {string} bmadDir - BMAD installation directory
@@ -312,7 +311,7 @@ Follow all instructions in the ${type} file exactly as written.
 
   /**
    * Write task/tool artifacts using underscore format (Windows-compatible)
-   * Creates flat files like: bmad_bmm_bmad-help.md
+   * Creates flat files like: bmad_bmm_help.md
    *
    * @param {string} baseCommandsDir - Base commands directory for the IDE
    * @param {Array} artifacts - Task/tool artifacts with relativePath
@@ -338,7 +337,7 @@ Follow all instructions in the ${type} file exactly as written.
 
   /**
    * Write task/tool artifacts using dash format (NEW STANDARD)
-   * Creates flat files like: bmad-bmm-bmad-help.md
+   * Creates flat files like: bmad-bmm-help.md
    *
    * Note: Tasks/tools do NOT have bmad-agent- prefix - only agents do.
    *
