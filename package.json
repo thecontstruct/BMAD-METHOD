@@ -25,6 +25,7 @@
   },
   "scripts": {
     "bmad:install": "node tools/cli/bmad-cli.js install",
+    "bmad:install:axonify": "node tools/cli/bmad-cli.js install --directory /Users/pmahncke/workspace/axonify-bmad --modules bmm,bmb,cis,tea --tools claude-code --yes",
     "docs:build": "node tools/build-docs.mjs",
     "docs:dev": "astro dev --root website",
     "docs:fix-links": "node tools/fix-doc-links.js",
