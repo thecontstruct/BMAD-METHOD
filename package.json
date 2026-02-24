@@ -25,7 +25,7 @@
   },
   "scripts": {
     "bmad:install": "node tools/cli/bmad-cli.js install",
-    "bmad:install:axonify": "node tools/cli/bmad-cli.js install --directory /Users/pmahncke/workspace/axonify-bmad --modules bmm,bmb,cis,tea --tools claude-code --yes",
+    "bmad:install:axonify": "./tools/update-upstream-and-install-axonify.sh",
     "bmad:uninstall": "node tools/cli/bmad-cli.js uninstall",
     "docs:build": "node tools/build-docs.mjs",
     "docs:dev": "astro dev --root website",
@@ -46,7 +46,6 @@
     "test:install": "node test/test-installation-components.js",
     "test:refs": "node test/test-file-refs-csv.js",
     "test:schemas": "node test/test-agent-schema.js",
-    "update:upstream": "CURRENT_BRANCH=$(git branch --show-current) && git fetch upstream && git checkout main && git merge upstream/main && git push origin main && git checkout $CURRENT_BRANCH && git merge main --no-edit && git push",
     "validate:refs": "node tools/validate-file-refs.js --strict",
     "validate:schemas": "node tools/validate-agent-schema.js"
   },
