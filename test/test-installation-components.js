@@ -81,6 +81,60 @@ async function createTestBmadFixture() {
   return fixtureDir;
 }
 
+async function createSkillCollisionFixture() {
+  const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-skill-collision-'));
+  const fixtureDir = path.join(fixtureRoot, '_bmad');
+  const configDir = path.join(fixtureDir, '_config');
+  await fs.ensureDir(configDir);
+
+  await fs.writeFile(
+    path.join(configDir, 'agent-manifest.csv'),
+    [
+      'name,displayName,title,icon,capabilities,role,identity,communicationStyle,principles,module,path,canonicalId',
+      '"bmad-master","BMAD Master","","","","","","","","core","_bmad/core/agents/bmad-master.md","bmad-master"',
+      '',
+    ].join('\n'),
+  );
+
+  await fs.writeFile(
+    path.join(configDir, 'workflow-manifest.csv'),
+    [
+      'name,description,module,path,canonicalId',
+      '"help","Workflow help","core","_bmad/core/workflows/help/workflow.md","bmad-help"',
+      '',
+    ].join('\n'),
+  );
+
+  await fs.writeFile(path.join(configDir, 'task-manifest.csv'), 'name,displayName,description,module,path,standalone,canonicalId\n');
+  await fs.writeFile(path.join(configDir, 'tool-manifest.csv'), 'name,displayName,description,module,path,standalone,canonicalId\n');
+  await fs.writeFile(
+    path.join(configDir, 'skill-manifest.csv'),
+    [
+      'canonicalId,name,description,module,path,install_to_bmad',
+      '"bmad-help","bmad-help","Native help skill","core","_bmad/core/tasks/bmad-help/SKILL.md","true"',
+      '',
+    ].join('\n'),
+  );
+
+  const skillDir = path.join(fixtureDir, 'core', 'tasks', 'bmad-help');
+  await fs.ensureDir(skillDir);
+  await fs.writeFile(
+    path.join(skillDir, 'SKILL.md'),
+    ['---', 'name: bmad-help', 'description: Native help skill', '---', '', 'Use this skill directly.'].join('\n'),
+  );
+
+  const agentDir = path.join(fixtureDir, 'core', 'agents');
+  await fs.ensureDir(agentDir);
+  await fs.writeFile(
+    path.join(agentDir, 'bmad-master.md'),
+    ['---', 'name: BMAD Master', 'description: Master agent', '---', '', '<agent name="BMAD Master" title="Master">', '</agent>'].join(
+      '\n',
+    ),
+  );
+
+  return { root: fixtureRoot, bmadDir: fixtureDir };
+}
+
 /**
  * Test Suite
  */
@@ -91,42 +145,7 @@ async function runTests() {
 
   const projectRoot = path.join(__dirname, '..');
 
-  // ============================================================
-  // Test 1: YAML → XML Agent Compilation (In-Memory)
-  // ============================================================
-  console.log(`${colors.yellow}Test Suite 1: Agent Compilation${colors.reset}\n`);
-
-  try {
-    const builder = new YamlXmlBuilder();
-    const pmAgentPath = path.join(projectRoot, 'src/bmm/agents/pm.agent.yaml');
-
-    // Create temp output path
-    const tempOutput = path.join(__dirname, 'temp-pm-agent.md');
-
-    try {
-      const result = await builder.buildAgent(pmAgentPath, null, tempOutput, { includeMetadata: true });
-
-      assert(result && result.outputPath === tempOutput, 'Agent compilation returns result object with outputPath');
-
-      // Read the output
-      const compiled = await fs.readFile(tempOutput, 'utf8');
-
-      assert(compiled.includes('<agent'), 'Compiled agent contains <agent> tag');
-
-      assert(compiled.includes('<persona>'), 'Compiled agent contains <persona> tag');
-
-      assert(compiled.includes('<menu>'), 'Compiled agent contains <menu> tag');
-
-      assert(compiled.includes('Product Manager'), 'Compiled agent contains agent title');
-
-      // Cleanup
-      await fs.remove(tempOutput);
-    } catch (error) {
-      assert(false, 'Agent compilation succeeds', error.message);
-    }
-  } catch (error) {
-    assert(false, 'YamlXmlBuilder instantiates', error.message);
-  }
+  // Test 1: Removed — old YAML→XML agent compilation no longer applies (agents now use SKILL.md format)
 
   console.log('');
 
@@ -797,32 +816,7 @@ async function runTests() {
 
   console.log('');
 
-  // ============================================================
-  // Test 16: QA Agent Compilation
-  // ============================================================
-  console.log(`${colors.yellow}Test Suite 16: QA Agent Compilation${colors.reset}\n`);
-
-  try {
-    const builder = new YamlXmlBuilder();
-    const qaAgentPath = path.join(projectRoot, 'src/bmm/agents/qa.agent.yaml');
-    const tempOutput = path.join(__dirname, 'temp-qa-agent.md');
-
-    try {
-      const result = await builder.buildAgent(qaAgentPath, null, tempOutput, { includeMetadata: true });
-      const compiled = await fs.readFile(tempOutput, 'utf8');
-
-      assert(compiled.includes('QA Engineer'), 'QA agent compilation includes agent title');
-
-      assert(compiled.includes('qa-generate-e2e-tests'), 'QA agent menu includes automate workflow');
-
-      // Cleanup
-      await fs.remove(tempOutput);
-    } catch (error) {
-      assert(false, 'QA agent compiles successfully', error.message);
-    }
-  } catch (error) {
-    assert(false, 'QA compilation test setup', error.message);
-  }
+  // Test 16: Removed — old YAML→XML QA agent compilation no longer applies (agents now use SKILL.md format)
 
   console.log('');
 
@@ -1641,6 +1635,15 @@ async function runTests() {
     );
     await fs.writeFile(path.join(taskSkillDir29, 'workflow.md'), '# Task Skill\n\nSkill in tasks\n');
 
+    // --- Native agent entrypoint inside agents/: core/agents/bmad-tea/ ---
+    const nativeAgentDir29 = path.join(tempFixture29, 'core', 'agents', 'bmad-tea');
+    await fs.ensureDir(nativeAgentDir29);
+    await fs.writeFile(path.join(nativeAgentDir29, 'bmad-skill-manifest.yaml'), 'type: agent\ncanonicalId: bmad-tea\n');
+    await fs.writeFile(
+      path.join(nativeAgentDir29, 'SKILL.md'),
+      '---\nname: bmad-tea\ndescription: Native agent entrypoint\n---\n\nPresent a capability menu.\n',
+    );
+
     // Minimal agent so core module is detected
     await fs.ensureDir(path.join(tempFixture29, 'core', 'agents'));
     const minimalAgent29 = '<agent name="Test" title="T"><persona>p</persona></agent>';
@@ -1670,6 +1673,17 @@ async function runTests() {
     const inTasks29 = generator29.tasks.find((t) => t.name === 'task-skill');
     assert(inTasks29 === undefined, 'Skill in tasks/ dir does NOT appear in tasks[]');
 
+    // Native agent entrypoint should be installed as a verbatim skill and also
+    // remain visible to the agent manifest pipeline.
+    const nativeAgentEntry29 = generator29.skills.find((s) => s.canonicalId === 'bmad-tea');
+    assert(nativeAgentEntry29 !== undefined, 'Native type:agent SKILL.md dir appears in skills[]');
+    assert(
+      nativeAgentEntry29 && nativeAgentEntry29.path.includes('agents/bmad-tea/SKILL.md'),
+      'Native type:agent SKILL.md path points to the agent directory entrypoint',
+    );
+    const nativeAgentManifest29 = generator29.agents.find((a) => a.name === 'bmad-tea');
+    assert(nativeAgentManifest29 !== undefined, 'Native type:agent SKILL.md dir appears in agents[] for agent metadata');
+
     // Regular workflow should be in workflows, NOT in skills
     const regularWf29 = generator29.workflows.find((w) => w.name === 'Regular Workflow');
     assert(regularWf29 !== undefined, 'Regular type:workflow appears in workflows[]');
@@ -1695,6 +1709,37 @@ async function runTests() {
 
     const scannedModules29 = await generator29.scanInstalledModules(tempFixture29);
     assert(scannedModules29.includes('skill-only-mod'), 'scanInstalledModules recognizes skill-only module');
+
+    // Test scanInstalledModules recognizes native-agent-only modules too
+    const agentOnlyModDir29 = path.join(tempFixture29, 'agent-only-mod');
+    await fs.ensureDir(path.join(agentOnlyModDir29, 'deep', 'nested', 'bmad-tea'));
+    await fs.writeFile(path.join(agentOnlyModDir29, 'deep', 'nested', 'bmad-tea', 'bmad-skill-manifest.yaml'), 'type: agent\n');
+    await fs.writeFile(
+      path.join(agentOnlyModDir29, 'deep', 'nested', 'bmad-tea', 'SKILL.md'),
+      '---\nname: bmad-tea\ndescription: desc\n---\n\nAgent menu.\n',
+    );
+
+    const rescannedModules29 = await generator29.scanInstalledModules(tempFixture29);
+    assert(rescannedModules29.includes('agent-only-mod'), 'scanInstalledModules recognizes native-agent-only module');
+
+    // Test scanInstalledModules recognizes multi-entry manifests keyed under SKILL.md
+    const multiEntryModDir29 = path.join(tempFixture29, 'multi-entry-mod');
+    await fs.ensureDir(path.join(multiEntryModDir29, 'deep', 'nested', 'bmad-tea'));
+    await fs.writeFile(
+      path.join(multiEntryModDir29, 'deep', 'nested', 'bmad-tea', 'bmad-skill-manifest.yaml'),
+      'SKILL.md:\n  type: agent\n  canonicalId: bmad-tea\n',
+    );
+    await fs.writeFile(
+      path.join(multiEntryModDir29, 'deep', 'nested', 'bmad-tea', 'SKILL.md'),
+      '---\nname: bmad-tea\ndescription: desc\n---\n\nAgent menu.\n',
+    );
+
+    const rescannedModules29b = await generator29.scanInstalledModules(tempFixture29);
+    assert(rescannedModules29b.includes('multi-entry-mod'), 'scanInstalledModules recognizes multi-entry native-agent module');
+
+    // skill-manifest.csv should include the native agent entrypoint
+    const skillManifestCsv29 = await fs.readFile(path.join(tempFixture29, '_config', 'skill-manifest.csv'), 'utf8');
+    assert(skillManifestCsv29.includes('bmad-tea'), 'skill-manifest.csv includes native type:agent SKILL.md entrypoint');
   } catch (error) {
     assert(false, 'Unified skill scanner test succeeds', error.message);
   } finally {
@@ -1766,6 +1811,140 @@ async function runTests() {
     assert(false, 'parseSkillMd validation test succeeds', error.message);
   } finally {
     if (tempFixture30) await fs.remove(tempFixture30).catch(() => {});
+  }
+
+  console.log('');
+
+  // ============================================================
+  // Test 31: Skill-format installs report unique skill directories
+  // ============================================================
+  console.log(`${colors.yellow}Test Suite 31: Skill Count Reporting${colors.reset}\n`);
+
+  let collisionFixtureRoot = null;
+  let collisionProjectDir = null;
+
+  try {
+    clearCache();
+    const collisionFixture = await createSkillCollisionFixture();
+    collisionFixtureRoot = collisionFixture.root;
+    collisionProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-antigravity-test-'));
+
+    const ideManager = new IdeManager();
+    await ideManager.ensureInitialized();
+    const result = await ideManager.setup('antigravity', collisionProjectDir, collisionFixture.bmadDir, {
+      silent: true,
+      selectedModules: ['core'],
+    });
+
+    assert(result.success === true, 'Antigravity setup succeeds with overlapping skill names');
+    assert(result.detail === '2 agents', 'Installer detail reports agents separately from skills');
+    assert(result.handlerResult.results.skillDirectories === 2, 'Result exposes unique skill directory count');
+    assert(result.handlerResult.results.agents === 2, 'Result retains generated agent write count');
+    assert(result.handlerResult.results.workflows === 1, 'Result retains generated workflow count');
+    assert(result.handlerResult.results.skills === 1, 'Result retains verbatim skill count');
+    assert(
+      await fs.pathExists(path.join(collisionProjectDir, '.agent', 'skills', 'bmad-agent-bmad-master', 'SKILL.md')),
+      'Agent skill directory is created',
+    );
+    assert(
+      await fs.pathExists(path.join(collisionProjectDir, '.agent', 'skills', 'bmad-help', 'SKILL.md')),
+      'Overlapping skill directory is created once',
+    );
+  } catch (error) {
+    assert(false, 'Skill-format unique count test succeeds', error.message);
+  } finally {
+    if (collisionProjectDir) await fs.remove(collisionProjectDir).catch(() => {});
+    if (collisionFixtureRoot) await fs.remove(collisionFixtureRoot).catch(() => {});
+  }
+
+  console.log('');
+
+  // ============================================================
+  // Suite 32: Ona Native Skills
+  // ============================================================
+  console.log(`${colors.yellow}Test Suite 32: Ona Native Skills${colors.reset}\n`);
+
+  let tempProjectDir32;
+  let installedBmadDir32;
+  try {
+    clearCache();
+    const platformCodes32 = await loadPlatformCodes();
+    const onaInstaller = platformCodes32.platforms.ona?.installer;
+
+    assert(onaInstaller?.target_dir === '.ona/skills', 'Ona target_dir uses native skills path');
+    assert(onaInstaller?.skill_format === true, 'Ona installer enables native skill output');
+    assert(onaInstaller?.template_type === 'default', 'Ona installer uses default skill template');
+
+    tempProjectDir32 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-ona-test-'));
+    installedBmadDir32 = await createTestBmadFixture();
+
+    const ideManager32 = new IdeManager();
+    await ideManager32.ensureInitialized();
+
+    // Verify Ona is selectable in available IDEs list
+    const availableIdes32 = ideManager32.getAvailableIdes();
+    assert(
+      availableIdes32.some((ide) => ide.value === 'ona'),
+      'Ona appears in available IDEs list',
+    );
+
+    // Verify Ona is NOT detected before install
+    const detectedBefore32 = await ideManager32.detectInstalledIdes(tempProjectDir32);
+    assert(!detectedBefore32.includes('ona'), 'Ona is not detected before install');
+
+    const result32 = await ideManager32.setup('ona', tempProjectDir32, installedBmadDir32, {
+      silent: true,
+      selectedModules: ['bmm'],
+    });
+
+    assert(result32.success === true, 'Ona setup succeeds against temp project');
+
+    // Verify Ona IS detected after install
+    const detectedAfter32 = await ideManager32.detectInstalledIdes(tempProjectDir32);
+    assert(detectedAfter32.includes('ona'), 'Ona is detected after install');
+
+    const skillFile32 = path.join(tempProjectDir32, '.ona', 'skills', 'bmad-master', 'SKILL.md');
+    assert(await fs.pathExists(skillFile32), 'Ona install writes SKILL.md directory output');
+
+    // Parse YAML frontmatter between --- markers
+    const skillContent32 = await fs.readFile(skillFile32, 'utf8');
+    const fmMatch32 = skillContent32.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    assert(fmMatch32, 'Ona SKILL.md contains valid frontmatter delimiters');
+
+    const frontmatter32 = fmMatch32[1];
+    const body32 = fmMatch32[2];
+
+    // Verify name in frontmatter matches directory name
+    const fmName32 = frontmatter32.match(/^name:\s*(.+)$/m);
+    assert(fmName32 && fmName32[1].trim() === 'bmad-master', 'Ona skill name frontmatter matches directory name exactly');
+
+    // Verify description exists and is non-empty
+    const fmDesc32 = frontmatter32.match(/^description:\s*(.+)$/m);
+    assert(fmDesc32 && fmDesc32[1].trim().length > 0, 'Ona skill description frontmatter is present and non-empty');
+
+    // Verify frontmatter contains only name and description keys
+    const fmKeys32 = [...frontmatter32.matchAll(/^([a-zA-Z0-9_-]+):/gm)].map((m) => m[1]);
+    assert(
+      fmKeys32.length === 2 && fmKeys32.includes('name') && fmKeys32.includes('description'),
+      'Ona skill frontmatter contains only name and description keys',
+    );
+
+    // Verify body content is non-empty and contains expected activation instructions
+    assert(body32.trim().length > 0, 'Ona skill body content is non-empty');
+    assert(body32.includes('agent-activation'), 'Ona skill body contains expected agent activation instructions');
+
+    // Reinstall/upgrade: run setup again over existing output
+    const result32b = await ideManager32.setup('ona', tempProjectDir32, installedBmadDir32, {
+      silent: true,
+      selectedModules: ['bmm'],
+    });
+    assert(result32b.success === true, 'Ona reinstall/upgrade succeeds over existing skills');
+    assert(await fs.pathExists(skillFile32), 'Ona reinstall preserves SKILL.md output');
+  } catch (error) {
+    assert(false, 'Ona native skills test succeeds', error.message);
+  } finally {
+    if (tempProjectDir32) await fs.remove(tempProjectDir32).catch(() => {});
+    if (installedBmadDir32) await fs.remove(installedBmadDir32).catch(() => {});
   }
 
   console.log('');

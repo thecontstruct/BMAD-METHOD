@@ -7,7 +7,7 @@ sidebar:
 
 ## 从这里开始：BMad-Help
 
-**获取关于 BMad 答案的最快方式是 `/bmad-help`。** 这个智能指南可以回答超过 80% 的问题，并且直接在您的 IDE 中可用，方便您工作时使用。
+**获取关于 BMad 答案的最快方式是 `bmad-help`。** 这个智能指南可以回答超过 80% 的问题，并且直接在您的 IDE 中可用，方便您工作时使用。
 
 BMad-Help 不仅仅是一个查询工具——它：
 - **检查您的项目**以查看已完成的内容
@@ -21,16 +21,16 @@ BMad-Help 不仅仅是一个查询工具——它：
 只需使用斜杠命令运行它：
 
 ```
-/bmad-help
+bmad-help
 ```
 
 或者结合自然语言查询：
 
 ```
-/bmad-help 我有一个 SaaS 想法并且知道所有功能。我应该从哪里开始？
-/bmad-help 我在 UX 设计方面有哪些选择？
-/bmad-help 我在 PRD 工作流上卡住了
-/bmad-help 向我展示到目前为止已完成的内容
+bmad-help 我有一个 SaaS 想法并且知道所有功能。我应该从哪里开始？
+bmad-help 我在 UX 设计方面有哪些选择？
+bmad-help 我在 PRD 工作流上卡住了
+bmad-help 向我展示到目前为止已完成的内容
 ```
 
 BMad-Help 会回应：
@@ -81,7 +81,7 @@ https://bmad-code-org.github.io/BMAD-METHOD/llms-full.txt
 :::note[示例]
 **问：** "告诉我用 BMad 构建某物的最快方式"
 
-**答：** 使用快速流程：运行 `quick-spec` 编写技术规范，然后运行 `quick-dev` 实现它——跳过完整的规划阶段。
+**答：** 使用快速流程：运行 `bmad-quick-dev` — 它在单个工作流中澄清意图、规划、实现、审查和呈现结果，跳过完整的规划阶段。
 :::
 
 ## 您将获得什么
