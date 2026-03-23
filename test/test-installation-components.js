@@ -14,6 +14,8 @@
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('fs-extra');
+const { Manifest } = require('../tools/cli/installers/lib/core/manifest');
+const { CustomModuleCache } = require('../tools/cli/installers/lib/core/custom-module-cache');
 const { ManifestGenerator } = require('../tools/cli/installers/lib/core/manifest-generator');
 const { IdeManager } = require('../tools/cli/installers/lib/ide/manager');
 const { clearCache, loadPlatformCodes } = require('../tools/cli/installers/lib/ide/platform-codes');
@@ -1849,6 +1851,95 @@ async function runTests() {
   } finally {
     if (tempProjectDir32) await fs.remove(tempProjectDir32).catch(() => {});
     if (installedBmadDir32) await fs.remove(path.dirname(installedBmadDir32)).catch(() => {});
+  }
+
+  console.log('');
+
+  // ============================================================
+  // Test 33: Manifest preserves custom modules on update
+  // ============================================================
+  console.log(`${colors.yellow}Test Suite 33: Manifest Custom Modules${colors.reset}\n`);
+
+  let manifestFixtureRoot33;
+  let manifestBmadDir33;
+  try {
+    manifestFixtureRoot33 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-manifest-custom-test-'));
+    manifestBmadDir33 = path.join(manifestFixtureRoot33, '_bmad');
+    await fs.ensureDir(path.join(manifestBmadDir33, '_config'));
+    await fs.writeFile(
+      path.join(manifestBmadDir33, '_config', 'manifest.yaml'),
+      [
+        'installation:',
+        '  version: 6.2.0',
+        '  installDate: 2026-03-01T00:00:00.000Z',
+        '  lastUpdated: 2026-03-01T00:00:00.000Z',
+        'modules:',
+        '  - name: jira-integration',
+        '    version: 0.0.0',
+        '    installDate: 2026-03-01T00:00:00.000Z',
+        '    lastUpdated: 2026-03-01T00:00:00.000Z',
+        '    source: custom',
+        'customModules:',
+        '  - id: jira-integration',
+        '    name: Jira Integration',
+        '    sourcePath: /tmp/jira-integration',
+        'ides:',
+        '  - claude-code',
+        '',
+      ].join('\n'),
+    );
+
+    const manifest33 = new Manifest();
+    await manifest33.update(manifestBmadDir33, {
+      version: '6.2.1',
+      moduleVersions: {
+        'jira-integration': {
+          version: '0.0.1',
+        },
+      },
+    });
+
+    const updatedManifest33 = await manifest33.read(manifestBmadDir33);
+    assert(updatedManifest33.customModules.length === 1, 'Manifest update preserves customModules entries');
+    assert(updatedManifest33.customModules[0].sourcePath === '/tmp/jira-integration', 'Manifest update preserves custom module sourcePath');
+  } catch (error) {
+    assert(false, 'Manifest customModules update test succeeds', error.message);
+  } finally {
+    if (manifestFixtureRoot33) await fs.remove(manifestFixtureRoot33).catch(() => {});
+  }
+
+  console.log('');
+
+  // ============================================================
+  // Test 34: Custom cache handles cache directory as source
+  // ============================================================
+  console.log(`${colors.yellow}Test Suite 34: Custom Cache Source Stability${colors.reset}\n`);
+
+  let cacheFixtureRoot34;
+  let cacheBmadDir34;
+  let sourceDir34;
+  try {
+    cacheFixtureRoot34 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-custom-cache-test-'));
+    cacheBmadDir34 = path.join(cacheFixtureRoot34, '_bmad');
+    sourceDir34 = path.join(cacheFixtureRoot34, 'jira-integration-source');
+    await fs.ensureDir(sourceDir34);
+    await fs.writeFile(path.join(sourceDir34, 'module.yaml'), ['code: jira-integration', 'name: Jira Integration', ''].join('\n'));
+    await fs.writeFile(path.join(sourceDir34, 'config.yaml'), 'user_name: Test\n');
+
+    const customCache34 = new CustomModuleCache(cacheBmadDir34);
+    const firstCache34 = await customCache34.cacheModule('jira-integration', sourceDir34, {
+      sourcePath: sourceDir34,
+    });
+    const secondCache34 = await customCache34.cacheModule('jira-integration', firstCache34.cachePath, {
+      sourcePath: firstCache34.cachePath,
+    });
+
+    assert(await fs.pathExists(path.join(firstCache34.cachePath, 'module.yaml')), 'Self-recache preserves cached module contents');
+    assert(secondCache34.sourcePath === sourceDir34, 'Self-recache preserves original custom module sourcePath metadata');
+  } catch (error) {
+    assert(false, 'Custom cache self-source test succeeds', error.message);
+  } finally {
+    if (cacheFixtureRoot34) await fs.remove(cacheFixtureRoot34).catch(() => {});
   }
 
   console.log('');

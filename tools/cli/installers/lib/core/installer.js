@@ -267,7 +267,11 @@ class Installer {
       // For quick update, populate customModulePaths from _customModuleSources
       if (config._customModuleSources) {
         for (const [moduleId, customInfo] of config._customModuleSources) {
-          customModulePaths.set(moduleId, customInfo.sourcePath);
+          let absoluteSourcePath = customInfo.sourcePath;
+          if (absoluteSourcePath && !path.isAbsolute(absoluteSourcePath)) {
+            absoluteSourcePath = path.join(bmadDir, absoluteSourcePath);
+          }
+          customModulePaths.set(moduleId, absoluteSourcePath);
         }
       }
     } else {
@@ -1459,6 +1463,8 @@ class Installer {
 
       // Check for custom modules with missing sources before update
       const customModuleSources = new Map();
+      const { CustomModuleCache } = require('./custom-module-cache');
+      const customCache = new CustomModuleCache(bmadDir);
 
       // Check manifest for backward compatibility
       if (existingInstall.customModules) {
@@ -1493,10 +1499,11 @@ class Installer {
             // Check if this is actually a custom module (has module.yaml)
             const moduleYamlPath = path.join(cachedPath, 'module.yaml');
             if (await fs.pathExists(moduleYamlPath)) {
+              const cachedInfo = await customCache.getCachedModule(moduleId);
               customModuleSources.set(moduleId, {
                 id: moduleId,
                 name: moduleId,
-                sourcePath: path.join('_config', 'custom', moduleId), // Relative path
+                sourcePath: cachedInfo?.sourcePath || cachedPath,
                 cached: true,
               });
             }
@@ -2329,6 +2336,8 @@ class Installer {
 
       // Get custom module sources: first from --custom-content (re-cache from source), then from cache
       const customModuleSources = new Map();
+      const { CustomModuleCache } = require('./custom-module-cache');
+      const customCache = new CustomModuleCache(bmadDir);
       if (config.customContent?.sources?.length > 0) {
         for (const source of config.customContent.sources) {
           if (source.id && source.path && (await fs.pathExists(source.path))) {
@@ -2372,11 +2381,11 @@ class Installer {
           // Check if this is actually a custom module (has module.yaml)
           const moduleYamlPath = path.join(cachedPath, 'module.yaml');
           if (await fs.pathExists(moduleYamlPath)) {
-            // For quick update, we always rebuild from cache
+            const cachedInfo = await customCache.getCachedModule(moduleId);
             customModuleSources.set(moduleId, {
               id: moduleId,
               name: moduleId, // We'll read the actual name if needed
-              sourcePath: cachedPath,
+              sourcePath: cachedInfo?.sourcePath || cachedPath,
               cached: true, // Flag to indicate this is from cache
             });
           }

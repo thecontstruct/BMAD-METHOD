@@ -116,11 +116,15 @@ class CustomModuleCache {
 
     const cacheDir = path.join(this.customCacheDir, moduleId);
     const cacheManifest = await this.getCacheManifest();
+    const resolvedCacheDir = path.resolve(cacheDir);
+    const resolvedSourcePath = path.isAbsolute(sourcePath) ? sourcePath : path.join(this.bmadDir, sourcePath);
+    const isCacheAsSource = path.resolve(resolvedSourcePath) === resolvedCacheDir;
+    const persistedSourcePath = isCacheAsSource ? cacheManifest[moduleId]?.sourcePath || resolvedSourcePath : resolvedSourcePath;
 
     // Check if already cached and unchanged
     if (cacheManifest[moduleId]) {
       const cached = cacheManifest[moduleId];
-      if (cached.originalHash && cached.originalHash === (await this.calculateHash(sourcePath))) {
+      if (cached.originalHash && cached.originalHash === (await this.calculateHash(resolvedSourcePath))) {
         // Source unchanged, return existing cache info
         return {
           moduleId,
@@ -131,29 +135,27 @@ class CustomModuleCache {
     }
 
     // Remove existing cache if it exists
-    if (await fs.pathExists(cacheDir)) {
+    if (!isCacheAsSource && (await fs.pathExists(cacheDir))) {
       await fs.remove(cacheDir);
     }
 
     // Copy module to cache
-    await fs.copy(sourcePath, cacheDir, {
-      filter: (src) => {
-        const relative = path.relative(sourcePath, src);
-        // Skip node_modules, .git, and other common ignore patterns
-        return !relative.includes('node_modules') && !relative.startsWith('.git') && !relative.startsWith('.DS_Store');
-      },
-    });
+    if (!isCacheAsSource) {
+      await fs.copy(resolvedSourcePath, cacheDir, {
+        filter: (src) => {
+          const relative = path.relative(resolvedSourcePath, src);
+          // Skip node_modules, .git, and other common ignore patterns
+          return !relative.includes('node_modules') && !relative.startsWith('.git') && !relative.startsWith('.DS_Store');
+        },
+      });
+    }
 
     // Calculate hash of the source
-    const sourceHash = await this.calculateHash(sourcePath);
-    const cacheHash = await this.calculateHash(cacheDir);
+    const sourceHash = await this.calculateHash(resolvedSourcePath);
+    const cacheHash = isCacheAsSource ? sourceHash : await this.calculateHash(cacheDir);
 
-    // Update manifest - don't store absolute paths for portability
-    // Clean metadata to remove absolute paths
     const cleanMetadata = { ...metadata };
-    if (cleanMetadata.sourcePath) {
-      delete cleanMetadata.sourcePath;
-    }
+    cleanMetadata.sourcePath = persistedSourcePath;
 
     cacheManifest[moduleId] = {
       originalHash: sourceHash,

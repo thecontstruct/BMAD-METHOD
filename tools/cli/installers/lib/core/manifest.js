@@ -166,6 +166,10 @@ class Manifest {
       manifest.ides = updates.ides;
     }
 
+    if (updates.customModules) {
+      manifest.customModules = updates.customModules;
+    }
+
     // Handle per-module version updates
     if (updates.moduleVersions) {
       for (const [moduleName, versionInfo] of Object.entries(updates.moduleVersions)) {
