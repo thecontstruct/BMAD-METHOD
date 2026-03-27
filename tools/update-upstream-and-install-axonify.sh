@@ -29,7 +29,7 @@ git push
 
 # Install BMAD to axonify workspace
 echo "📦 Installing BMAD to axonify workspace..."
-node tools/cli/bmad-cli.js install \
+node tools/installer/bmad-cli.js install \
   --directory /Users/pmahncke/workspace/axonify-bmad \
   --modules bmm,bmb,cis,tea \
   --tools claude-code \

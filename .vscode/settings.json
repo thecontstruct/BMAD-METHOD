@@ -92,5 +92,12 @@
   "[xml]": {
     "editor.defaultFormatter": "redhat.vscode-xml"
   },
-  "xml.format.maxLineWidth": 140
+  "xml.format.maxLineWidth": 140,
+  "workbench.colorCustomizations": {
+    "activityBar.background": "#123331",
+    "titleBar.activeBackground": "#1A4744",
+    "titleBar.activeForeground": "#F4FBFB",
+    "titleBar.inactiveBackground": "#123331",
+    "titleBar.inactiveForeground": "#F4FBFB"
+  }
 }
