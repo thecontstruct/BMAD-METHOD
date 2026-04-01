@@ -25,6 +25,7 @@
   },
   "scripts": {
     "bmad:install": "node tools/installer/bmad-cli.js install",
+    "bmad:install:axonify": "./tools/update-upstream-and-install-axonify.sh",
     "bmad:uninstall": "node tools/installer/bmad-cli.js uninstall",
     "docs:build": "node tools/build-docs.mjs",
     "docs:dev": "astro dev --root website",
