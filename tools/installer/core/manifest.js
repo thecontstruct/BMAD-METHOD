@@ -97,7 +97,6 @@ class Manifest {
           lastUpdated: manifestData.installation?.lastUpdated,
           modules: moduleNames, // Simple array of module names for backward compatibility
           modulesDetailed: hasDetailedModules ? modules : null, // New detailed format
-          customModules: manifestData.customModules || [], // Keep for backward compatibility
           ides: manifestData.ides || [],
         };
       } catch (error) {
@@ -182,10 +181,10 @@ class Manifest {
 
     // Handle adding a new module with version info
     if (updates.addModule) {
-      const { name, version, source, npmPackage, repoUrl } = updates.addModule;
+      const { name, version, source, npmPackage, repoUrl, localPath } = updates.addModule;
       const existing = manifest.modules.find((m) => m.name === name);
       if (!existing) {
-        manifest.modules.push({
+        const entry = {
           name,
           version: version || null,
           installDate: new Date().toISOString(),
@@ -193,7 +192,9 @@ class Manifest {
           source: source || 'external',
           npmPackage: npmPackage || null,
           repoUrl: repoUrl || null,
-        });
+        };
+        if (localPath) entry.localPath = localPath;
+        manifest.modules.push(entry);
       }
     }
 
@@ -254,7 +255,6 @@ class Manifest {
       lastUpdated: manifest.installation?.lastUpdated,
       modules: moduleNames,
       modulesDetailed: hasDetailedModules ? modules : null,
-      customModules: manifest.customModules || [],
       ides: manifest.ides || [],
     };
   }
@@ -282,7 +282,7 @@ class Manifest {
 
     if (existingIndex === -1) {
       // Module doesn't exist, add it
-      manifest.modules.push({
+      const entry = {
         name: moduleName,
         version: options.version || null,
         installDate: new Date().toISOString(),
@@ -290,7 +290,9 @@ class Manifest {
         source: options.source || 'unknown',
         npmPackage: options.npmPackage || null,
         repoUrl: options.repoUrl || null,
-      });
+      };
+      if (options.localPath) entry.localPath = options.localPath;
+      manifest.modules.push(entry);
     } else {
       // Module exists, update its version info
       const existing = manifest.modules[existingIndex];
@@ -300,6 +302,7 @@ class Manifest {
         source: options.source || existing.source,
         npmPackage: options.npmPackage === undefined ? existing.npmPackage : options.npmPackage,
         repoUrl: options.repoUrl === undefined ? existing.repoUrl : options.repoUrl,
+        localPath: options.localPath === undefined ? existing.localPath : options.localPath,
         lastUpdated: new Date().toISOString(),
       };
     }
@@ -784,52 +787,6 @@ class Manifest {
     return configs;
   }
   /**
-   * Add a custom module to the manifest with its source path
-   * @param {string} bmadDir - Path to bmad directory
-   * @param {Object} customModule - Custom module info
-   */
-  async addCustomModule(bmadDir, customModule) {
-    const manifest = await this.read(bmadDir);
-    if (!manifest) {
-      throw new Error('No manifest found');
-    }
-
-    if (!manifest.customModules) {
-      manifest.customModules = [];
-    }
-
-    // Check if custom module already exists
-    const existingIndex = manifest.customModules.findIndex((m) => m.id === customModule.id);
-    if (existingIndex === -1) {
-      // Add new entry
-      manifest.customModules.push(customModule);
-    } else {
-      // Update existing entry
-      manifest.customModules[existingIndex] = customModule;
-    }
-
-    await this.update(bmadDir, { customModules: manifest.customModules });
-  }
-
-  /**
-   * Remove a custom module from the manifest
-   * @param {string} bmadDir - Path to bmad directory
-   * @param {string} moduleId - Module ID to remove
-   */
-  async removeCustomModule(bmadDir, moduleId) {
-    const manifest = await this.read(bmadDir);
-    if (!manifest || !manifest.customModules) {
-      return;
-    }
-
-    const index = manifest.customModules.findIndex((m) => m.id === moduleId);
-    if (index !== -1) {
-      manifest.customModules.splice(index, 1);
-      await this.update(bmadDir, { customModules: manifest.customModules });
-    }
-  }
-
-  /**
    * Get module version info from source
    * @param {string} moduleName - Module name/code
    * @param {string} bmadDir - Path to bmad directory
@@ -837,14 +794,13 @@ class Manifest {
    * @returns {Object} Version info object with version, source, npmPackage, repoUrl
    */
   async getModuleVersionInfo(moduleName, bmadDir, moduleSourcePath = null) {
-    const os = require('node:os');
     const yaml = require('yaml');
 
-    // Built-in modules use BMad version (only core and bmm are in BMAD-METHOD repo)
+    // Resolve source type first, then read version with the correct path context
     if (['core', 'bmm'].includes(moduleName)) {
-      const bmadVersion = require(path.join(getProjectRoot(), 'package.json')).version;
+      const version = await this._readMarketplaceVersion(moduleName, moduleSourcePath);
       return {
-        version: bmadVersion,
+        version,
         source: 'built-in',
         npmPackage: null,
         repoUrl: null,
@@ -857,67 +813,103 @@ class Manifest {
     const moduleInfo = await extMgr.getModuleByCode(moduleName);
 
     if (moduleInfo) {
-      // External module - try to get version from npm registry first, then fall back to cache
-      let version = null;
-
-      if (moduleInfo.npmPackage) {
-        // Fetch version from npm registry
-        try {
-          version = await this.fetchNpmVersion(moduleInfo.npmPackage);
-        } catch {
-          // npm fetch failed, try cache as fallback
-        }
-      }
-
-      // If npm didn't work, try reading from cached repo's package.json
-      if (!version) {
-        const cacheDir = path.join(os.homedir(), '.bmad', 'cache', 'external-modules', moduleName);
-        const packageJsonPath = path.join(cacheDir, 'package.json');
-
-        if (await fs.pathExists(packageJsonPath)) {
-          try {
-            const pkg = require(packageJsonPath);
-            version = pkg.version;
-          } catch (error) {
-            await prompts.log.warn(`Failed to read package.json for ${moduleName}: ${error.message}`);
-          }
-        }
-      }
-
+      // External module: use moduleSourcePath if provided, otherwise fall back to cache
+      const version = await this._readMarketplaceVersion(moduleName, moduleSourcePath);
       return {
-        version: version,
+        version,
         source: 'external',
         npmPackage: moduleInfo.npmPackage || null,
         repoUrl: moduleInfo.url || null,
       };
     }
 
-    // Custom module - check cache directory
-    const cacheDir = path.join(bmadDir, '_config', 'custom', moduleName);
-    const moduleYamlPath = path.join(cacheDir, 'module.yaml');
+    // Check if this is a community module
+    const { CommunityModuleManager } = require('../modules/community-manager');
+    const communityMgr = new CommunityModuleManager();
+    const communityInfo = await communityMgr.getModuleByCode(moduleName);
+    if (communityInfo) {
+      const communityVersion = await this._readMarketplaceVersion(moduleName, moduleSourcePath);
+      return {
+        version: communityVersion || communityInfo.version,
+        source: 'community',
+        npmPackage: communityInfo.npmPackage || null,
+        repoUrl: communityInfo.url || null,
+      };
+    }
 
-    if (await fs.pathExists(moduleYamlPath)) {
-      try {
-        const yamlContent = await fs.readFile(moduleYamlPath, 'utf8');
-        const moduleConfig = yaml.parse(yamlContent);
-        return {
-          version: moduleConfig.version || null,
-          source: 'custom',
-          npmPackage: moduleConfig.npmPackage || null,
-          repoUrl: moduleConfig.repoUrl || null,
-        };
-      } catch (error) {
-        await prompts.log.warn(`Failed to read module.yaml for ${moduleName}: ${error.message}`);
-      }
+    // Check if this is a custom module (from user-provided URL or local path)
+    const { CustomModuleManager } = require('../modules/custom-module-manager');
+    const customMgr = new CustomModuleManager();
+    const resolved = customMgr.getResolution(moduleName);
+    const customSource = await customMgr.findModuleSourceByCode(moduleName, { bmadDir });
+    if (customSource || resolved) {
+      const customVersion = resolved?.version || (await this._readMarketplaceVersion(moduleName, moduleSourcePath));
+      return {
+        version: customVersion,
+        source: 'custom',
+        npmPackage: null,
+        repoUrl: resolved?.repoUrl || null,
+        localPath: resolved?.localPath || null,
+      };
     }
 
     // Unknown module
+    const version = await this._readMarketplaceVersion(moduleName, moduleSourcePath);
     return {
-      version: null,
+      version,
       source: 'unknown',
       npmPackage: null,
       repoUrl: null,
     };
+  }
+
+  /**
+   * Read version from .claude-plugin/marketplace.json for a module
+   * @param {string} moduleName - Module code
+   * @returns {string|null} Version or null
+   */
+  async _readMarketplaceVersion(moduleName, moduleSourcePath = null) {
+    const os = require('node:os');
+    let marketplacePath;
+
+    if (['core', 'bmm'].includes(moduleName)) {
+      marketplacePath = path.join(getProjectRoot(), '.claude-plugin', 'marketplace.json');
+    } else if (moduleSourcePath) {
+      // Walk up from source path to find marketplace.json
+      let dir = moduleSourcePath;
+      for (let i = 0; i < 5; i++) {
+        const candidate = path.join(dir, '.claude-plugin', 'marketplace.json');
+        if (await fs.pathExists(candidate)) {
+          marketplacePath = candidate;
+          break;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+    }
+
+    // Fallback to external module cache
+    if (!marketplacePath) {
+      const cacheDir = path.join(os.homedir(), '.bmad', 'cache', 'external-modules', moduleName);
+      marketplacePath = path.join(cacheDir, '.claude-plugin', 'marketplace.json');
+    }
+
+    try {
+      if (await fs.pathExists(marketplacePath)) {
+        const data = JSON.parse(await fs.readFile(marketplacePath, 'utf8'));
+        const plugins = data?.plugins;
+        if (!Array.isArray(plugins) || plugins.length === 0) return null;
+        let best = null;
+        for (const p of plugins) {
+          if (p.version && (!best || p.version > best)) best = p.version;
+        }
+        return best;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
   }
 
   /**
