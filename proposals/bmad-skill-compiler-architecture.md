@@ -1,4 +1,14 @@
 ---
+revisionNotes: >-
+  v1.1 (2026-04-20) — Course-corrected after absorbing upstream's TOML
+  customization system (PR #2284, bf30b697 at-skill-entry renderer,
+  a6d075bd fs-native, 8fb22b1a _bmad/custom/ provisioning). Decisions
+  3, 5, 6, 8, 10, 13, 15 revised in place. New decisions 16 (lazy
+  compile-on-entry), 17 (shared Python library absorbs upstream
+  renderer + resolver), 18 (glob inputs tracked as first-class
+  compile inputs) appended. Python 3.11+ is the baseline runtime;
+  compile engine lives at `src/scripts/bmad_compile/`. Override root
+  renamed `_bmad/custom/` throughout.
 stepsCompleted: [1, 2, 3, 4]
 inputDocuments:
   - proposals/bmad-skill-compiler-prd.md
@@ -204,17 +214,17 @@ mkdir -p tools/installer/compiler
 
 | Option | Pros | Cons |
 |---|---|---|
-| (a) Hand-rolled regex + line tracker | Zero deps, fully specifiable, ~200 LOC, grammar is frozen and small (4 constructs) | Must build line-tracking manually; error-recovery by hand |
-| (b) `@kayvan/markdown-tree-parser@1.6` (existing dep) | Already in the tree; proper AST | Parser is general-purpose Markdown, not template-aware; `<<include>>` / `{{var}}` aren't directives it understands |
-| (c) New PEG / parser-combinator dep | Clean grammar file | Violates NFR-S6 (no new deps) |
+| (a) Hand-rolled Python regex + line tracker | Zero deps (stdlib `re`), fully specifiable, ~200 LOC, grammar is frozen and small (4 constructs including `{{self.*}}`) | Must build line-tracking manually; error-recovery by hand |
+| (b) Python third-party parsing lib (`lark`, `parsimonious`, etc.) | Clean grammar file | Violates NFR-S6 (stdlib only) |
+| (c) JS parser in the Node layer, pass AST to Python | Could use `@kayvan/markdown-tree-parser` | Cross-process AST marshalling; two languages handling determinism |
 
-**Decision:** **(a) Hand-rolled tokenizer + AST builder.** Grammar is frozen at four constructs; a regex + line-column tracker is sufficient and keeps the implementation fully auditable. `@kayvan/markdown-tree-parser` is held in reserve for rendering `--explain` output (inline XML tags in emitted Markdown) where a proper tree walker helps.
+**Decision:** **(a) Hand-rolled Python tokenizer + AST builder, stdlib only.** Grammar is frozen at four constructs; a stdlib `re`-based tokenizer with a line-column tracker is sufficient and keeps the implementation fully auditable. The parser lives at `src/scripts/bmad_compile/parser.py`.
 
 **Implications:**
 
-- AST node types: `Text`, `Include { src, props, line, col }`, `VarCompile { name, line, col }`, `VarRuntime { name, line, col }`.
-- Unknown directive syntax (anything matching `<<...>>` or `{{...}}` not in the four constructs) raises `UNKNOWN_DIRECTIVE` at parse time — never silently passed through (FR7).
-- Parser output is deterministic and pure; no I/O during parse.
+- AST node types (Python dataclasses): `Text`, `Include(src, props, line, col)`, `VarCompile(name, line, col)` where `name` carries the full dotted path (including any `self.` prefix for TOML-sourced), `VarRuntime(name, line, col)`.
+- Unknown directive syntax (anything matching `<<...>>` or `{{...}}` not in the four constructs) raises `UnknownDirectiveError` at parse time — never silently passed through (FR7).
+- Parser is pure: AST out, no I/O. Deterministic.
 
 ---
 
@@ -240,84 +250,90 @@ mkdir -p tools/installer/compiler
 
 ---
 
-### Decision 3 — Variable Resolver & Precedence
+### Decision 3 — Variable Resolver & Precedence (two-namespace cascade, YAML + TOML)
 
-**Problem.** Resolve `{{var}}` against the complete set of config sources bmad reads or generates, attribute every resolution to its origin for `--explain` output (FR31, Appendix A), emit only value hashes to the lockfile (FR43, NFR-S1), and preserve byte-for-byte reproducibility (NFR-R1).
+**Problem.** Resolve `{{var}}` against the complete set of config sources bmad reads or generates (YAML *and* TOML), attribute every resolution to its origin for `--explain` output (FR31, Appendix A), emit only value hashes to the lockfile (FR43, NFR-S1), and preserve byte-for-byte reproducibility (NFR-R1).
 
 **Investigation: every config surface bmad currently creates or reads:**
 
 | File / source | Role | Compiler treatment |
 |---|---|---|
-| `_bmad/core/config.yaml` | Core values: `user_name`, `communication_language`, `document_output_language`, `output_folder` | `bmad-config` tier |
-| `_bmad/<module>/config.yaml` (e.g., `bmm`) | Module-specific values + duplicated copy of core values below a `# Core Configuration Values` comment marker (installer.js:819–862) | `module-config` tier for keys above marker; keys below are attributed to `bmad-config` to preserve provenance |
-| `<module>/<workflow-path>/config.yaml` (e.g., `bmm/workflows/orchestrate-story/config.yaml`) | Workflow- or skill-scoped config; installer copies verbatim (`official-modules.js:472–475`). None in core/bmm today; bmb-created modules and Phase 2 workflow-step compilation produce them. | New semantic tier, surfaced as `module-config` in v1 `--explain` (disambiguated via `source-path`); dedicated `workflow-config` enum value is reserved for v2 |
-| `_bmad/_config/manifest.yaml` | Install metadata (versions, dates, modules, IDEs) | Not a value source; used only to populate derived-tier values (`module_version`, `bmad_version`) |
+| `_bmad/core/config.yaml` | Core YAML values: `user_name`, `communication_language`, `document_output_language`, `output_folder` | `bmad-config` tier |
+| `_bmad/<module>/config.yaml` (e.g., `bmm`) | Module-specific values + duplicated copy of core values below a `# Core Configuration Values` comment marker (installer.js:819–862) | `module-config` tier for keys above marker; keys below are attributed to `bmad-config` |
+| `<module>/<workflow-path>/config.yaml` | Workflow- or skill-scoped YAML config; installer copies verbatim (`official-modules.js:472–475`). None in core/bmm today; bmb-created modules and Phase 2 produce them | Attributed to `module-config` in v1 `--explain` (disambiguated via `source-path`); dedicated `workflow-config` enum value reserved for v2 |
+| `<skill>/customize.toml` | TOML defaults for a skill's structured customization (declared per-field `prompt`, `default`, `result` etc.) | `toml` source, `toml-layer: defaults`. Values accessed via `{{self.<dotted.path>}}` |
+| `_bmad/custom/<skill>.toml` | TOML team override layer (committable convention) | `toml` source, `toml-layer: team` |
+| `_bmad/custom/<skill>.user.toml` | TOML user override layer (gitignored convention) | `toml` source, `toml-layer: user` |
+| `_bmad/_config/manifest.yaml` | Install metadata (versions, modules, IDEs) | Not a value source; used only to populate derived-tier values |
 | `_bmad/_config/{files-manifest,skill-manifest,agent-manifest,bmad-help}.csv`, `_bmad/<module>/module-help.csv` | Registries and help catalogs | Not value sources |
-| **`<override_root>/[<module>/[<workflow-path>/]]config.yaml`** *(new)* | User's persistent variable overrides; most-specific path wins within the tier | `user-config` tier |
-| CLI flags at this invocation | One-shot overrides (`bmad install --user-name=X`, `bmad compile --var-NAME=VALUE`, etc.) | `install-flag` tier |
-| `process.env` | Reserved for future use | `env` tier — **not emitted or read in v1**; PRD Appendix A retains the enum value; compiler never touches `process.env` for variable resolution |
+| **`_bmad/custom/[<module>/[<workflow-path>/]]config.yaml`** | User's persistent YAML variable overrides; most-specific path wins within the tier | `user-config` tier |
+| CLI flags at this invocation | One-shot overrides (`bmad install --user-name=X`, `bmad compile --var-NAME=VALUE`, etc.) | `install-flag` tier (applies to both namespaces) |
+| `process.env` | Reserved for future use | `env` — **not emitted or read in v1** |
 | Computed at compile time (allowlisted) | Install paths, version sentinels, current-invocation identifiers, `module.yaml` `directories:` resolved | `derived` tier |
-| `src/<module>/module.yaml` | **Schema source** (not a value source): declares prompts, defaults, `result:` templates, `single-select` options, `directories:` list, and inherited-variables comment | Drives `declared-by` attribution, value-template expansion, derived-directory computation |
+| `src/<module>/module.yaml` | **Schema source** (not a value source): declares prompts, defaults, `result:` templates, `single-select` options, `directories:` list, inherited-variables comment | Drives `declared-by` attribution, value-template expansion, derived-directory computation |
 
-**Precedence (highest → lowest), v1:**
+**Two parallel precedence cascades (v1):**
 
-1. **`install-flag`** — CLI flags at the current `install` / `upgrade` / `compile` invocation. Explicit user intent at the moment of execution outranks everything persisted.
-2. **`user-config`** — `<override_root>/[<module>/[<workflow-path>/]]config.yaml`. Most-specific path wins within this tier (e.g., module-scoped override beats root-scoped).
-3. **`module-config`** — `<module>/config.yaml`, keys above the `# Core Configuration Values` marker. In v1 also used for workflow-scoped `<module>/<workflow-path>/config.yaml` values, with `source-path` disambiguating which file supplied the value.
+The `self.*` namespace is lexically distinct from non-`self.` names, so the two cascades never collide. Each `{{name}}` reference resolves in exactly one cascade based on whether its dotted path starts with `self.`.
+
+**Non-`self.` cascade (YAML-sourced, highest → lowest):**
+
+1. **`install-flag`** — CLI flags at the current invocation.
+2. **`user-config`** — `_bmad/custom/[<module>/[<workflow-path>/]]config.yaml`; most-specific path wins.
+3. **`module-config`** — `<module>/config.yaml` (keys above core-marker), plus workflow-scoped YAML files.
 4. **`bmad-config`** — `core/config.yaml`, and keys below the core-marker in module configs.
-5. **`derived`** — computed allowlist (see table below).
+5. **`derived`** — computed allowlist.
 
-**`env` is dropped from the active v1 tier list.** Process state breaks determinism (NFR-R1) and NFR-S5's "no ambient state" spirit. Reserved in the Appendix A enum only; the compiler never reads `process.env` and never emits `source="env"`.
+**`self.*` cascade (TOML-sourced, highest → lowest):**
+
+1. **`install-flag`** — CLI flags that specifically target TOML paths (e.g., a hypothetical `--self-agent-icon=X`); same tier as YAML install-flag.
+2. **`toml/user`** — `_bmad/custom/<skill>.user.toml`.
+3. **`toml/team`** — `_bmad/custom/<skill>.toml`.
+4. **`toml/defaults`** — `<skill>/customize.toml`.
+
+TOML merge within the `self.*` cascade uses upstream's structural rules (scalars: override wins; tables: deep merge; arrays-of-tables with shared `code`/`id`: merge-by-key; other arrays: append). When an array value is produced by structural merge across multiple layers, the resolver attributes the composite value to `toml-layer: merged` and emits `contributing-paths` listing every contributing file.
+
+**`env` is dropped from both v1 cascades.** Process state breaks determinism (NFR-R1) and NFR-S5. Reserved in the enum only.
 
 **Provenance correctness — handling the installer's core-spread:**
 
-The installer duplicates core values into each module's `config.yaml` for runtime convenience (installer.js:819–862). If the compiler naively read module-config first, every core value would be wrongly attributed to `module-config`. Mitigation:
+The installer duplicates core values into each module's `config.yaml` for runtime convenience. The compiler's YAML module-config parser splits on the `# Core Configuration Values` comment marker: keys above → `module-config` candidates; keys below → discarded (authoritative core value comes from `core/config.yaml` and attributes to `bmad-config`). A module that legitimately overrides a core key authors it above the marker.
 
-- The compiler's module-config parser splits the YAML by the `# Core Configuration Values` comment marker. Keys above → `module-config` candidates; keys below → discarded (authoritative core value comes from `_bmad/core/config.yaml` and attributes to `bmad-config`).
-- A module that legitimately overrides a core key for its own scope authors it *above* the marker, making the override module-scoped by convention. This is a compiler-recognized convention documented in the module-author migration guide.
-
-**Derived values: what, where from, when computed:**
-
-Computed **once per compile invocation** at compile-engine init (immediately after `InstallPaths.create()`, before any template parse). Frozen into `VariableScope` and never re-computed during the run. Same install state → same derived values across runs (NFR-R1).
-
-Source inputs:
-- `paths` object from `InstallPaths.create()` (`tools/installer/core/install-paths.js:7`): `srcDir`, `version`, `projectRoot`, `bmadDir`, `configDir`, `coreDir`, `isUpdate`.
-- `_bmad/_config/manifest.yaml` — installation/module version blocks (no timestamps consumed).
-- Compile invocation parameters: `currentModule`, `currentSkill`, `currentVariant`.
-
-**Initial v1 derived allowlist** (enumerated, no arbitrary computation):
+**Derived values — computed once at engine init, frozen into scope, never re-computed during the run:**
 
 | Variable | Value | Computed from |
 |---|---|---|
-| `install_root` | Absolute POSIX path to `_bmad` | `paths.bmadDir` |
-| `project_root` | Absolute POSIX path to project root | `paths.projectRoot` |
-| `module_root` | Absolute POSIX path to current module directory | `paths.moduleDir(currentModule)` |
-| `bmad_version` | BMAD semver | `paths.version` (from `package.json`) |
-| `module_version` | Installed module's semver | `manifest.yaml` entry for `currentModule` |
-| `current_module` | Module ID being compiled | Compile invocation parameter |
-| `current_skill` | Skill ID being compiled | Compile invocation parameter |
-| `current_variant` | Selected IDE variant or `universal` | Variant selector output (Decision 7) |
-| `installed_modules` | Comma-joined sorted list of installed module IDs | Manifest module entries, sorted alphabetically |
+| `install_root` | POSIX path to `_bmad` | install-paths |
+| `project_root` | POSIX path to project root | install-paths |
+| `module_root` | POSIX path to current module directory | `install_root / currentModule` |
+| `bmad_version` | BMAD semver | `package.json` |
+| `module_version` | Installed module's semver | `manifest.yaml` |
+| `current_module` | Module ID being compiled | invocation parameter |
+| `current_skill` | Skill ID being compiled | invocation parameter |
+| `current_variant` | Selected IDE variant or `universal` | Variant selector output |
+| `installed_modules` | Comma-joined sorted list of module IDs | manifest entries, alphabetical |
 
-**Explicitly NOT derived in v1:** wall-clock timestamps, `os.*`, `os.userInfo()`, hostname, arbitrary filesystem enumeration, random IDs, UUIDs. Hashes appear only in the lockfile, never in compiled output.
+**Explicitly NOT derived in v1:** wall-clock timestamps, `os.*`, hostname, arbitrary filesystem enumeration, random IDs. Hashes appear only in the lockfile, never in compiled output.
 
-**`module.yaml` role (schema metadata, not a value source):**
+**`module.yaml` role (schema metadata):**
 
-The compiler reads each installed module's `module.yaml` once at engine init, building:
+The compiler reads each installed module's `module.yaml` once at engine init, building per-module:
+- **declared-variables set** (keys with `prompt:`/`default:`) → enables `declared-by`.
+- **inherited-variables set** (parsed from `# Variables from Core Config inserted:` comment).
+- **value-template map** (`result:` shapes) → applied during resolution, produces `template-from` attribution.
+- **directories list** → populates `derived` entries.
 
-- Per-module **declared-variables set** (keys with `prompt:` / `default:` blocks) — enables `declared-by` attribution.
-- Per-module **inherited-variables set** (parsed from the `# Variables from Core Config inserted:` comment block) — same declaration convention, declared-by still attributes to the originating module (e.g., `core`).
-- Per-module **value-template map** (the `result: "{project-root}/{value}"` shape) — applied during resolution so `output_folder` emits `<project-root>/_bmad-output` everywhere it's referenced; produces the `template-from` attribute on `<Variable>` tags.
-- Per-module **directories list** (resolved against the `VariableScope`) — populates `derived` entries for variables like `planning_artifacts`, `implementation_artifacts`, `project_knowledge`.
+**TOML customize.toml role (per-skill structured defaults, `self.*` source):**
+
+At compile init for a given skill, the resolver loads the skill's TOML layer stack in order: `customize.toml` (defaults) → `_bmad/custom/<skill>.toml` (team) if exists → `_bmad/custom/<skill>.user.toml` (user) if exists. Each layer is parsed by stdlib `tomllib`. Layers are merged via the shared `bmad_compile.toml_merge` library (same code consumed by upstream's `resolve_customization.py` — see Decision 17). The merged result is flattened into a `self.*` name table with per-leaf provenance (which layer contributed; for merged arrays, which layers contributed and the `contributing-paths` list). Each `{{self.<dotted.path>}}` reference resolves by dotted-path lookup into this table.
 
 **Implications:**
 
-- `VariableScope.resolve(name) → { value, source, source_path?, declared_by?, template_from? }`. Engine never re-reads the filesystem during resolution; scope is pre-materialized and frozen.
-- Unknown variable raises `UNRESOLVED_VARIABLE` with a "tried tiers: install-flag (no), user-config (no), module-config (no), bmad-config (no), derived (not allowlisted)" remediation hint (NFR-O3).
-- `--explain` output and lockfile entries carry `declared-by` / `declared_by` and `template-from` / `template_from` per the PRD amendment.
-- Lockfile records `value_hash: sha256(value)` — never plaintext (NFR-S1, FR43).
-- For `derived`, lockfile and `--explain` use a symbolic `source-path` of the form `derived://<name>` so consumers can disambiguate without leaking state.
-- Workflow-scoped `<module>/<workflow-path>/config.yaml` values are resolved and attributed to `module-config` in v1 output; the dedicated `workflow-config` enum value activates in a future major version.
+- `VariableScope.resolve(name) → ResolvedValue` where `ResolvedValue` carries `value, source, source_path?, toml_layer?, contributing_paths?, base_source_path?, declared_by?, template_from?`. Engine never re-reads the filesystem during resolution; scope is pre-materialized and frozen.
+- Unknown variable raises `UnresolvedVariableError` with a cascade-specific "tried tiers" remediation hint.
+- Lockfile records `value_hash: sha256(value)` — never plaintext (NFR-S1, FR43). For `source: toml`, additional fields (`toml_layer`, `contributing_paths?`) are recorded.
+- For `derived`, lockfile and `--explain` use a symbolic `source-path` of `derived://<name>`.
+- Workflow-scoped YAML files are resolved and attributed to `module-config` in v1 with `source-path` disambiguation.
 
 ---
 
@@ -347,45 +363,60 @@ The compiler reads each installed module's `module.yaml` once at engine init, bu
 
 ---
 
-### Decision 5 — CLI Surface & Engine Sharing
+### Decision 5 — CLI Surface, Python Engine, Node Adapters
 
-**Problem.** All three subcommands (`install`, `upgrade`, `compile`) route to the same `compile()` engine with different input sets (PRD §Technical Architecture Considerations — "Single-engine plumbing, layered porcelain").
+**Problem.** All three subcommands (`install`, `upgrade`, `compile`) route to the same compile engine with different input sets (PRD §Technical Architecture Considerations — "Single-engine plumbing, layered porcelain"). The engine is now in Python (Option A from the course-correct); Node hosts the CLI and installer.
 
-**Decision:** **One engine module, three command adapters.**
+**Decision:** **One Python engine module, one build-time entry point, Node CLI adapters that shell out.**
 
-- Engine lives at `tools/installer/compiler/engine.js`, exporting `compile(skillInputs) → { compiledMarkdown, lockEntry, explain }`.
-- Adapters in `tools/installer/commands/`:
-  - `install.js` — existing; augmented to call the engine on migrated skills, verbatim-copy on unmigrated.
-  - `upgrade.js` — new; wraps engine with `--dry-run`, `--reconcile`, and drift calculator.
-  - `compile.js` — new; direct engine invocation for power users / CI / `bmad-customize`.
-- Engine is deterministic and stateless (aside from its per-invocation fragment cache).
-- `bmad` is the primary binary name (already the shorter of the two in `package.json`); `bmad-method` remains as alias.
+- Shared library: `src/scripts/bmad_compile/` (Python package, stdlib only). Modules: `parser.py`, `resolver.py`, `toml_merge.py`, `variants.py`, `io.py`, `errors.py`, `lockfile.py`, `explain.py`, `lazy_compile.py`.
+- Build-time entry: `src/scripts/compile.py`. Invoked as `python3 src/scripts/compile.py --skill <id> --install-dir <path> [--dry-run] [--diff] [--explain] [--tree|--json] [--with-content] ...`. Emits JSON to stdout (compile result, `--diff`, `--explain --json`) or plain text (`--diff` TTY mode, `--explain` default). Non-zero exit on error; error detail on stderr.
+- Runtime entry: `src/scripts/lazy_compile.py` (invoked by the SKILL.md shim at skill entry — see Decision 16).
+- Upstream TOML resolver (`src/scripts/resolve_customization.py`) is refactored to import from `bmad_compile.toml_merge` (Decision 17).
+- Node adapters in `tools/installer/commands/`:
+  - `install.js` — existing; the module-install callback invokes `python3 src/scripts/compile.py --install-phase ...` for each migrated skill after `OfficialModules.install()` copies files.
+  - `upgrade.js` — new; wraps engine invocation with `--dry-run` + drift-calculator output aggregation; emits `--json` for `bmad-customize` triage.
+  - `compile.js` — new; direct `python3 compile.py` passthrough with arg forwarding.
+- Node is responsible for argv parsing, user prompts (`@clack/prompts`), TTY coloring, orchestration. Python owns all template parsing, fragment resolution, variable resolution, TOML merge, lockfile I/O, `--explain` rendering. File I/O for compile inputs/outputs is done by Python via its own sandbox (`bmad_compile/io.py`).
+- `bmad` remains the primary binary name (already the shorter of two in `package.json`); `bmad-method` remains alias.
+
+**Process-boundary contract:**
+
+- Node passes arguments only (paths, skill IDs, flags) — not file contents.
+- Python reads inputs from disk, writes outputs to disk (compiled SKILL.md, bmad.lock), emits structured JSON to stdout for ephemeral outputs (`--diff`, `--explain --json`, `upgrade --dry-run --json`).
+- Node parses Python's stdout for adapter-level decisions (e.g., "exit non-zero because drift detected"); propagates Python's exit code and stderr to the user.
+- No long-lived Python subprocess; each invocation is cold-start (stdlib-only, so ~50ms overhead — within NFR-P2 budget).
 
 **Implications:**
 
-- `bmad-customize` skill calls `bmad compile <skill> --explain --json` and `bmad compile <skill> --diff` via the IDE's shell tool — no direct engine import (Decision 15).
-- Every adapter shares flags `--directory`, `--modules`, `--tools`, `--override-root`, `--yes`, `--debug` (FR24).
+- `bmad-customize` skill calls `bmad compile <skill> --explain --json` and `bmad compile <skill> --diff` and `bmad upgrade --dry-run --json` via the IDE's shell tool — Node CLI on top, Python engine underneath, no direct engine import (Decision 15).
+- Every adapter shares flags `--directory`, `--modules`, `--tools`, `--override-root`, `--yes`, `--debug` (FR24). `--override-root` defaults to `_bmad/custom/`.
+- Error taxonomy (Decision 11) is implemented in Python; Node adapters propagate. Frozen error codes (NFR-M5) remain the public contract regardless of which runtime raises them.
 
 ---
 
-### Decision 6 — Installer Integration Seam
+### Decision 6 — Installer Integration Seam (Node shells to Python)
 
-**Problem.** Wire the compiler into `installer._installAndConfigure()` without breaking the verbatim-copy path (NFR-C4).
+**Problem.** Wire the Python compile engine into `installer._installAndConfigure()` without breaking the verbatim-copy path (NFR-C4).
 
-**Decision:** **Post-copy, pre-manifest hook.** The compiler runs *after* `OfficialModules.install()` has copied raw module files into the install location, and *before* `ManifestGenerator.generateManifests()` scans `SKILL.md`. For each migrated skill directory (detected by presence of `*.template.md`), the compiler:
+**Decision:** **Post-copy, pre-manifest Node→Python shell-out.** The Node installer runs `OfficialModules.install()` as today to copy raw module files into the install location, then before `ManifestGenerator.generateManifests()` scans `SKILL.md`, the Node adapter spawns `python3 src/scripts/compile.py --install-phase --install-dir <bmadDir> [--skill <id>]` which:
 
-1. Loads templates + fragments from the copied files.
-2. Resolves includes, variants, variables, overrides.
-3. Writes compiled `SKILL.md` to the install location, replacing any placeholder.
-4. Emits a `bmad.lock` entry.
+1. Enumerates migrated skills (detected by presence of `*.template.md` in the copied-to-install-location tree).
+2. Per migrated skill: loads templates + fragments + `customize.toml` stack + YAML configs, resolves via the shared library, writes compiled `SKILL.md` to the install location, emits the lockfile entry.
+3. Returns structured JSON to stdout summarizing per-skill outcomes; Node parses and passes to the existing `installedFiles` set callback.
 
-For non-migrated skills (no `*.template.md`), the copied files are left untouched. `ManifestGenerator.generateManifests()` then runs unchanged on a directory tree that looks uniform to it — preserves the validate-skills contract for both paths.
+For non-migrated skills (no `*.template.md`), the copied files are left untouched. `ManifestGenerator.generateManifests()` then runs unchanged on a directory tree that looks uniform to it — preserves the validate-skills contract.
+
+**SKILL.md shim integration:** For skills the compiler owns, the "SKILL.md" at the install location is NOT the compiled output directly — it is (a) the compiled content or (b) upstream's stdout-dispatch shim (`b0d70766`) that invokes `lazy_compile.py` at skill entry. The compiler writes the compiled output to a canonical location the shim reads from (e.g., `<skill-dir>/SKILL.md.compiled`) and keeps the shim's `SKILL.md` stub in place; the shim either emits the compiled file directly (fast path) or invokes `lazy_compile.py` if staleness is suspected. See Decision 16 for the full lazy-compile contract.
+
+Alternatively, if coordination with the shim proves fragile, the compiler writes directly to `SKILL.md` (no shim for compiled skills) and the lazy-compile guard is wired as a separate pre-read hook the IDE invokes. Implementation detail; the PRD's externally-visible contract (SKILL.md is always fresh at skill entry) is what matters. Chosen approach is finalized during implementation of this integration story.
 
 **Implications:**
 
-- The `installedFiles` callback that `_installAndConfigure()` already maintains (installer.js:584) is updated by the compiler to include only *final* compiled outputs, not the intermediate templates (which are not installed).
-- Templates are deleted from the install location after compile — they're build-time artifacts, not runtime (NFR-O2 implies only compiled output is visible at runtime).
-- `quickUpdate()` (installer.js:1145) runs the compiler in "recompile-only" mode: no re-copy, just re-resolve against possibly-updated configs.
+- The `installedFiles` callback that `_installAndConfigure()` already maintains (installer.js:584) is updated from Python-side JSON output; Node merges compiled outputs into the set that the manifest generator later scans.
+- Templates (`*.template.md`) are deleted from the install location after compile — they're build-time artifacts (NFR-O2 implies only compiled output is visible at runtime). `customize.toml` is NOT deleted — the lazy-compile guard needs it and the TOML resolver pattern requires its presence.
+- `quickUpdate()` (installer.js:1145) runs the compiler in "recompile-only" mode: no re-copy, just `python3 compile.py --recompile-all` against possibly-updated configs.
+- `fs-native.js` (upstream-introduced in `a6d075bd`) replaces `fs-extra` for all Node-side I/O touching installed files. Python side uses its own stdlib I/O through `bmad_compile/io.py`.
 
 ---
 
@@ -407,39 +438,50 @@ For non-migrated skills (no `*.template.md`), the copied files are left untouche
 
 ---
 
-### Decision 8 — `bmad-customize` Skill Override-Authoring Flow (PRD Open Question #1, RESOLVED)
+### Decision 8 — `bmad-customize` Skill Flow Across Three Planes + Drift Triage
 
-**Problem.** `bmad-customize` is a Markdown skill executed by an LLM in IDE chat, not compiled code. It can't "pipe to stdin" or "atomic-rename a staging file" as mechanical operations — it operates conversationally.
+**Problem.** `bmad-customize` is a Markdown skill executed by an LLM in IDE chat. It operates conversationally. Course-correct extended its scope to cover three customization planes (TOML structured fields, prose fragments, YAML variables) + drift triage.
 
-**Flow (v1):**
+**Authoring flow (v1, per-plane routing):**
 
-1. **Discovery (calls CLI).** Skill invokes `bmad compile <skill> --explain --json` via the IDE's shell tool. Receives structured provenance: every fragment, every variable, their resolution tiers and current values.
-2. **Intent mapping (chat-only).** LLM reasons over the JSON to identify which fragment / variable / full-skill the user's natural-language request maps to. Negotiates ambiguity with the user in chat (FR36).
-3. **Active content presentation (chat-only).** LLM presents the active fragment content to the user as a Markdown code block in the conversation — pulled from the explain JSON (enhanced, see engine adjustment below) or via an IDE read-tool on the resolved fragment path.
-4. **Draft override (chat-only, iterative).** LLM proposes the edit as text in chat. User reviews, asks for adjustments, refines. **No disk writes during this phase.** The "preview" the user sees during drafting is a conversational before/after rendered by the LLM, not a compile-output diff.
-5. **User acceptance.** User signals acceptance. LLM uses its file-write tool to write the override file at `<override_root>/<module>/fragments/<name>.template.md` (or the equivalent for a variable / full-skill override).
-6. **Post-write verification (calls CLI).** LLM invokes `bmad compile <skill> --diff` against the currently-installed `SKILL.md`. CLI computes the diff between the installed file and the recompiled output (which now picks up the just-written override). LLM surfaces this final compiled-output diff to the user as confirmation.
-7. **Final compile.** Either implicit (next `bmad install` / `bmad upgrade`) or explicit (`bmad compile <skill>`) to write the new compiled `SKILL.md` to its install location.
+1. **Discovery (calls CLI).** Skill invokes `bmad compile <skill> --explain --json` via the IDE's shell tool. Returns the full customization surface: structured TOML fields with defaults + currently-resolved values + per-field provenance; prose fragments with resolved-from tier + active content; compile-time variables (`{{self.*}}` TOML-sourced and non-`self.` YAML-sourced) with source + source-path + declared-by.
+2. **Intent mapping (chat-only).** LLM reasons over the JSON to identify which plane the user's request maps to:
+   - Metadata/icon/principle/step/menu → TOML plane → target file `_bmad/custom/<skill>.user.toml` (or `<skill>.toml` if team scope)
+   - Prose wording of instructions, greetings, explanations → prose plane → target file `_bmad/custom/fragments/<module>/<skill>/<name>.template.md`
+   - Variable-value change (e.g., `output_folder`) → YAML plane → target file `_bmad/custom/config.yaml` (or `<module>/config.yaml`)
+   - Full-skill rewrite → full-skill plane → target file `_bmad/custom/fragments/<module>/<skill>/SKILL.template.md`
+3. **Active-content presentation (chat-only).** LLM shows the user the current value (from explain JSON).
+4. **Draft (chat-only, iterative).** LLM drafts the edit as text in chat. User reviews/refines. **No disk writes during this phase** (FR54).
+5. **User acceptance.** LLM uses its file-write tool to write the override file at the plane-appropriate path.
+6. **Post-write verification (calls CLI).** LLM invokes `bmad compile <skill> --diff` (shows compiled-SKILL.md-level impact across both planes, since the compiler merges TOML values into `{{self.*}}` references at compile time and applies prose overrides too).
+7. **Final compile.** Implicit on next `bmad install`/`upgrade`, or explicit `bmad compile <skill>`, or lazy at next skill entry.
 
-**PRD FR37 / FR38 semantics reframed (via PRD amendment):**
+**Drift-triage flow (new, post-course-correct — FR56):**
 
-- **FR37** — "scaffolds override file(s)" is now a **chat-time draft** rendered as content in the conversation. No filesystem artifact during drafting.
-- **FR38** — `bmad compile --diff` is a **post-write verification step**, not a pre-write preview.
+1. User runs `bmad upgrade`; CLI detects drift (prose / TOML / glob / variable-provenance) and halts with non-zero exit (FR57), pointing user to `bmad-customize`.
+2. User invokes `bmad-customize` with drift-triage intent.
+3. Skill calls `bmad upgrade --dry-run --json`; receives structured per-entry drift report.
+4. For each drift entry, skill applies per-type UX in chat:
+   - **Prose fragment drift** → three-way side-by-side (upstream-old / upstream-new / user-override); keep / adopt-upstream / author-merged-override.
+   - **TOML default-value drift** → field-path + old-default / new-default / user-value; keep / adopt-new-default / rewrite-override.
+   - **TOML orphan** → "field removed upstream; override no longer applies"; remove-override offered.
+   - **TOML new-default awareness** → informational; no action required.
+   - **Glob-input drift** → show added/removed matches and content changes; informational unless intersecting a field-level override.
+5. For each decision, skill writes the appropriate file (FR54 contract preserved).
+6. After all entries are triaged, skill instructs user to re-run `bmad upgrade`.
 
-**Ratified FR54** (added via PRD amendment): *No override content is written to any path under `<override_root>` during the drafting phase of a `bmad-customize` session. The override root is modified strictly on explicit user acceptance, and only at the final override path (never to a staging subdirectory).*
+**Engine adjustments (two, small):**
 
-**Ratified FR55** (added via PRD amendment): *CI runs a test that exercises an abandoned `bmad-customize` session and asserts no new files under `<override_root>` and `bmad.lock` is byte-identical to its pre-session state.*
-
-**Engine adjustment (single, small):**
-
-- `bmad compile <skill> --explain --json` **includes the resolved active content** of every fragment by default. This lets the skill present the active text without a separate file read. No separate flag needed.
-- No `--with-override-stdin` flag. No staging directory. The committed override root is the only place an override ever exists.
+- `bmad compile <skill> --explain --json` includes resolved active content of every fragment by default (for step 3 above without a separate file read).
+- `bmad upgrade --dry-run --json` emits structured per-entry drift report (for the triage flow).
+- No `--with-override-stdin` flag. No staging directory. `_bmad/custom/` is the only place any override ever exists.
 
 **Implications:**
 
-- PRD §Open Questions item 1 is resolved without a new filesystem convention and without changing the 5-tier fragment precedence contract (FR10).
-- Skill is responsible for graceful "I changed my mind" handling — user can edit or delete the written override file, and a recompile picks up the change.
-- Engine remains pure: takes filesystem state, produces compiled output and lockfile entry. No special "preview" mode.
+- PRD §Open Questions item 1 resolved without a new filesystem convention. FR54/FR55 ratified.
+- Skill handles "I changed my mind" by editing or deleting the written file; next recompile picks up the change.
+- Engine remains pure: takes filesystem state, produces compiled output + lockfile. No special preview mode.
+- Triage is a new skill-mode, not a new CLI path. The only CLI addition is `upgrade --dry-run --json`.
 
 ---
 
@@ -453,21 +495,24 @@ Resolved inside **Decision 4**: `previous_base_hash` and `lineage` fields on fra
 
 **Problem.** NFR-R1 demands byte-identical output across macOS/Linux/Windows. Common sources of drift: path separators, line endings, filesystem enumeration order, clocks, hash hexcase.
 
-**Decision:** **All compiler I/O goes through `tools/installer/compiler/io.js`** which:
+**Decision:** **All Python compile-engine I/O goes through `src/scripts/bmad_compile/io.py`** which:
 
-- Normalizes paths to POSIX internally (`path.posix.normalize`).
-- Reads files as UTF-8, converts CRLF → LF on ingest.
-- Writes files with LF line endings and no BOM.
-- Sorts directory listings alphabetically (by POSIX path, case-sensitive).
-- Rejects filesystem escapes: any path that resolves outside its declared root (e.g., override-root, install-root) raises `OVERRIDE_OUTSIDE_ROOT` or equivalent — also rejects symlinks that cross roots.
-- Uses SHA-256 with lowercase hex (`toString('hex')` guarantees lowercase; spec-pinned in docs).
+- Normalizes paths to POSIX internally (`pathlib.PurePosixPath`).
+- Reads files with explicit `encoding='utf-8'`, converts CRLF → LF on ingest.
+- Writes files with LF line endings (`newline='\n'`) and no BOM.
+- Sorts directory listings alphabetically by POSIX path (case-sensitive) — never relies on `os.listdir` / `pathlib.Path.iterdir` native order.
+- Rejects filesystem escapes: any path that resolves outside its declared root (override-root `_bmad/custom/`, install-root `_bmad/`, project-root for glob expansion) raises `OverrideOutsideRootError`. Symlinks that cross roots are rejected via `Path.resolve(strict=True)` + ancestor containment check.
+- Uses `hashlib.sha256(...).hexdigest()` — stdlib guarantees lowercase hex. Files are hashed in binary mode so platform newline conversion never affects hashes.
 
-The engine never calls `fs.*` directly — always via the sandbox. Lint rule: `no-restricted-imports` bans `fs` and `fs-extra` from `tools/installer/compiler/**` except `io.js` itself.
+The Python engine never calls `open` or `pathlib` I/O directly outside `io.py`; repo Python linter config bans raw file operations elsewhere in `bmad_compile/`.
+
+The Node side uses `fs-native.js` (upstream-introduced in `a6d075bd`) for installer coordination, manifest scanning, `.bak` handling, and network fetches. Compile-time I/O (Python `io.py`) and installer-time I/O (Node `fs-native.js`) are deliberately separate sandboxes — they enforce different contracts (Python's for determinism; Node's for atomic multi-module install without graceful-fs monkey-patching).
 
 **Implications:**
 
-- NFR-S2 (override containment) is enforced at this layer, not scattered throughout the engine.
-- CI runs a three-OS determinism check (NFR-R1) that compiles the reference skill set on macOS + Linux + Windows and diffs outputs byte-for-byte.
+- NFR-S2 (override root containment + glob containment) is enforced at `io.py`, not scattered throughout the engine.
+- CI runs a three-OS determinism check (NFR-R1) that compiles the reference skill set on macOS + Linux + Windows and diffs outputs byte-for-byte. Both runtimes (Python 3.11 + Node 20) are tested on each OS.
+- `fs-extra` is NOT reintroduced on the Node side (replaced upstream in `a6d075bd`); the compiler subsystem does not regress that fix.
 
 ---
 
@@ -516,38 +561,223 @@ Detection is per-module, not per-skill, to keep module boundaries clean. FR53 co
 
 ---
 
-### Decision 15 — `bmad-customize` Skill Contract with the Compiler
+### Decision 15 — `bmad-customize` Skill Contract with the Compiler (widened)
 
 **Decision:** The skill's only inputs from the compiler are:
 
-1. `bmad compile <skill> --explain --json` → structured provenance with resolved fragment content (for discovery / intent mapping / active-content presentation).
-2. `bmad compile <skill> --diff` → unified diff (for post-write verification).
+1. **`bmad compile <skill> --explain --json`** → structured provenance with resolved fragment content AND structured TOML field defaults + current values + per-field layer attribution AND variable values with source / declared-by / template-from. This is the discovery / intent-mapping / active-content primitive.
+2. **`bmad compile <skill> --diff`** → unified diff (for post-write verification after the skill persists an accepted override on any plane).
+3. **`bmad upgrade --dry-run --json`** (new) → structured per-entry drift report covering prose fragments, TOML defaults, TOML orphans, TOML new-defaults, glob-input changes, and variable-provenance shifts. This is the drift-triage primitive.
 
-The skill never imports the engine, never reads the lockfile directly, and never writes to disk except to persist an accepted override. This is a hard architectural boundary — the mechanical / reasoning split (PRD §Two-layer design).
+The skill never imports the compile engine, never reads `bmad.lock` directly, and never writes to disk except to persist an accepted override (on one of the three planes). This is a hard architectural boundary — the mechanical / reasoning split (PRD §Two-layer design).
 
 **Implications:**
 
-- Any future capability the skill needs must first appear as a CLI flag on `bmad compile`, not as a new skill-to-engine import path.
-- The skill is authored as `*.template.md` + fragments (FR39) and compiled by the same engine — the dogfood loop is enforced by CI (every release recompiles the skill; any regression fails the build).
+- Any future capability the skill needs must first appear as a CLI flag on `bmad compile` or `bmad upgrade`, not as a new skill-to-engine import path.
+- The skill is authored as `*.template.md` + fragments + `customize.toml` (FR39) and compiled by the same engine — the dogfood loop is enforced by CI (every release recompiles the skill across both planes; any regression fails the build).
+- The skill is responsible for per-plane routing of user intent (Decision 8) but does NOT need to understand the merge semantics of either plane — both `--explain --json` (for currently-resolved values) and `--dry-run --json` (for drift) present already-computed state.
+
+---
+
+### Decision 16 — Lazy Compile-on-Entry as Cache-Coherence Guard
+
+**Problem.** Users edit TOML overrides (`_bmad/custom/<skill>.user.toml`) and project-context files (matched by `file:` globs in `persistent_facts`) at any time and expect changes to take effect on the next skill invocation without running a manual `bmad compile`. Upstream shipped a runtime Python template renderer (`bf30b697`) to serve that UX. If the compiler bakes all values at install time, the user loses "edit and go" — unacceptable.
+
+**Decision: replace the runtime renderer with a cache-coherence guard that lazily recompiles on input drift.**
+
+At skill entry, the SKILL.md shim (upstream `b0d70766`'s stdout-dispatch mechanism) invokes `python3 -m bmad_compile.lazy_compile <skill>`. The guard:
+
+1. Reads the skill's `bmad.lock` entry for the tracked-input hash manifest.
+2. For each tracked input, computes the current hash:
+   - Source template + all included fragments → hash each file.
+   - YAML config files (core, module, workflow-scoped, user-config) → hash each.
+   - TOML layer files (`customize.toml`, team, user) → hash each.
+   - Each `glob_inputs[]` entry → re-evaluate glob against current filesystem, produce sorted match list, compute `match_set_hash` of `{path, content_hash}` pairs; compare against lockfile's `match_set_hash` as fast early-out; on fast-match, hash each current match's content for content-drift check.
+3. If every tracked input hash matches the lockfile → emit `SKILL.md` bytes unchanged to stdout (fast path, target ≤50 ms per NFR-P5).
+4. If any mismatch → invoke the same compile engine that `bmad compile <skill>` would invoke, write new `SKILL.md` + new lockfile entry, emit the new bytes (slow path, target ≤500 ms per NFR-P2).
+
+**What the guard is NOT:**
+
+- Not a template renderer. No substitution, no TOML merge, no `{var}` resolution happens inside the guard. Those happen only when the compile engine runs.
+- Not invoke-time content assembly (Level 4). Level 4 is forbidden (explicit anti-goal). The guard is mechanical cache coherence — it re-runs the same deterministic compile that would have run at install time.
+
+**Concurrency:**
+
+At skill entry the IDE may invoke the guard for multiple skills simultaneously, or a single skill concurrently on fast keystrokes. The guard acquires an advisory file-lock (`flock` POSIX / `LockFileEx` Windows) on a sibling `.compiling.lock` file for the skill's install directory during recompile. If locked, a concurrent invocation waits on the winner and re-reads the newly-written `SKILL.md` rather than recompiling.
+
+**What replaces upstream's renderer:**
+
+- `bf30b697`'s runtime renderer → replaced by `lazy_compile.py`.
+- `{var}` substitution behavior — **removed.** `{var}` now means "emitted unchanged; LLM is the sole consumer." Any upstream template relying on Python-side `{var}` substitution migrates to `{{var}}` or `{{self.*}}` in the same PR as the compiler lands.
+- `resolve_customization.py` (TOML resolver invoked at skill entry) — **subsumed.** The guard's recompile runs the TOML merge via the shared library (Decision 17); there is no separate TOML resolution at skill entry.
+
+**Behavioral contract:**
+
+- `SKILL.md` on disk is the exact bytes the LLM will read.
+- `SKILL.md` is up to date relative to every tracked input at the moment the LLM reads.
+- There is no runtime substitution; what you see at `--explain` is what the LLM sees (minus the diagnostic XML tags).
+
+**Implications:**
+
+- Lockfile integrity is critical. A stale/malformed lockfile either falsely misses a drift (wrong content shown to LLM) or falsely triggers unnecessary recompiles (perf regression). NFR-R5 already covers refusing to proceed on malformed lockfile.
+- CI must exercise the lazy path: a test that installs, edits a TOML user override, invokes the shim, asserts the emitted SKILL.md reflects the edit without any explicit `bmad compile` call.
+- NFR-P5 (≤50 ms fast path) is a new budget specifically for the guard.
+
+---
+
+### Decision 17 — Shared Python Library Absorbs Upstream Renderer + Resolver
+
+**Problem.** Upstream ships two Python components today: `resolve_customization.py` (TOML merge at skill entry) and the runtime template renderer (`bf30b697`, `{var}` substitution at skill entry). The compiler needs the same TOML merge logic at build time. Two implementations of TOML merge = bug factory.
+
+**Decision: one Python library, multiple entry points.**
+
+**Library layout (`src/scripts/bmad_compile/`):**
+
+```
+bmad_compile/
+    __init__.py
+    parser.py         # template tokenizer + AST builder (Decision 1)
+    resolver.py       # variable resolver (Decision 3) — two cascades
+    toml_merge.py     # TOML layer merge (upstream's structural rules, shared)
+    variants.py       # IDE variant selection (Decision 7)
+    io.py             # deterministic I/O sandbox (Decision 10)
+    errors.py         # CompilerError hierarchy (Decision 11)
+    lockfile.py       # lockfile reader + writer + hash builder (Decision 4)
+    explain.py        # --explain renderer (Markdown/XML, tree, JSON)
+    lazy_compile.py   # skill-entry cache-coherence guard (Decision 16)
+    engine.py         # top-level orchestrator (build-time compile)
+```
+
+**Entry points:**
+
+```
+src/scripts/
+    compile.py        # build-time entry; invoked by Node CLI adapters (install / upgrade / compile)
+                      # uses: engine, parser, resolver, toml_merge, variants, io, errors, lockfile, explain
+    resolve_customization.py  # refactored — thin shim over bmad_compile.toml_merge
+                              # signature + stdout behavior unchanged for backward compat with upstream consumers
+```
+
+**Relationship to upstream code:**
+
+1. **`resolve_customization.py`** (existing, from `bd1c0053`/`0dbfae67`): refactored. Its merge logic is extracted into `bmad_compile.toml_merge.merge_layers(defaults, team, user) → merged`. The shim retains its CLI interface and stdout contract (returns merged TOML) so any existing consumer scripts or skill-entry invocations keep working. Same test suite upstream has for the resolver is ported / adapted.
+
+2. **`bf30b697`'s runtime renderer** (quick-dev at-skill-entry template substitution): replaced by `lazy_compile.py`. The SKILL.md shim (`b0d70766`) that currently invokes the renderer is updated to invoke `lazy_compile.py` instead. Templates that depend on `{var}` Python substitution at skill entry are migrated to `{{var}}` / `{{self.*}}` as part of the compiler-rollout PR (the migrated set is the same 6 agents upstream migrated to TOML — a coordinated change).
+
+**Shared state between the compile engine and the lazy-compile guard:**
+
+- Same `lockfile.py` code (reader/writer).
+- Same `resolver.py` (variable resolution for both cascades).
+- Same `toml_merge.py` (identical merge output for same inputs).
+- Same `io.py` (determinism sandbox).
+- Different `__main__` logic: `engine.py` does full compile (parse, resolve, merge, write, lockfile); `lazy_compile.py` does hash-check + conditional `engine.compile_one(skill_id)`.
+
+**What this is NOT:**
+
+- Not a new FR — the upstream-shipped capabilities (TOML merge, runtime rendering) are consolidated in implementation, not scope-expanded.
+- Not a takeover of runtime rendering as a compiler concern — `lazy_compile.py` is cache coherence, not rendering.
+- Not a breaking change to upstream's external contract — `resolve_customization.py` keeps its CLI surface for any out-of-tree consumer.
+
+**Migration sequencing:**
+
+1. Land the shared library with `parser/resolver/toml_merge/io/errors/lockfile/explain/engine`.
+2. Refactor `resolve_customization.py` to import from `bmad_compile.toml_merge` (behavior-preserving; validated against upstream's existing tests).
+3. Land `compile.py` and the Node CLI adapters (`install`/`upgrade`/`compile`).
+4. Land `lazy_compile.py` and update the SKILL.md shim to use it instead of the runtime renderer.
+5. Migrate `{var}` → `{{var}}`/`{{self.*}}` usages in the migrated-agent set; delete the runtime renderer code from upstream.
+
+**Implications:**
+
+- One source of truth for TOML merge, variable precedence, path normalization, hash computation, error vocabulary.
+- Upstream maintainers are stakeholders for this refactor; the PR that lands the compiler touches their code and needs their review. Coordinate via GitHub discussion before implementation.
+- Regression risk during refactor is contained to TOML merge (widely covered by upstream tests) + runtime-renderer contract (narrower surface, tested by existing skill entry-point tests).
+
+---
+
+### Decision 18 — Glob Inputs Tracked as First-Class Compile Inputs
+
+**Problem.** `customize.toml` fields like `persistent_facts` accept entries prefixed with `file:` that must glob against the filesystem and inline the matching file contents into the skill. The matched files can change independently of any bmad command (user edits project-context.md; user adds new matching file). Lazy compile-on-entry (Decision 16) must detect these changes to stay coherent.
+
+**Decision: compile-time glob expansion + lockfile-tracked match set + guard-time re-evaluation.**
+
+**At compile time:**
+
+1. For each `file:`-prefixed entry in a merged TOML array (after layer merge), substitute `{project-root}`-style derived variables in the pattern.
+2. Glob deterministically against the filesystem; sort matches alphabetically by POSIX path.
+3. Read each matched file through the I/O sandbox (UTF-8, CRLF→LF normalization).
+4. Inline matched content at the TOML field's render location in the compiled output, wrapped in `<TomlGlobExpansion>` + `<TomlGlobMatch>` tags when `--explain` is active (plain content when emitting real `SKILL.md`).
+5. Record a `glob_inputs[]` entry in the lockfile with: `pattern` (pre-substitution), `resolved_pattern` (post-substitution), `source: toml`, `toml_layer`, `source_path` (the TOML file that contained the pattern), `toml_field` (dotted path into merged TOML), `match_set[]` (sorted list of `{path, hash}`), `match_set_hash` (hash of the sorted list for fast comparison).
+
+**At skill entry (lazy-compile guard — Decision 16):**
+
+1. For each `glob_inputs[]` entry in the lockfile:
+   - Re-substitute derived vars in the pattern (same `project_root` as install state → same pattern).
+   - Re-glob against the current filesystem.
+   - Sort matches alphabetically.
+   - Compute `match_set_hash` of the current matches (path + content hash).
+   - Compare against lockfile's `match_set_hash`. If mismatch → staleness detected → recompile.
+2. If `match_set_hash` matches → fast path.
+
+**Two-stage comparison optimization:**
+
+- Stage 1: `match_set_hash` is a single hash over `[(path_1, hash_1), (path_2, hash_2), …]`. If this matches, the entire match set is unchanged — neither the set of matched files nor any individual file's content. Fast out.
+- Stage 2: only needed when authoring `--debug` output or when `match_set_hash` changes — walk the per-match list to identify which matches were added/removed/modified. Used by `bmad upgrade --dry-run --json` (FR41) for drift reporting.
+
+**Authoring guidance (documented):**
+
+- Prefer narrow globs (`{project-root}/docs/*.md`, `{project-root}/standards/*.md`) over broad (`{project-root}/**/*`).
+- CI linter warns on `**`-heavy patterns that could match >100 files.
+- Author-facing migration guide documents the pattern conventions.
+
+**Containment:**
+
+- Patterns that resolve outside `{project-root}` are rejected at compile with `OverrideOutsideRootError` (symmetric with override-root containment per NFR-S2).
+- Symlinked matches that point outside `{project-root}` are rejected at read time.
+
+**Performance bound:**
+
+- Glob re-evaluation + hashing of ≤20 matches totalling ≤500 KB: <20 ms on a warm FS, within NFR-P5's 50 ms fast-path budget.
+- Degenerate globs (10,000+ matches in a monorepo `**/*.md`) exceed budget; author-side guidance is the mitigation, CI linter the enforcement.
+
+**Provenance:**
+
+- `--explain` emits `<TomlGlobExpansion pattern="..." toml-layer="..." source-path="..." toml-field="..." match-count="N">` wrapping `<TomlGlobMatch path="..." hash="...">` per file, with file content inlined inside each match tag (Appendix A).
+- `--json` emits the same as a structured node (see Appendix A).
+
+**Drift detection and triage (ties to FR41 / FR56):**
+
+- `bmad upgrade --dry-run --json` reports glob-input drift as a dedicated entry type when match_set_hash differs. Per-drift payload: pattern, old match-set, new match-set (with per-file add/remove/modify classification).
+- `bmad-customize` triage UX for glob-input drift is typically informational (globs auto-incorporate new matches); flagged for action only when a user override layers on top of the relevant TOML field.
+
+**Implications:**
+
+- Lockfile grows with globbed files, proportional to match count. Narrow globs are cheap; wide globs are expensive.
+- Edge case: file deleted between compile and skill entry → re-glob sees smaller set → mismatch → recompile (recompile handles the gone-file naturally).
+- Edge case: file added between compile and skill entry → re-glob sees larger set → mismatch → recompile → new file content incorporated.
+- Edge case: file content changed, name unchanged → per-match hash differs → mismatch → recompile.
+- All three edge cases covered by the same mechanism: re-glob + re-hash on guard invocation.
 
 ---
 
 ### Decision Impact Analysis
 
-**Implementation sequence:**
+**Implementation sequence (revised):**
 
-1. Decision 1 (parser) + Decision 10 (I/O sandbox) + Decision 11 (error classes) — foundation; no dependencies.
-2. Decision 2 (fragment resolver) + Decision 3 (variable resolver) — built on 1 + 10 + 11.
-3. Decision 7 (variant selection) — wraps 2.
-4. Decision 4 (lockfile) — consumes 2 + 3 output.
-5. Decision 5 (CLI adapters) + Decision 6 (installer seam) — integration.
-6. Decision 15 (`bmad-customize` contract) + Decision 13 (distribution model) + Decision 14 (module boundary) — cross-cutting, enforced through 2 + 6.
-7. Decision 8 (`bmad-customize` flow) — requires engine's `--explain --json --with-content` output (enhancement inside Decision 15).
-8. Decision 12 (cache) — optimization; deferrable to end of v1.
+1. **Foundation:** Decision 1 (parser), Decision 10 (I/O sandbox), Decision 11 (error classes), Decision 17 (shared library skeleton).
+2. **Core resolution:** Decision 2 (fragment resolver), Decision 3 (variable resolver with two cascades), `bmad_compile.toml_merge` (refactored from `resolve_customization.py`).
+3. **Variant selection:** Decision 7.
+4. **Globs:** Decision 18 (glob expansion + lockfile tracking).
+5. **Lockfile:** Decision 4 (full schema incl. toml_customization, glob_inputs, lineage).
+6. **CLI + installer integration:** Decision 5 (Python engine + Node adapters), Decision 6 (installer hook), Decision 13 (distribution-model detection), Decision 14 (module boundary).
+7. **Lazy compile:** Decision 16 + refactor SKILL.md shim to use `lazy_compile.py`.
+8. **Skill integration:** Decision 15 (widened contract), Decision 8 (skill flow + drift triage).
+9. **Optimizations:** Decision 12 (hash-based skip at build time).
 
 **Cross-component dependencies:**
 
-- The I/O sandbox (Decision 10) is a singleton — every other component imports from it; a regression here breaks determinism for all.
-- The lockfile writer (Decision 4) has read+write access; every other component is write-only on the lockfile, via an append-only API.
-- The CLI adapter pattern (Decision 5) assumes the engine is idempotent; Decision 12 (caching) preserves idempotence — skip path must be observationally indistinguishable from a full recompile.
-- Variable resolver (Decision 3) is the most inter-connected: consumes `InstallPaths` output, manifest, `module.yaml` schema, all config tiers, and the `VariableScope`. A change here ripples through `<Variable>` tag emission, lockfile variable entries, and all derived-value consumers.
+- `bmad_compile.io` (Decision 10) is a singleton imported by every other module. A regression here breaks determinism everywhere.
+- `bmad_compile.toml_merge` (Decision 17) is consumed by both the compile engine and the refactored `resolve_customization.py`. Upstream's existing TOML merge tests guard behavior.
+- `lockfile.py` (Decision 4) is the append-only API shared by build-time compile (Decision 5) and lazy-compile guard (Decision 16). Both read the schema; only build-time compile writes.
+- CLI adapters (Decision 5) assume engine idempotence. Decision 12 (caching) preserves idempotence — skip path must be observationally indistinguishable from a full recompile.
+- `resolver.py` (Decision 3) is the most inter-connected — it consumes install-paths, manifest, module.yaml schemas, all config tiers, TOML layer stack. Changes ripple through `<Variable>` emission, lockfile variable entries, and derived-value consumers.
+- `lazy_compile.py` (Decision 16) has zero independent rendering logic — it's a thin orchestrator over `engine.compile_one()`. Every correctness property of build-time compile applies to lazy compile by construction.
