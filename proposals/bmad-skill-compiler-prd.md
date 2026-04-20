@@ -345,12 +345,14 @@ Tag vocabulary (v1):
 
 | `source` value | Meaning |
 |---|---|
-| `user-config` | Value came from a user-authored config file at the install location (`.bmad-overrides/config.yaml` or equivalent). Highest precedence. |
-| `module-config` | Value came from the active module's `config.yaml` (e.g., `_bmad/bmm/config.yaml`). |
-| `bmad-config` | Value came from BMAD core config (`_bmad/_config/config.yaml` or equivalent). |
-| `install-flag` | Value was set via a CLI flag to `bmad install` / `bmad upgrade` (e.g., `--user-name`). |
-| `env` | Value came from an environment variable. |
-| `derived` | Computed at compile time from other inputs (e.g., install-absolute paths, timestamps intentionally pinned for reproducibility). |
+| `install-flag` | Value was set via a CLI flag to `bmad install` / `bmad upgrade` / `bmad compile` at the current invocation (e.g., `--user-name`). **Highest precedence.** |
+| `user-config` | Value came from a user-authored config file under the override root (`<override_root>/[<module>/[<workflow-path>/]]config.yaml`). Most-specific path wins within this tier. |
+| `module-config` | Value came from the active module's `config.yaml` (e.g., `_bmad/bmm/config.yaml`), from keys above the `# Core Configuration Values` marker. Also used in v1 for workflow-scoped `<module>/<workflow-path>/config.yaml` values (disambiguated via `source-path`); a dedicated `workflow-config` enum value is reserved for a future major version. |
+| `bmad-config` | Value came from BMAD core config (`_bmad/core/config.yaml`), or from keys below the `# Core Configuration Values` marker inside a module's `config.yaml`. |
+| `env` | **Reserved — not emitted in v1.** Retained in the enum for forward compatibility; v1 compiler never reads `process.env` for variable resolution and never emits this source value. |
+| `derived` | Computed at compile time from an enumerated allowlist (install-absolute paths, BMAD/module versions, current-module/skill/variant identifiers, resolved `directories:` entries from `module.yaml`). No timestamps, no ambient state. |
+
+**Precedence order (v1, highest to lowest):** `install-flag` > `user-config` > `module-config` > `bmad-config` > `derived`. `env` is reserved and never participates in v1 resolution. A variable's `source` reflects the first tier in which the name appears during the precedence walk.
 
 Runtime placeholders (`{var_name}`) are **not** tagged in `--explain` output; they pass through unchanged so the output still previews what the model will actually receive.
 
@@ -391,7 +393,7 @@ compiler:
 
 ```yaml
 version: 1
-compiled_at: <iso-timestamp>
+compiled_at: <release-pinned sentinel, NOT wall-clock>   # deterministic per release; see Reliability NFR-R1
 bmad_version: 6.3.0
 entries:
   - skill: bmad-agent-pm
@@ -403,17 +405,35 @@ entries:
         hash: <sha256>
       - path: fragments/menu-handler.template.md
         resolved_from: user-override
-        base_hash: <sha256>    # what we overrode
+        base_hash: <sha256>                 # current upstream base
+        previous_base_hash: <sha256?>       # upstream base from prior compile; enables rollback forward-compat
         override_hash: <sha256>
         override_path: .bmad-overrides/bmm/fragments/menu-handler.template.md
+        lineage:                            # audit trail of override/base history across upgrades
+          - bmad_version: 6.3.0
+            base_hash: <sha256>
+            override_hash: <sha256>
+          - bmad_version: 6.4.0
+            base_hash: <sha256>
+            override_hash: <sha256>
     variables:
       - name: user_name
         source: user-config
         source_path: .bmad-overrides/config.yaml
-        value_hash: <sha256>   # hash of value, not plaintext, to avoid leaking configured secrets
-    variant: claude-code       # or cursor / universal
-    compiled_hash: <sha256>    # hash of emitted SKILL.md
+        declared_by: core                   # which module's module.yaml declared this variable
+        template_from: core/module.yaml     # when a result-template was applied during resolution; omitted when none
+        value_hash: <sha256>                # hash of resolved value, not plaintext (NFR-S1)
+    variant: claude-code                    # or cursor / universal
+    compiled_hash: <sha256>                 # hash of emitted SKILL.md
 ```
+
+**Lockfile schema v1 field notes:**
+
+- `compiled_at` is pinned to a release sentinel (e.g., the BMAD version tag), not wall-clock time, to satisfy NFR-R1 byte-for-byte reproducibility. Implementations that write wall-clock timestamps are non-conformant.
+- `previous_base_hash` and `lineage` are additive forward-compat fields for a future `bmad upgrade --rollback` (out of v1 scope per PRD §Post-MVP). v1 writers populate them; v1 readers ignore lineage beyond the current compile.
+- `declared_by` names the module whose `module.yaml` originally declared the variable (not necessarily the module whose `config.yaml` supplied the value; that is `source` + `source_path`).
+- `template_from` names the `module.yaml` path whose `result:` template was applied to produce the resolved value (e.g., `output_folder` has `result: "{project-root}/{value}"` in `core/module.yaml`). Absent when no template was applied.
+- Additive new fields (`previous_base_hash`, `lineage`, `declared_by`, `template_from`) are tolerated by any conformant v1 reader; unknown fields MUST be round-tripped unchanged by mechanical rewriters to preserve compatibility.
 
 ### Code Examples (Reference Skills)
 
@@ -584,9 +604,10 @@ Skipping the migration is a first-class choice: a module that prefers to ship pu
 - FR34: End User can invoke `bmad-customize` skill from an IDE chat (Claude Code or Cursor) with a natural-language customization intent (e.g., "make the PM agent's menu include a [Q] Question option").
 - FR35: The `bmad-customize` skill discovers candidate override targets by calling `bmad compile --explain --json` on the affected skill(s) and reasoning over the returned fragment and variable structure.
 - FR36: The `bmad-customize` skill identifies whether the user's intent maps to a fragment override, a variable override, or a full-skill replacement, and negotiates the chosen target with the user before writing any files.
-- FR37: The `bmad-customize` skill scaffolds override file(s) at the correct path under the configured override root, pre-populated with the active content, and produces a draft edit based on the user's expressed intent for the user to review.
-- FR38: The `bmad-customize` skill calls `bmad compile --diff` to preview the compiled-output impact of the override and surfaces the diff to the user before any change is treated as accepted.
+- FR37: The `bmad-customize` skill drafts override content conversationally in the IDE chat session, starting from the active content for the target fragment / variable / full skill and incorporating the user's expressed intent. The draft is shown to the user as text inside the conversation. No file is written under the configured override root during drafting (see FR54).
+- FR38: After the user accepts a draft and the skill writes the override file to its final path under the override root, the skill invokes `bmad compile <skill> --diff` to surface the compiled-`SKILL.md`-level impact as a final verification step. The during-draft preview shown to the user inside chat is rendered conversationally by the skill itself, not produced by a `bmad compile --diff` call.
 - FR39: The `bmad-customize` skill is itself authored as `SKILL.template.md` + fragments and compiled by the same pipeline it helps users customize (dogfood reference).
+- FR54 (**ratified from PRD §Open Questions #1**): No override content is written to any path under `<override_root>` during the drafting phase of a `bmad-customize` session. Drafts exist only as conversational text inside the chat session. The override root is modified strictly on explicit user acceptance, and only at the final override path (never to a staging subdirectory). This contract applies to all draft states: proposed, revised, and abandoned.
 
 ### Drift Detection & Lockfile
 
@@ -613,6 +634,7 @@ Skipping the migration is a first-class choice: a module that prefers to ship pu
 - FR51: Installer exits non-zero with a user-facing error when any FR7 error condition occurs during a compile.
 - FR52: CI runs an end-to-end integration test covering the full customization lifecycle: fresh `bmad install` → `bmad-customize` skill scaffolds a fragment override → `bmad compile --diff` accepted → `bmad upgrade --dry-run` shows drift after a simulated upstream fragment change → `bmad upgrade` halts → manual override edit resolves the drift → `bmad upgrade` succeeds → `bmad.lock` records the lineage (old base hash, new base hash, override hash). Pipeline failure of any step fails the build.
 - FR53: CI matrix includes a Model 3 (template source + precompiled fallback) distribution test: install a module in a compiler-present environment and in a compiler-absent environment, assert both produce equivalent installed skill output.
+- FR55 (**companion to FR54**): CI runs a test that exercises an abandoned `bmad-customize` session — fresh `bmad install` → `bmad-customize` skill opens a drafting session → the session is abandoned before acceptance → assert no new files exist under `<override_root>` and `bmad.lock` is byte-identical to its pre-session state. Pipeline failure fails the build.
 
 ## Non-Functional Requirements
 
@@ -691,9 +713,11 @@ Emitted around every `{{var_name}}` interpolation in the compiled output.
 | Attribute | Required | Type / Enum | Meaning |
 |---|---|---|---|
 | `name` | yes | string | Variable name (the text inside `{{...}}`) |
-| `source` | yes | `user-config` \| `module-config` \| `bmad-config` \| `install-flag` \| `env` \| `derived` | Where the value came from (per FR31 and FR10 precedence) |
+| `source` | yes | `install-flag` \| `user-config` \| `module-config` \| `bmad-config` \| `env` \| `derived` | Which precedence tier supplied the value (see source-value table above for precedence order; `env` is reserved, not emitted in v1) |
 | `resolved-at` | yes | `compile-time` | Always `compile-time` in v1. (Reserved for future runtime-resolution variants; `{var_name}` runtime placeholders are never tagged.) |
-| `source-path` | optional | string (path) | Filesystem path of the file that supplied the value. Present for `user-config`, `module-config`, `bmad-config`, and `derived` sources where a source file exists; absent for `install-flag` and `env`. |
+| `source-path` | optional | string (path) | Filesystem path of the file that supplied the value. Present for `user-config`, `module-config`, `bmad-config` sources; absent for `install-flag`. For `derived` sources, a symbolic path of the form `derived://<name>` is emitted so consumers can disambiguate without leaking secrets or ambient state. |
+| `declared-by` | optional | string (module ID) | Module whose `module.yaml` originally declared this variable (e.g., `core`, `bmm`, `<custom>`). Distinguishes declaration from value source — a value resolved from `module-config` may originate from a variable declared by `core` via the `# Variables from Core Config inserted:` inheritance convention. |
+| `template-from` | optional | string (path) | `module.yaml` file whose `result:` template was applied during resolution (e.g., `core/module.yaml` for `output_folder`'s `{project-root}/{value}` template). Absent when no template expansion occurred. |
 
 ### JSON Rendering Equivalence (`--json`)
 
@@ -713,16 +737,23 @@ Example schema fragment:
 
 ### Stability
 
-Tag names, attribute names, and enum values defined in this appendix are frozen for v1. Adding a new enum value to `resolved-from` or `source` requires a major-version bump of `bmad-method` (per NFR-M5 error-vocabulary stability, applied analogously to provenance vocabulary). Consumers may safely pin to the v1 schema.
+Tag names, attribute names, and **required** enum values defined in this appendix are frozen for v1. The stability rules, in order of restrictiveness:
+
+- **Breaking (major bump required):** renaming an attribute; removing an attribute; changing an attribute's type; removing a `<Tag>`; adding a new value to the `resolved-from` or `source` enums beyond what this appendix lists (per NFR-M5 error-vocabulary stability, applied analogously to provenance vocabulary). The `env` source value may be activated in a future minor release without a bump because it is already listed in v1 (merely `reserved — not emitted`), so emitting it does not widen the enum.
+- **Additive (no bump required):** adding a new **optional** attribute to an existing tag; adding a new **optional** field to a lockfile entry; adding a new **optional** `<Tag>` to the vocabulary where the absence of the tag is always a valid interpretation. Consumers MUST tolerate unknown optional attributes and fields (ignore them gracefully; round-trip them unchanged if they rewrite).
+
+Consumers may safely pin to the v1 schema for required attributes and the set of v1-listed enum values.
 
 ## Open Questions for Architecture
 
-Issues raised during PRD review that require resolution at architecture or implementation time. Not blockers for PRD acceptance; must be answered before the affected FR is built.
+Issues raised during PRD review that required resolution at architecture or implementation time. Not blockers for PRD acceptance; each is answered below before the affected FR is built. **Both items are now RESOLVED** via the architecture document at `proposals/bmad-skill-compiler-architecture.md`; resolutions are summarized inline for PRD self-containment.
 
-- **Staging semantics for override scaffolds (FR37 ↔ FR38).** The `bmad-customize` skill scaffolds an override file on disk (FR37) before calling `bmad compile --diff` for preview (FR38). If the user rejects the diff, stale override content may persist under the committed override root and affect the next compile. Candidate resolutions:
-  - (a) scaffold to `override_root/.staging/<skill>/<fragment>.template.md` and atomic-rename on user accept;
-  - (b) skill holds draft content in memory and passes it via `bmad compile --diff --with-override-stdin` (new flag), only persisting to the override root on accept;
-  - (c) alternative architecture ratifies a different approach.
-  Architecture is to pick an approach and ratify an additional FR making "no override persists to the committed override root until the user accepts the diff" an explicit contract. Integration test FR52 exercises the accept path and will surface the failure mode if the chosen approach is incorrect.
+- **Staging semantics for override scaffolds (FR37 ↔ FR38) — RESOLVED (see architecture §Core Architectural Decisions → Decision 8).**
+  The `bmad-customize` skill is a Markdown prompt executed by an LLM in IDE chat — not compiled code — so override drafts happen *conversationally* in chat context, not on disk. No file is written under `<override_root>` until the user explicitly accepts the proposed change. The engine does not need a `--with-override-stdin` flag and there is no staging directory.
+  - **FR37 clarification:** "Scaffolds override file(s)" is reframed as a **chat-time draft** — the skill presents the active content and the proposed edit as text inside the conversation for the user to review. The committed override root is untouched during drafting.
+  - **FR38 clarification:** `bmad compile --diff` is called **after** the user accepts and the file is written, to surface the compiled-`SKILL.md`-level impact as final verification. The during-draft "preview" the user sees is a conversational before/after rendered by the skill itself, not a compile invocation.
+  - **Ratified new contract (see FR54 below):** No override file is written under `<override_root>` until the user accepts. The only authoritative location for an override is its final path; staging is strictly a runtime concept of the skill, never a filesystem artifact.
+  - **Integration test FR52** already exercises the accept path; a companion case verifies that a rejected / abandoned drafting session leaves the committed override root untouched.
 
-- **`bmad upgrade --rollback`.** Rollback is out of scope for the v1 FR set. If post-release demand justifies it, architecture needs to define lockfile history semantics before implementation (e.g., keep N prior lockfiles, snapshot-on-upgrade, or delta chain). Even absent v1 work, architecture should note the forward-compatibility implication so the v1 lockfile schema does not foreclose rollback later.
+- **`bmad upgrade --rollback` — RESOLVED forward-compat (see architecture §Core Architectural Decisions → Decision 4).**
+  Rollback remains out of v1 scope. The v1 lockfile schema is extended with `previous_base_hash` (prior upstream base for an overridden fragment) and `lineage` (append-only array of `{bmad_version, base_hash, override_hash}` entries per fragment) so a future `bmad upgrade --rollback` can reconstruct pre-upgrade state without requiring parallel lockfile snapshots or a separate delta chain. v1 writers populate these fields; v1 readers treat them as optional. Neither field changes the wire format of the existing v1 schema (both are additive optional fields; see Appendix A Stability section).
