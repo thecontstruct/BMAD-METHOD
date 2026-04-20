@@ -1,5 +1,5 @@
 const path = require('node:path');
-const fs = require('fs-extra');
+const fs = require('../fs-native');
 const yaml = require('yaml');
 const crypto = require('node:crypto');
 const csv = require('csv-parse/sync');
@@ -193,11 +193,13 @@ class ManifestGenerator {
           }
         }
 
-        // Recurse into subdirectories
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-          if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
-          await walk(path.join(dir, entry.name));
+        // Recurse into subdirectories — but not inside a discovered skill
+        if (!skillMeta) {
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+            await walk(path.join(dir, entry.name));
+          }
         }
       };
 
@@ -327,7 +329,6 @@ class ManifestGenerator {
           displayName: m.displayName || m.name || entry.name,
           title: m.title || '',
           icon: m.icon || '',
-          capabilities: m.capabilities ? this.cleanForCSV(m.capabilities) : '',
           role: m.role ? this.cleanForCSV(m.role) : '',
           identity: m.identity ? this.cleanForCSV(m.identity) : '',
           communicationStyle: m.communicationStyle ? this.cleanForCSV(m.communicationStyle) : '',
@@ -497,7 +498,7 @@ class ManifestGenerator {
     }
 
     // Create CSV header with persona fields and canonicalId
-    let csvContent = 'name,displayName,title,icon,capabilities,role,identity,communicationStyle,principles,module,path,canonicalId\n';
+    let csvContent = 'name,displayName,title,icon,role,identity,communicationStyle,principles,module,path,canonicalId\n';
 
     // Combine existing and new agents, preferring new data for duplicates
     const allAgents = new Map();
@@ -515,7 +516,6 @@ class ManifestGenerator {
         displayName: agent.displayName,
         title: agent.title,
         icon: agent.icon,
-        capabilities: agent.capabilities,
         role: agent.role,
         identity: agent.identity,
         communicationStyle: agent.communicationStyle,
@@ -533,7 +533,6 @@ class ManifestGenerator {
         escapeCsv(record.displayName),
         escapeCsv(record.title),
         escapeCsv(record.icon),
-        escapeCsv(record.capabilities),
         escapeCsv(record.role),
         escapeCsv(record.identity),
         escapeCsv(record.communicationStyle),
