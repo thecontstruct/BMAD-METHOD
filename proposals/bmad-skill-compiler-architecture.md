@@ -319,6 +319,10 @@ The `self.*` namespace is lexically distinct from non-`self.` names, so the two 
 7. **`toml/central-base-user`** — `_bmad/config.user.toml` (central base user answers, PR #2285).
 8. **`toml/central-base-team`** — `_bmad/config.toml` (central base team answers + agent roster, PR #2285).
 
+**Precedence principle — specific scope wins over general scope.** Per-skill TOML layers (tiers 2–4) outrank the process-global central TOML layers (tiers 5–8) even when the per-skill layer is a *shipped default* (tier 4) and the central layer is an *explicit user override* (tier 5). The rationale: a skill author who declares `agent.icon = "📋"` in PM's `customize.toml` is asserting per-skill intent that should not be silently overridden by a global preference. A user's central `[agent] icon = "🦊"` in `_bmad/custom/config.user.toml` is a *fallback* that applies to skills whose `customize.toml` does not speak to that field; it does not override skills that do. Users wanting to change PM's icon specifically must override at the per-skill layer (`_bmad/custom/bmad-agent-pm.user.toml`, tier 2).
+
+This is a deliberate design choice — the alternative ("user intent wins at any scope") would reverse tiers 4 and 5 so that central-custom-user beats per-skill-defaults. We rejected that alternative because it would let a single central override silently affect every per-skill author's intent across all installed skills. The "specific wins over general" ordering preserves per-skill authoring autonomy at the cost of slightly more verbose user-side overrides. The trade-off is explicit; documentation makes the two layers' roles unambiguous so users know which file to edit.
+
 Per-skill TOML layers (tiers 2–4) are lexically scoped to the skill being compiled; the central TOML layers (tiers 5–8) are process-global and contribute the agent-roster surface (`self.agent.*`) plus any install-answer values that module.yaml schemas promote into templates. Tiers 5–8 match the four-layer merge order that upstream's `resolve_config.py` implements (base-team → base-user → custom-team → custom-user); the compiler's resolver produces the same merged view and records `toml-layer` provenance per leaf so `--explain` output can trace any value back to the originating file.
 
 TOML merge within the `self.*` cascade uses upstream's structural rules (scalars: override wins; tables: deep merge; arrays-of-tables with shared `code`/`id`: merge-by-key; other arrays: append). When an array value is produced by structural merge across multiple layers, the resolver attributes the composite value to `toml-layer: merged` and emits `contributing-paths` listing every contributing file.
@@ -660,9 +664,9 @@ At skill entry the IDE may invoke the guard for multiple skills simultaneously, 
 
 ---
 
-### Decision 17 — Shared Python Library Absorbs Upstream Renderer + Resolver
+### Decision 17 — Shared Python Library Absorbs Upstream Renderer + Resolvers
 
-**Problem.** Upstream ships two Python components today: `resolve_customization.py` (TOML merge at skill entry) and the runtime template renderer (`bf30b697`, `{var}` substitution at skill entry). The compiler needs the same TOML merge logic at build time. Two implementations of TOML merge = bug factory.
+**Problem.** Upstream ships three Python components that implement the same TOML merge rules today: `resolve_customization.py` (per-skill TOML merge at skill entry), `resolve_config.py` (four-layer central TOML merge per PR #2285, run at install time and by tooling), and the runtime template renderer (`bf30b697`, `{var}` substitution at skill entry). The compiler needs the same TOML merge logic at build time. Three implementations of TOML merge = bug factory.
 
 **Decision: one Python library, multiple entry points.**
 
@@ -691,13 +695,18 @@ src/scripts/
                       # uses: engine, parser, resolver, toml_merge, variants, io, errors, lockfile, explain
     resolve_customization.py  # refactored — thin shim over bmad_compile.toml_merge
                               # signature + stdout behavior unchanged for backward compat with upstream consumers
+    resolve_config.py         # refactored — thin shim over bmad_compile.toml_merge (4-layer merge, PR #2285)
+                              # signature + stdout behavior unchanged for backward compat with upstream consumers
+                              # and the bmad-party-mode / agent-roster consumers
 ```
 
 **Relationship to upstream code:**
 
-1. **`resolve_customization.py`** (existing, from `bd1c0053`/`0dbfae67`): refactored. Its merge logic is extracted into `bmad_compile.toml_merge.merge_layers(defaults, team, user) → merged`. The shim retains its CLI interface and stdout contract (returns merged TOML) so any existing consumer scripts or skill-entry invocations keep working. Same test suite upstream has for the resolver is ported / adapted.
+1. **`resolve_customization.py`** (existing, from `bd1c0053`/`0dbfae67`): refactored. Its merge logic is extracted into `bmad_compile.toml_merge.merge_layers(*layers) → merged`. The shim retains its CLI interface and stdout contract (returns merged TOML) so any existing consumer scripts or skill-entry invocations keep working. Same test suite upstream has for the resolver is ported / adapted.
 
-2. **`bf30b697`'s runtime renderer** (quick-dev at-skill-entry template substitution): replaced by `lazy_compile.py`. The SKILL.md shim (`b0d70766`) that currently invokes the renderer is updated to invoke `lazy_compile.py` instead. Templates that depend on `{var}` Python substitution at skill entry are migrated to `{{var}}` / `{{self.*}}` as part of the compiler-rollout PR (the migrated set is the same 6 agents upstream migrated to TOML — a coordinated change).
+2. **`resolve_config.py`** (existing, from PR #2285 / commit `4405b817`): refactored. Its four-layer merge (`_bmad/config.toml` → `_bmad/config.user.toml` → `_bmad/custom/config.toml` → `_bmad/custom/config.user.toml`) delegates to the same `bmad_compile.toml_merge.merge_layers(*layers) → merged` — the merge rules are identical across the two resolvers (scalars override / tables deep-merge / arrays-of-tables merge-by-`code`-or-`id` / other arrays append). The shim retains its CLI surface (`python3 resolve_config.py --project-root <path> [--key <name>]`) so upstream consumers (`bmad-party-mode`'s agent-roster read, any out-of-tree tooling) keep working. Test parity with upstream's existing behavior is a ship gate.
+
+3. **`bf30b697`'s runtime renderer** (quick-dev at-skill-entry template substitution): replaced by `lazy_compile.py`. The SKILL.md shim (`b0d70766`) that currently invokes the renderer is updated to invoke `lazy_compile.py` instead. Templates that depend on `{var}` Python substitution at skill entry are migrated to `{{var}}` / `{{self.*}}` as part of the compiler-rollout PR (the migrated set is the same 6 agents upstream migrated to TOML — a coordinated change).
 
 **Shared state between the compile engine and the lazy-compile guard:**
 
@@ -711,12 +720,12 @@ src/scripts/
 
 - Not a new FR — the upstream-shipped capabilities (TOML merge, runtime rendering) are consolidated in implementation, not scope-expanded.
 - Not a takeover of runtime rendering as a compiler concern — `lazy_compile.py` is cache coherence, not rendering.
-- Not a breaking change to upstream's external contract — `resolve_customization.py` keeps its CLI surface for any out-of-tree consumer.
+- Not a breaking change to upstream's external contracts — `resolve_customization.py` and `resolve_config.py` both keep their CLI surfaces for out-of-tree consumers (e.g., `bmad-party-mode`'s agent-roster read).
 
 **Migration sequencing:**
 
 1. Land the shared library with `parser/resolver/toml_merge/io/errors/lockfile/explain/engine`.
-2. Refactor `resolve_customization.py` to import from `bmad_compile.toml_merge` (behavior-preserving; validated against upstream's existing tests).
+2. Refactor `resolve_customization.py` AND `resolve_config.py` to import from `bmad_compile.toml_merge` (behavior-preserving; both validated against upstream's existing test suites as a pair — landing one without the other would leave a divergent merge implementation in place).
 3. Land `compile.py` and the Node CLI adapters (`install`/`upgrade`/`compile`).
 4. Land `lazy_compile.py` and update the SKILL.md shim to use it instead of the runtime renderer.
 5. Migrate `{var}` → `{{var}}`/`{{self.*}}` usages in the migrated-agent set; delete the runtime renderer code from upstream.
