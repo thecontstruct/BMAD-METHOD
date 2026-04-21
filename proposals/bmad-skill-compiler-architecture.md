@@ -9,6 +9,23 @@ revisionNotes: >-
   compile inputs) appended. Python 3.11+ is the baseline runtime;
   compile engine lives at `src/scripts/bmad_compile/`. Override root
   renamed `_bmad/custom/` throughout.
+
+  v1.2 (2026-04-20) — Aligned with upstream PR #2285 (central
+  config.toml + bmad-skill-manifest.yaml removal, commit 4405b817)
+  and PR #2287 (17 bmm-skills moved to customize.toml with
+  workflow.md deletions, commit ffdd9bc6). Decision 3 resolver gains
+  a fourth input surface: the four-layer central TOML
+  (`_bmad/config.toml`, `_bmad/config.user.toml`,
+  `_bmad/custom/config.toml`, `_bmad/custom/config.user.toml`)
+  emitted by the installer and merged by `resolve_config.py`;
+  agent-roster fields (`code`, `name`, `title`, `icon`,
+  `description`) now originate in each module's `module.yaml`
+  `agents:` block and flow into the `self.agent.*` namespace via
+  those layers. Install tree diagram updated to show the central
+  config files. Areas-for-Future-Enhancement wording on workflow-
+  step compilation clarified to distinguish step-Markdown
+  compilation (future) from workflow metadata (already owned by
+  upstream `customize.toml`, out of v1 compiler scope).
 stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8]
 lastStep: 8
 status: 'complete'
@@ -267,8 +284,12 @@ mkdir -p tools/installer/compiler
 | `<skill>/customize.toml` | TOML defaults for a skill's structured customization (declared per-field `prompt`, `default`, `result` etc.) | `toml` source, `toml-layer: defaults`. Values accessed via `{{self.<dotted.path>}}` |
 | `_bmad/custom/<skill>.toml` | TOML team override layer (committable convention) | `toml` source, `toml-layer: team` |
 | `_bmad/custom/<skill>.user.toml` | TOML user override layer (gitignored convention) | `toml` source, `toml-layer: user` |
+| `_bmad/config.toml` | **Central TOML, base-team layer** (installer-emitted per PR #2285, commit 4405b817): team install answers + agent roster | `toml` source, `toml-layer: central-base-team`. Roster fields exposed as `self.agent.*` |
+| `_bmad/config.user.toml` | **Central TOML, base-user layer** (installer-emitted, gitignored): user install answers | `toml` source, `toml-layer: central-base-user` |
+| `_bmad/custom/config.toml` | **Central TOML, custom-team layer** (installer-stubbed, committed): team-scope overrides of central fields | `toml` source, `toml-layer: central-custom-team` |
+| `_bmad/custom/config.user.toml` | **Central TOML, custom-user layer** (installer-stubbed, gitignored): personal overrides of central fields | `toml` source, `toml-layer: central-custom-user` |
 | `_bmad/_config/manifest.yaml` | Install metadata (versions, modules, IDEs) | Not a value source; used only to populate derived-tier values |
-| `_bmad/_config/{files-manifest,skill-manifest,agent-manifest,bmad-help}.csv`, `_bmad/<module>/module-help.csv` | Registries and help catalogs | Not value sources |
+| `_bmad/_config/{files-manifest,skill-manifest,bmad-help}.csv`, `_bmad/<module>/module-help.csv` | Registries and help catalogs | Not value sources. `agent-manifest.csv` was removed in PR #2285 — agent roster now derived from `module.yaml` + central TOML merge |
 | **`_bmad/custom/[<module>/[<workflow-path>/]]config.yaml`** | User's persistent YAML variable overrides; most-specific path wins within the tier | `user-config` tier |
 | CLI flags at this invocation | One-shot overrides (`bmad install --user-name=X`, `bmad compile --var-NAME=VALUE`, etc.) | `install-flag` tier (applies to both namespaces) |
 | `process.env` | Reserved for future use | `env` — **not emitted or read in v1** |
@@ -290,9 +311,15 @@ The `self.*` namespace is lexically distinct from non-`self.` names, so the two 
 **`self.*` cascade (TOML-sourced, highest → lowest):**
 
 1. **`install-flag`** — CLI flags that specifically target TOML paths (e.g., a hypothetical `--self-agent-icon=X`); same tier as YAML install-flag.
-2. **`toml/user`** — `_bmad/custom/<skill>.user.toml`.
-3. **`toml/team`** — `_bmad/custom/<skill>.toml`.
-4. **`toml/defaults`** — `<skill>/customize.toml`.
+2. **`toml/user`** — `_bmad/custom/<skill>.user.toml` (per-skill user layer).
+3. **`toml/team`** — `_bmad/custom/<skill>.toml` (per-skill team layer).
+4. **`toml/defaults`** — `<skill>/customize.toml` (per-skill defaults).
+5. **`toml/central-custom-user`** — `_bmad/custom/config.user.toml` (central user overrides, PR #2285).
+6. **`toml/central-custom-team`** — `_bmad/custom/config.toml` (central team overrides, PR #2285).
+7. **`toml/central-base-user`** — `_bmad/config.user.toml` (central base user answers, PR #2285).
+8. **`toml/central-base-team`** — `_bmad/config.toml` (central base team answers + agent roster, PR #2285).
+
+Per-skill TOML layers (tiers 2–4) are lexically scoped to the skill being compiled; the central TOML layers (tiers 5–8) are process-global and contribute the agent-roster surface (`self.agent.*`) plus any install-answer values that module.yaml schemas promote into templates. Tiers 5–8 match the four-layer merge order that upstream's `resolve_config.py` implements (base-team → base-user → custom-team → custom-user); the compiler's resolver produces the same merged view and records `toml-layer` provenance per leaf so `--explain` output can trace any value back to the originating file.
 
 TOML merge within the `self.*` cascade uses upstream's structural rules (scalars: override wins; tables: deep merge; arrays-of-tables with shared `code`/`id`: merge-by-key; other arrays: append). When an array value is produced by structural merge across multiple layers, the resolver attributes the composite value to `toml-layer: merged` and emits `contributing-paths` listing every contributing file.
 
@@ -329,6 +356,10 @@ The compiler reads each installed module's `module.yaml` once at engine init, bu
 **TOML customize.toml role (per-skill structured defaults, `self.*` source):**
 
 At compile init for a given skill, the resolver loads the skill's TOML layer stack in order: `customize.toml` (defaults) → `_bmad/custom/<skill>.toml` (team) if exists → `_bmad/custom/<skill>.user.toml` (user) if exists. Each layer is parsed by stdlib `tomllib`. Layers are merged via the shared `bmad_compile.toml_merge` library (same code consumed by upstream's `resolve_customization.py` — see Decision 17). The merged result is flattened into a `self.*` name table with per-leaf provenance (which layer contributed; for merged arrays, which layers contributed and the `contributing-paths` list). Each `{{self.<dotted.path>}}` reference resolves by dotted-path lookup into this table.
+
+**Central TOML role (process-global agent roster + install answers, `self.*` source):**
+
+The resolver additionally loads the four central TOML files once per engine init (not per skill) and merges them via `bmad_compile.toml_merge` in upstream's `resolve_config.py` order: `_bmad/config.toml` (base-team) → `_bmad/config.user.toml` (base-user) → `_bmad/custom/config.toml` (custom-team) → `_bmad/custom/config.user.toml` (custom-user). The merged central view is unioned into the per-skill `self.*` name table: central leaves occupy lower precedence than the per-skill stack (per the 8-tier cascade above), so a skill's `customize.toml` default can shadow a central base value if both declare the same path, and per-skill team/user overrides continue to win over everything central. Agent-roster fields (`self.agent.code`, `self.agent.name`, `self.agent.title`, `self.agent.icon`, `self.agent.description`) are declared schema-first in each module's `module.yaml` `agents:` block (PR #2285 relocated these from the now-removed `bmad-skill-manifest.yaml`); their values are whatever the merged central TOML produces, with the module.yaml declaration supplying defaults and `declared-by` attribution.
 
 **Implications:**
 
@@ -1112,22 +1143,27 @@ src/
 
 ```
 _bmad/
+  config.toml             # NEW (PR #2285) — central base-team: install answers + agent roster
+  config.user.toml        # NEW (PR #2285) — central base-user: user install answers (gitignored)
   _config/
     manifest.yaml         # existing
     files-manifest.csv    # existing (unchanged by compiler)
     skill-manifest.csv    # existing
-    agent-manifest.csv    # existing
     bmad-help.csv         # existing
     bmad.lock             # NEW — compiler output
+    # agent-manifest.csv removed in PR #2285; roster derives from module.yaml + central TOML
   scripts/                # upstream-provisioned (8fb22b1a)
     resolve_customization.py
+    resolve_config.py     # central TOML merger (PR #2285)
     bmad_compile/         # copied from src/scripts/
     compile.py
     lazy_compile.py
   custom/                 # upstream-provisioned override root
     .gitignore            # seeded with `*.user.toml` + `fragments/**/*.user.*`
-    <skill>.toml          # team TOML overrides (optional)
-    <skill>.user.toml     # user TOML overrides (optional, gitignored)
+    config.toml           # NEW (PR #2285) — central custom-team overrides (committed stub)
+    config.user.toml      # NEW (PR #2285) — central custom-user overrides (gitignored stub)
+    <skill>.toml          # team TOML overrides (optional, per-skill)
+    <skill>.user.toml     # user TOML overrides (optional, gitignored, per-skill)
     config.yaml           # user YAML variable overrides (optional)
     <module>/config.yaml  # per-module overrides (optional)
     fragments/            # NEW — prose fragment overrides
@@ -1157,8 +1193,12 @@ _bmad/
 | `_bmad/**/SKILL.md` | No (in user project) | Regenerated by installer / lazy-compile |
 | `_bmad/_config/bmad.lock` | Yes (recommended for user project) | Audit trail; drift-detect baseline |
 | `_bmad/**/.compiling.lock` | No | Advisory lock sentinel; transient |
-| `_bmad/custom/<skill>.toml` | Yes | Team TOML overrides |
-| `_bmad/custom/<skill>.user.toml` | No (gitignored by convention) | Personal overrides |
+| `_bmad/custom/<skill>.toml` | Yes | Team TOML overrides (per-skill) |
+| `_bmad/custom/<skill>.user.toml` | No (gitignored by convention) | Personal overrides (per-skill) |
+| `_bmad/config.toml` | Yes | Central base-team: install answers + agent roster (installer-emitted, PR #2285) |
+| `_bmad/config.user.toml` | No (gitignored by convention) | Central base-user: user install answers |
+| `_bmad/custom/config.toml` | Yes | Central custom-team: team overrides of central fields |
+| `_bmad/custom/config.user.toml` | No (gitignored by convention) | Central custom-user: personal overrides of central fields |
 | `_bmad/custom/fragments/**/*.template.md` | Yes | Team prose overrides |
 | `_bmad/custom/fragments/**/*.user.template.md` | No (gitignored) | Personal prose overrides |
 
@@ -1850,7 +1890,7 @@ Six minor drifts were identified during validation. **All six have since been re
 **Areas for Future Enhancement (post-v1):**
 
 - Richer TOML semantic-drift UX beyond the v1 dry-run notification (Phase 2).
-- Workflow-step compilation — activates the reserved `workflow-config` tier and the `workflow-config` source enum value.
+- Workflow-step Markdown compilation — step body files themselves (e.g., `steps/step-01-init.md`) become compilable inputs, activating the reserved `workflow-config` tier and source enum value for step-scoped YAML variables. **Scope boundary:** this is step *body* compilation only; workflow *metadata* (activation_steps_prepend/append, persistent_facts, on_complete) is already owned by upstream's `customize.toml` system — PR #2287 migrated 17 bmm-skills onto it and deleted their `workflow.md` files — and remains outside compiler v1 scope with no absorption planned.
 - `bmad upgrade --rollback` — schema already supports via `lineage` field; implementation is future work.
 - Cross-skill references with cycle detection (Level 5 per PRD §Post-MVP).
 - Python render-function extensions gated by `trust_mode: full` (Level 3).

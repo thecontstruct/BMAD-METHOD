@@ -25,6 +25,18 @@ amendmentNotes: >-
   lazy-compile-on-entry cache-coherence guard (no runtime template rendering
   remains), `file:` glob expansions tracked as first-class compile inputs,
   `bmad-customize` skill triages TOML drift alongside prose drift.
+
+  v1.2 (2026-04-20) — Aligned with upstream PR #2285 (central config.toml,
+  bmad-skill-manifest.yaml removal) and PR #2287 (17 bmm-skills switched to
+  customize.toml + workflow.md deletion). Config surface documents the four
+  central TOML layers (`_bmad/config.toml`, `_bmad/config.user.toml`,
+  `_bmad/custom/config.toml`, `_bmad/custom/config.user.toml`) as an input
+  source the compiler reads for `{{self.agent.*}}` resolution; agent roster
+  now lives in each module's `module.yaml` under `agents:` and is merged
+  through those layers. Phase 2 "workflow-step compilation" language
+  clarified — it refers to step-level Markdown files becoming individually
+  compilable, not to workflow metadata (which is already owned by the
+  upstream customize.toml system and out of compiler scope in v1).
 inputDocuments:
   - proposals/bmad-skill-compiler-proposal.md
   - proposals/research-prompt-compilation-landscape.md
@@ -424,7 +436,7 @@ Runtime token that the model will resolve: {user_context}
 
 `--tree` renders the same provenance metadata as an indented dependency tree (no content). `--json` serializes every `<Include>` / `<Variable>` as a structured object, preserving order, for use by editor plugins, LSP-style integrations, or future drift-visualization tools.
 
-**Config surface (module `config.yaml`, additive):**
+**Config surface — module `config.yaml` (additive):**
 
 ```yaml
 compiler:
@@ -432,6 +444,19 @@ compiler:
   override_root: _bmad/custom   # where user overrides live; provisioned by installer, gitignored patterns seeded
   trust_mode: safe           # "safe" = v1 stdlib-only Python (default); "full" reserved for computed fragments / non-stdlib extensions post-v1
 ```
+
+**Config surface — central TOML (installer-owned, compiler-consumed):**
+
+Upstream PR #2285 introduced a four-layer central TOML config that holds install answers and the agent roster. The compiler does not write these files — the installer does — but the resolver reads them as an input source for `{{self.agent.*}}` and other roster-derived values in templates. Layer precedence (highest → lowest): `_bmad/custom/config.user.toml` → `_bmad/custom/config.toml` → `_bmad/config.user.toml` → `_bmad/config.toml`. Agent roster fields (`code`, `name`, `title`, `icon`, `description`) are declared in each module's `module.yaml` under `agents:` and merged through these layers.
+
+```
+_bmad/config.toml              # base-team: team install answers + agent roster (installer-emitted)
+_bmad/config.user.toml         # base-user: user install answers (installer-emitted, gitignored)
+_bmad/custom/config.toml       # custom-team: team overrides (stub seeded by installer, committed)
+_bmad/custom/config.user.toml  # custom-user: personal overrides (stub seeded, gitignored)
+```
+
+Per-skill `customize.toml` remains the deep-behavior source of truth for structured skill customization (Decision 3, `self.*` cascade); it is orthogonal to the central config layers above and both feed the same `{{self.*}}` namespace.
 
 **Lockfile (`bmad.lock`, schema v1):**
 
@@ -602,7 +627,7 @@ Skipping the migration is a first-class choice: a module that prefers to ship pu
 **Phase 2 — Growth (post-v1, near-term):**
 
 - Full three-way merge UX for drifted overrides (if not shipped in v1 due to capacity).
-- Workflow-step files participate in the same template/fragment/override pipeline (Section 14 of proposal).
+- Workflow-step Markdown files (the step body files themselves — e.g., `steps/step-01-init.md`) participate in the same template/fragment/override pipeline as skill bodies, activating the reserved `workflow-config` source tier for step-scoped YAML variables. Note: workflow *metadata* (activation steps, persistent facts, on-complete hooks, etc.) is already owned by the upstream `customize.toml` system (PR #2287 migrated 17 skills to it and deleted their `workflow.md` files) — that layer is **not** compiler scope in v1 and is not targeted for v1-to-v2 absorption.
 - IDE variants beyond Claude Code and Cursor: VS Code extensions, JetBrains plugin context, Gemini CLI — added as demand is proven.
 - Template linter, cross-module drift reports, fragment-usage registry for module authors.
 - `bmad-customize` editor integrations (LSP-style) consuming `bmad compile --explain --json` output.
