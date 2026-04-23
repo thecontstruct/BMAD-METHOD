@@ -2257,6 +2257,374 @@ async function runTests() {
   console.log('');
 
   // ============================================================
+  // Test Suite 38: External-Module Agent Resolution
+  // ============================================================
+  console.log(`${colors.yellow}Test Suite 38: External-Module Agent Resolution${colors.reset}\n`);
+
+  {
+    // Scenario: external official modules (bmb, cis, gds, ...) are cloned into
+    // ~/.bmad/cache/external-modules/<name>/ — NOT copied into src/modules/.
+    // collectAgentsFromModuleYaml must resolve them from the cache or their
+    // agent roster silently vanishes from config.toml.
+    const tempCacheDir38 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-ext-cache-'));
+    const tempBmadDir38 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-ext-install-'));
+    const priorCacheEnv = process.env.BMAD_EXTERNAL_MODULES_CACHE;
+    process.env.BMAD_EXTERNAL_MODULES_CACHE = tempCacheDir38;
+
+    try {
+      // Seed a fake external module with agents at cache/<mod>/src/module.yaml —
+      // matches the real CIS layout.
+      const extSrcDir = path.join(tempCacheDir38, 'fake-ext', 'src');
+      await fs.ensureDir(extSrcDir);
+      await fs.writeFile(
+        path.join(extSrcDir, 'module.yaml'),
+        [
+          'code: fake-ext',
+          'name: "Fake External Module"',
+          'agents:',
+          '  - code: bmad-fake-ext-agent-one',
+          '    name: Ext-One',
+          '    title: External Agent One',
+          '    icon: "🧪"',
+          '    team: fake',
+          '    description: "First fake external agent."',
+          '  - code: bmad-fake-ext-agent-two',
+          '    name: Ext-Two',
+          '    title: External Agent Two',
+          '    icon: "🧬"',
+          '    team: fake',
+          '    description: "Second fake external agent."',
+          '',
+        ].join('\n'),
+      );
+
+      // Second fake module at cache/<mod>/skills/module.yaml — matches bmb layout.
+      const extSkillsDir = path.join(tempCacheDir38, 'fake-skills', 'skills');
+      await fs.ensureDir(extSkillsDir);
+      await fs.writeFile(
+        path.join(extSkillsDir, 'module.yaml'),
+        [
+          'code: fake-skills',
+          'name: "Fake Skills-Layout Module"',
+          'agents:',
+          '  - code: bmad-fake-skills-agent',
+          '    name: SkillsHero',
+          '    title: Skills Layout Agent',
+          '    icon: "🛠️"',
+          '    team: fake-skills',
+          '    description: "Lives under skills/ not src/."',
+          '',
+        ].join('\n'),
+      );
+
+      const generator38 = new ManifestGenerator();
+      generator38.bmadDir = tempBmadDir38;
+      generator38.bmadFolderName = path.basename(tempBmadDir38);
+      generator38.updatedModules = ['core', 'bmm', 'fake-ext', 'fake-skills'];
+
+      await generator38.collectAgentsFromModuleYaml();
+
+      const byCode = new Map(generator38.agents.map((a) => [a.code, a]));
+      assert(byCode.has('bmad-fake-ext-agent-one'), 'external module at cache/<name>/src resolves and contributes agent one');
+      assert(byCode.has('bmad-fake-ext-agent-two'), 'external module at cache/<name>/src resolves and contributes agent two');
+      assert(byCode.has('bmad-fake-skills-agent'), 'external module at cache/<name>/skills layout also resolves');
+      assert(byCode.get('bmad-fake-ext-agent-one').module === 'fake-ext', 'agent.module matches the owning external module name');
+      assert(byCode.get('bmad-fake-ext-agent-one').team === 'fake', 'explicit team from module.yaml is preserved');
+
+      await generator38.writeCentralConfig(tempBmadDir38, {
+        core: {},
+        bmm: {},
+        'fake-ext': {},
+        'fake-skills': {},
+      });
+
+      const teamContent = await fs.readFile(path.join(tempBmadDir38, 'config.toml'), 'utf8');
+      assert(teamContent.includes('[agents.bmad-fake-ext-agent-one]'), 'external-module agents land in config.toml [agents.*] section');
+      assert(teamContent.includes('[agents.bmad-fake-skills-agent]'), 'skills-layout external module agents also land in config.toml');
+      assert(teamContent.includes('First fake external agent.'), 'agent description from external module.yaml is written');
+    } finally {
+      if (priorCacheEnv === undefined) {
+        delete process.env.BMAD_EXTERNAL_MODULES_CACHE;
+      } else {
+        process.env.BMAD_EXTERNAL_MODULES_CACHE = priorCacheEnv;
+      }
+      await fs.remove(tempCacheDir38).catch(() => {});
+      await fs.remove(tempBmadDir38).catch(() => {});
+    }
+  }
+
+  console.log('');
+
+  // ============================================================
+  // Test Suite 39: Module Version Resolution
+  // ============================================================
+  console.log(`${colors.yellow}Test Suite 39: Module Version Resolution${colors.reset}\n`);
+
+  // --- package.json beats module.yaml and marketplace.json for cached external modules ---
+  {
+    const { resolveModuleVersion } = require('../tools/installer/modules/version-resolver');
+    const tempCacheDir39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-version-cache-'));
+    const priorCacheEnv39 = process.env.BMAD_EXTERNAL_MODULES_CACHE;
+    process.env.BMAD_EXTERNAL_MODULES_CACHE = tempCacheDir39;
+
+    try {
+      const moduleRoot = path.join(tempCacheDir39, 'tea');
+      const moduleSrc = path.join(moduleRoot, 'src');
+      await fs.ensureDir(path.join(moduleRoot, '.claude-plugin'));
+      await fs.ensureDir(moduleSrc);
+
+      await fs.writeFile(
+        path.join(moduleRoot, 'package.json'),
+        JSON.stringify({ name: 'bmad-method-test-architecture-enterprise', version: '1.12.3' }, null, 2) + '\n',
+      );
+      await fs.writeFile(
+        path.join(moduleSrc, 'module.yaml'),
+        ['code: tea', 'name: Test Architect', 'module_version: 1.11.0', ''].join('\n'),
+      );
+      await fs.writeFile(
+        path.join(moduleRoot, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({ plugins: [{ name: 'tea', version: '1.7.2' }] }, null, 2) + '\n',
+      );
+
+      const versionInfo = await resolveModuleVersion('tea');
+      assert(versionInfo.version === '1.12.3', 'resolver prefers cached package.json over stale marketplace metadata for external modules');
+      assert(versionInfo.source === 'package.json', 'resolver reports package.json as the winning metadata source');
+    } finally {
+      if (priorCacheEnv39 === undefined) {
+        delete process.env.BMAD_EXTERNAL_MODULES_CACHE;
+      } else {
+        process.env.BMAD_EXTERNAL_MODULES_CACHE = priorCacheEnv39;
+      }
+      await fs.remove(tempCacheDir39).catch(() => {});
+    }
+  }
+
+  // --- module.yaml is used when package.json is absent ---
+  {
+    const { resolveModuleVersion } = require('../tools/installer/modules/version-resolver');
+    const tempRepo39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-version-module-yaml-'));
+    const tempCacheDir39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-version-module-yaml-cache-'));
+    const priorCacheEnv39 = process.env.BMAD_EXTERNAL_MODULES_CACHE;
+    process.env.BMAD_EXTERNAL_MODULES_CACHE = tempCacheDir39;
+
+    try {
+      const moduleDir = path.join(tempRepo39, 'src');
+      await fs.ensureDir(path.join(tempRepo39, '.claude-plugin'));
+      await fs.ensureDir(moduleDir);
+
+      await fs.writeFile(path.join(moduleDir, 'module.yaml'), ['code: sample-mod', 'module_version: 2.4.0', ''].join('\n'));
+      await fs.writeFile(
+        path.join(tempRepo39, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({ plugins: [{ name: 'sample-mod', version: '1.7.2' }] }, null, 2) + '\n',
+      );
+
+      const versionInfo = await resolveModuleVersion('sample-mod', { moduleSourcePath: moduleDir });
+      assert(versionInfo.version === '2.4.0', 'resolver falls back to module.yaml when package.json is missing');
+      assert(versionInfo.source === 'module.yaml', 'resolver reports module.yaml when it provides the selected version');
+    } finally {
+      if (priorCacheEnv39 === undefined) {
+        delete process.env.BMAD_EXTERNAL_MODULES_CACHE;
+      } else {
+        process.env.BMAD_EXTERNAL_MODULES_CACHE = priorCacheEnv39;
+      }
+      await fs.remove(tempRepo39).catch(() => {});
+      await fs.remove(tempCacheDir39).catch(() => {});
+    }
+  }
+
+  // --- marketplace fallback uses semver-aware comparison ---
+  {
+    const { resolveModuleVersion } = require('../tools/installer/modules/version-resolver');
+    const tempRepo39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-version-marketplace-'));
+    const tempCacheDir39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-version-marketplace-cache-'));
+    const priorCacheEnv39 = process.env.BMAD_EXTERNAL_MODULES_CACHE;
+    process.env.BMAD_EXTERNAL_MODULES_CACHE = tempCacheDir39;
+
+    try {
+      const moduleDir = path.join(tempRepo39, 'src');
+      await fs.ensureDir(path.join(tempRepo39, '.claude-plugin'));
+      await fs.ensureDir(moduleDir);
+
+      await fs.writeFile(
+        path.join(tempRepo39, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify(
+          {
+            plugins: [
+              { name: 'older-plugin', version: '1.7.2' },
+              { name: 'newer-plugin', version: '1.12.3' },
+            ],
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      const versionInfo = await resolveModuleVersion('missing-plugin', { moduleSourcePath: moduleDir });
+      assert(
+        versionInfo.version === '1.12.3',
+        'resolver picks the highest marketplace fallback version using semver instead of string comparison',
+      );
+      assert(versionInfo.source === 'marketplace.json', 'resolver reports marketplace.json when it is the only usable metadata source');
+    } finally {
+      if (priorCacheEnv39 === undefined) {
+        delete process.env.BMAD_EXTERNAL_MODULES_CACHE;
+      } else {
+        process.env.BMAD_EXTERNAL_MODULES_CACHE = priorCacheEnv39;
+      }
+      await fs.remove(tempRepo39).catch(() => {});
+      await fs.remove(tempCacheDir39).catch(() => {});
+    }
+  }
+
+  // --- package.json lookup must not escape the module repo boundary ---
+  {
+    const { resolveModuleVersion } = require('../tools/installer/modules/version-resolver');
+    const tempHost39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-version-boundary-host-'));
+    const tempCacheDir39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-version-boundary-cache-'));
+    const priorCacheEnv39 = process.env.BMAD_EXTERNAL_MODULES_CACHE;
+    process.env.BMAD_EXTERNAL_MODULES_CACHE = tempCacheDir39;
+
+    try {
+      const moduleRoot = path.join(tempHost39, 'nested-module');
+      const moduleDir = path.join(moduleRoot, 'src');
+      await fs.ensureDir(path.join(moduleRoot, '.claude-plugin'));
+      await fs.ensureDir(moduleDir);
+
+      await fs.writeFile(path.join(tempHost39, 'package.json'), JSON.stringify({ name: 'host-project', version: '9.9.9' }, null, 2) + '\n');
+      await fs.writeFile(path.join(moduleDir, 'module.yaml'), ['code: sample-mod', 'module_version: 2.4.0', ''].join('\n'));
+      await fs.writeFile(
+        path.join(moduleRoot, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({ plugins: [{ name: 'sample-mod', version: '1.7.2' }] }, null, 2) + '\n',
+      );
+
+      const versionInfo = await resolveModuleVersion('sample-mod', { moduleSourcePath: moduleDir });
+      assert(versionInfo.version === '2.4.0', 'resolver does not read a host project package.json outside the module repo boundary');
+      assert(versionInfo.source === 'module.yaml', 'resolver stops at the module repo boundary before climbing into host project metadata');
+    } finally {
+      if (priorCacheEnv39 === undefined) {
+        delete process.env.BMAD_EXTERNAL_MODULES_CACHE;
+      } else {
+        process.env.BMAD_EXTERNAL_MODULES_CACHE = priorCacheEnv39;
+      }
+      await fs.remove(tempHost39).catch(() => {});
+      await fs.remove(tempCacheDir39).catch(() => {});
+    }
+  }
+
+  // --- Manifest uses the shared resolver for external modules ---
+  {
+    const { Manifest } = require('../tools/installer/core/manifest');
+    const { ExternalModuleManager } = require('../tools/installer/modules/external-manager');
+    const tempCacheDir39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-manifest-version-cache-'));
+    const tempBmadDir39 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-manifest-version-install-'));
+    const priorCacheEnv39 = process.env.BMAD_EXTERNAL_MODULES_CACHE;
+    const originalLoadConfig39 = ExternalModuleManager.prototype.loadExternalModulesConfig;
+    process.env.BMAD_EXTERNAL_MODULES_CACHE = tempCacheDir39;
+
+    ExternalModuleManager.prototype.loadExternalModulesConfig = async function () {
+      return {
+        modules: [
+          {
+            code: 'tea',
+            name: 'Test Architect',
+            repository: 'https://example.com/tea.git',
+            module_definition: 'src/module.yaml',
+            npm_package: 'bmad-method-test-architecture-enterprise',
+          },
+        ],
+      };
+    };
+
+    try {
+      const moduleRoot = path.join(tempCacheDir39, 'tea');
+      const moduleSrc = path.join(moduleRoot, 'src');
+      await fs.ensureDir(path.join(moduleRoot, '.claude-plugin'));
+      await fs.ensureDir(moduleSrc);
+
+      await fs.writeFile(
+        path.join(moduleRoot, 'package.json'),
+        JSON.stringify({ name: 'bmad-method-test-architecture-enterprise', version: '1.12.3' }, null, 2) + '\n',
+      );
+      await fs.writeFile(path.join(moduleSrc, 'module.yaml'), ['code: tea', 'module_version: 1.11.0', ''].join('\n'));
+      await fs.writeFile(
+        path.join(moduleRoot, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify({ plugins: [{ name: 'tea', version: '1.7.2' }] }, null, 2) + '\n',
+      );
+
+      const manifest39 = new Manifest();
+      const versionInfo = await manifest39.getModuleVersionInfo('tea', tempBmadDir39, moduleSrc);
+
+      assert(versionInfo.version === '1.12.3', 'manifest version info prefers external package.json over stale marketplace metadata');
+      assert(versionInfo.source === 'external', 'manifest preserves external source classification while using the shared resolver');
+      assert(
+        versionInfo.npmPackage === 'bmad-method-test-architecture-enterprise',
+        'manifest preserves npm package metadata for external modules',
+      );
+    } finally {
+      ExternalModuleManager.prototype.loadExternalModulesConfig = originalLoadConfig39;
+      if (priorCacheEnv39 === undefined) {
+        delete process.env.BMAD_EXTERNAL_MODULES_CACHE;
+      } else {
+        process.env.BMAD_EXTERNAL_MODULES_CACHE = priorCacheEnv39;
+      }
+      await fs.remove(tempCacheDir39).catch(() => {});
+      await fs.remove(tempBmadDir39).catch(() => {});
+    }
+  }
+
+  // --- Update checks should not advertise npm downgrades when source installs are newer ---
+  {
+    const { Manifest } = require('../tools/installer/core/manifest');
+    const manifest39 = new Manifest();
+    const originalGetAllModuleVersions39 = manifest39.getAllModuleVersions.bind(manifest39);
+    const originalFetchNpmVersion39 = manifest39.fetchNpmVersion.bind(manifest39);
+
+    manifest39.getAllModuleVersions = async () => [
+      {
+        name: 'tea',
+        version: '1.12.3',
+        npmPackage: 'bmad-method-test-architecture-enterprise',
+      },
+    ];
+    manifest39.fetchNpmVersion = async () => '1.7.2';
+
+    try {
+      const updates = await manifest39.checkForUpdates('/unused');
+      assert(updates.length === 0, 'update check ignores older npm versions when installed source metadata is newer');
+    } finally {
+      manifest39.getAllModuleVersions = originalGetAllModuleVersions39;
+      manifest39.fetchNpmVersion = originalFetchNpmVersion39;
+    }
+  }
+
+  // --- Update checks ignore non-semver version strings instead of flagging false positives ---
+  {
+    const { Manifest } = require('../tools/installer/core/manifest');
+    const manifest39 = new Manifest();
+    const originalGetAllModuleVersions39 = manifest39.getAllModuleVersions.bind(manifest39);
+    const originalFetchNpmVersion39 = manifest39.fetchNpmVersion.bind(manifest39);
+
+    manifest39.getAllModuleVersions = async () => [
+      {
+        name: 'tea',
+        version: 'workspace-build',
+        npmPackage: 'bmad-method-test-architecture-enterprise',
+      },
+    ];
+    manifest39.fetchNpmVersion = async () => 'latest-build';
+
+    try {
+      const updates = await manifest39.checkForUpdates('/unused');
+      assert(updates.length === 0, 'update check ignores non-semver version strings instead of reporting misleading updates');
+    } finally {
+      manifest39.getAllModuleVersions = originalGetAllModuleVersions39;
+      manifest39.fetchNpmVersion = originalFetchNpmVersion39;
+    }
+  }
+
+  console.log('');
+
+  // ============================================================
   // Summary
   // ============================================================
   console.log(`${colors.cyan}========================================`);
