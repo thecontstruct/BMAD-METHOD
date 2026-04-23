@@ -11,6 +11,21 @@ inputDocuments:
 
 This document provides the complete epic and story breakdown for BMAD Compiled Skills, decomposing the requirements from the PRD and Architecture into implementable stories. No UX design document exists — the product is a CLI + template-authoring system with no UI surface.
 
+## FR Numbering Cross-Reference (PRD ↔ Epics)
+
+**This document uses a sequential FR1–FR59 scheme.** The PRD uses FR1–FR58 plus the amendment-inserted FR13a. Both schemes cover the same 59 requirements with identical semantic content. When citing FRs in tickets, commits, PR descriptions, or error messages (e.g., `PRECEDENCE_UNDEFINED`), use the **epics scheme (FR1–FR59)** — this document is the authoritative numbering for implementation. Use the table below to look up PRD references.
+
+| Range | PRD scheme | Epics scheme | Relationship |
+|---|---|---|---|
+| FR1–FR13 | FR1–FR13 | FR1–FR13 | Identical |
+| TOML structured override | FR13a | FR14 | PRD v1.2 amendment insertion → promoted to full number in epics |
+| FR14–FR58 (PRD) | FR14–FR58 | FR15–FR59 | Shifted by +1 |
+
+**Lookup examples:**
+- PRD "FR39 (dogfood)" → Epics FR40.
+- PRD "FR54 (no-disk-write contract)" → Epics FR55.
+- Epics "FR59 (lazy compile-on-entry)" → PRD FR58.
+
 ## Requirements Inventory
 
 ### Functional Requirements
@@ -680,6 +695,8 @@ As an end user,
 I want to override any `customize.toml` field via `_bmad/custom/<skill>.toml` (team) or `_bmad/custom/<skill>.user.toml` (personal, gitignored),
 So that I can tune structured behavior without editing upstream files.
 
+**Coordination Owner:** _TBD — assigned during Sprint 0._ This story includes a cross-cutting refactor of upstream's `resolve_customization.py` and `resolve_config.py` to import from the shared `bmad_compile.toml_merge` module. The refactor must land atomically in a single PR. The named owner is responsible for scheduling the landing window, coordinating with upstream maintainers, and arbitrating parity-test failures between the old and new implementations.
+
 **Acceptance Criteria:**
 
 **Given** a skill with `customize.toml` containing `icon = "📋"` and no user override
@@ -1045,6 +1062,13 @@ As a performance-conscious user,
 I want the SKILL.md shim updated to invoke `lazy_compile.py` instead of upstream's runtime renderer, and I want install-time compiles to use batch mode,
 So that skill entry is fast and fresh installs don't pay N × 200ms interpreter startup.
 
+**Coordination Owner:** _TBD — assigned during Sprint 0._ The SKILL.md shim change has skill-entry-wide blast radius: a broken shim fails every skill at entry simultaneously across every install. The named owner is responsible for (1) scheduling the landing window with the SKILL.md shim upstream owner, (2) defining a staged-rollout plan if the deployment model supports it (e.g., shim behind a feature flag for the first release), and (3) owning the roll-forward / roll-back procedure documented below.
+
+**Roll-forward / roll-back plan:**
+- **Pre-merge:** Full cross-OS CI on all 6 OS/arch combinations (macOS Intel + Apple Silicon, Linux x86_64 + ARM64, Windows 10/11) must pass, not the PR-default Linux-only subset. Integration test (Story 7.2) must pass against the candidate shim.
+- **Post-merge guardrail:** For the first release after landing, the SKILL.md shim preserves a fallback code path that re-invokes the previous runtime renderer if `lazy_compile.py` exits non-zero from a known recoverable error taxonomy (`MISSING_FRAGMENT`, `LOCKFILE_VERSION_MISMATCH`). Fallback emits a stderr warning so regressions are visible without breaking user sessions. Fallback is removed in the following minor release once the shim is proven in the wild.
+- **Roll-back trigger:** If ≥ 3 independent user reports of shim-originated skill-entry failure land within 7 days of release, the release owner reverts the shim commit and pins the runtime renderer back in a patch release. Decision authority rests with the Coordination Owner.
+
 **Acceptance Criteria:**
 
 **Given** the upstream SKILL.md shim (commit `b0d70766`) previously invoking a runtime renderer
@@ -1259,6 +1283,33 @@ So that the skill is a living reference implementation that exercises both compi
 **Then** `bmad-customize` is invoked via its own interactive test harness (drives discovery, drafts in chat-simulation, verifies no disk writes until accept, exercises drift triage against a fixture drift set)
 **And** the release fails if any `bmad-customize` scenario fails
 
+**Dogfood Release Gate Procedure (FR40 / PRD FR39 — own-cooking cycle):**
+
+**Given** `bmad-customize` has shipped at a prior BMAD version (N-1) as template source with at least one user-authored override applied to itself (e.g., its own `customize.toml` `icon` field overridden, and one prose fragment in its `fragments/` tree overridden)
+**When** the release of BMAD version N is being prepared
+**Then** the release owner executes the following procedure and records the outcome in the release PR:
+
+  1. Check out a clean environment with BMAD N-1 installed, including the `bmad-customize` self-overrides described above
+  2. Upgrade to the candidate build of BMAD N via `bmad upgrade --dry-run`
+  3. Assert the dry-run correctly classifies each `bmad-customize` self-override against upstream changes (no silent classification, every override either "unchanged / still applies" or "drift / needs triage")
+  4. If drift is reported, invoke `bmad-customize` (running under the N-1 build) with drift-triage intent against its own self-overrides, reconcile each drift entry per the Story 6.6 UX, and assert `bmad upgrade` succeeds after triage
+  5. Assert the upgraded `bmad-customize` at version N retains its own user overrides (the ones preserved through triage) and behaves correctly in a smoke-test scenario (discovery, plane routing, draft + accept, post-accept `--diff`)
+  6. Assert `bmad.lock` records the version N transition lineage for each self-override
+
+**Pass criteria (all must hold):**
+  - Every self-override is either preserved verbatim or intentionally reconciled by the release owner; no silent loss.
+  - Upgrade completes to exit 0 after triage (or directly, if no drift).
+  - Post-upgrade smoke-test passes.
+  - Release owner signs off in the release PR description with the recorded outcome of steps 1–6.
+
+**Fail criteria (any one blocks release):**
+  - A self-override is silently lost at any step.
+  - The dry-run misclassifies a drift entry (false negative or false positive verified against the known self-override set).
+  - Post-upgrade smoke-test fails.
+  - The procedure cannot be executed (e.g., `bmad-customize` at N-1 cannot be used to triage itself because of a compiler regression introduced in N).
+
+**Ownership:** The dogfood-gate procedure has a **named owner (person, not team)** on every release PR, assigned per Story 7.5. Owner must be a core maintainer with commit rights, not rotating — continuity matters across consecutive releases for reproducible sign-off.
+
 ---
 
 ## Epic 7: Validation, CI, Release Gates & Module Distribution
@@ -1381,9 +1432,10 @@ So that release-blocking items are closed before the release PR merges.
 
 **Given** the PRD's "25% of installs have ≥ 1 override within 90 days" success metric
 **When** this story is complete
-**Then** either:
-  a. a telemetry-lite proxy is scoped into v1 (opt-in ping, GitHub search heuristic, or survey cohort), with the corresponding integration story added to Epic 7, OR
-  b. the criterion is explicitly downgraded to a Phase 2 post-release measurement and a ship-gate-observable replacement metric is chosen (e.g., "`bmad-customize` skill is invoked without error in dogfood test run")
+**Then** the criterion is **explicitly downgraded to a Phase 2 post-release measurement** (rationale: v1 is a Problem-solving MVP, not an experience MVP; no telemetry infrastructure is in-scope; privacy posture per NFR-S1/NFR-S5 favors no-telemetry default)
+**And** the replacement ship-gate-observable metric for v1 is: **"`bmad-customize` skill is invoked end-to-end without error in the dogfood test run defined by Story 6.7"** — measurable in CI, no network/telemetry required
+**And** a Phase 2 backlog item is filed to revisit the 25% metric with either (a) an opt-in post-upgrade installer prompt, or (b) a Discord community survey conducted ≥ 90 days post-GA
+**And** this resolution may be overridden by the release manager before Story 7.5 is picked up if telemetry-lite is re-scoped into v1; the override must be recorded in the release PR description
 
 **Given** any **hard-gate** release item is unresolved (docs present, dogfood owner signed off, metric resolved)
 **When** the release PR is created
