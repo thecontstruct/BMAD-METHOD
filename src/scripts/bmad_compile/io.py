@@ -138,6 +138,11 @@ def list_dir_sorted(path: PathLike) -> list[PurePosixPath]:
     return entries
 
 
+def hash_text(text: str) -> str:
+    """SHA-256 hex digest of a UTF-8 string. Used for value_hash in provenance."""
+    return hashlib.sha256(text.encode()).hexdigest()  # pragma: allow-raw-io
+
+
 def sha256_hex(data_or_path: Union[bytes, bytearray, memoryview, PathLike]) -> str:
     """SHA-256, binary mode, lowercase hex.
 

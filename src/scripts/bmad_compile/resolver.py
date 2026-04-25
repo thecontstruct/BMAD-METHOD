@@ -1,5 +1,16 @@
 """Layer 6 — fragment-resolution engine.
 
+Story 1.3 additions:
+- `ResolvedValue` dataclass: provenance record for a resolved variable value.
+- `VariableScope`: pre-materialized variable lookup table built once per
+  `compile_skill()` call. Two parallel cascades:
+    non-self.*: local_scope props > bmad-config YAML (_bmad/core/config.yaml)
+    self.*:     toml/user > toml/team > toml/defaults (per-skill customize.toml)
+- `_parse_flat_yaml()`: custom flat key-value YAML parser (no pyyaml).
+- `ResolveContext.var_scope` field (optional; None is valid for legacy tests).
+- `_walk_nodes()` now resolves `VarCompile` nodes inline (respecting
+  per-fragment local_scope) and passes `VarRuntime` nodes through unchanged.
+
 Expands `<<include path="...">>` directives in an AST into an inline node
 stream via DFS, enforcing:
 
@@ -37,9 +48,9 @@ Pathlib boundary: imports `PurePosixPath` via the `io.py` re-export.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Union
+from typing import Any, Union
 
-from . import errors, io, parser, variants
+from . import errors, io, parser, toml_merge, variants
 from .io import PurePosixPath
 
 # Tier names — frozen for v1.
@@ -65,6 +76,209 @@ _TEMPLATE_SUFFIX = variants.TEMPLATE_SUFFIX
 
 
 @dataclass(frozen=True)
+class ResolvedValue:
+    """Provenance record for a resolved variable value."""
+    value: str
+    source: str          # "bmad-config" | "toml" | "local-scope" | etc.
+    source_path: str | None = None        # POSIX relative path to the source file
+    toml_layer: str | None = None         # "defaults" | "team" | "user"
+    contributing_paths: list[str] | None = None
+    value_hash: str | None = None         # SHA-256 hex of value.encode()
+
+
+def _parse_flat_yaml(content: str) -> dict[str, str]:
+    """Parse a flat YAML config file (key: value pairs only).
+
+    Rules:
+      - Lines starting with `#` after stripping → skip (comments).
+      - Lines with no `:` → skip.
+      - Lines with leading whitespace → skip (nested YAML not supported).
+      - Key: everything before the first `:`, stripped.
+      - Value: everything after the first `:`, stripped.
+      - Surrounding single or double quotes on the entire value are stripped.
+      - Empty value after stripping → key set to empty string (not omitted).
+      - Empty key after stripping → skip.
+
+    Story 1.3 reads the full file. Module-config tier parsing (the
+    `# Core Configuration Values` marker) is deferred to Story 2.x.
+
+    A leading UTF-8 BOM (`\\ufeff`) is stripped before parsing — common when
+    YAML is authored on Windows. Without this, the first key would be stored
+    as `\\ufeffkey` and silently fail every `{{key}}` lookup.
+    """
+    if content.startswith("\ufeff"):
+        content = content[1:]
+    result: dict[str, str] = {}
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if line[0:1] == " " or line[0:1] == "\t":
+            continue  # indented → nested YAML, skip
+        if ":" not in line:
+            continue
+        key, _, raw_value = line.partition(":")
+        key = key.strip()
+        if not key:
+            continue
+        val = raw_value.strip()
+        # Strip surrounding matching quotes — only when len >= 2 to avoid
+        # treating a lone quote character as its own delimiter.
+        if len(val) >= 2 and (
+            (val.startswith('"') and val.endswith('"')) or
+            (val.startswith("'") and val.endswith("'"))
+        ):
+            val = val[1:-1]
+        result[key] = val
+    return result
+
+
+def _flatten_toml(
+    d: dict,
+    prefix: str,
+    layer_name: str,
+    priority_map: dict[str, str],
+    result: dict[str, ResolvedValue],
+) -> None:
+    """Recursively flatten a merged TOML dict into `self.<dotted.path>` entries."""
+    for k, v in d.items():
+        dotted = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            _flatten_toml(v, dotted, layer_name, priority_map, result)
+        elif isinstance(v, list):
+            raise errors.UnknownDirectiveError(
+                f"self.* variable '{dotted}' resolves to a TOML array, not a scalar",
+                hint=(
+                    f"self.* variable path '{dotted}' resolves to a TOML array, "
+                    "not a scalar — use a more specific dotted path"
+                ),
+            )
+        else:
+            full_key = f"self.{dotted}"
+            # Booleans must serialize as lowercase "true"/"false" to match
+            # TOML/JSON/YAML conventions; Python's str(False) gives "False".
+            str_val = str(v).lower() if isinstance(v, bool) else str(v)
+            winning_layer = priority_map.get(full_key, layer_name)
+            result[full_key] = ResolvedValue(
+                value=str_val,
+                source="toml",
+                toml_layer=winning_layer,
+                value_hash=io.hash_text(str_val),
+            )
+
+
+def _build_priority_map(
+    toml_layers: list[tuple[str, dict]],
+) -> dict[str, str]:
+    """Scan layers from highest to lowest priority to record which layer wins each path."""
+    priority_map: dict[str, str] = {}
+
+    def _scan(d: dict, prefix: str, layer_name: str) -> None:
+        for k, v in d.items():
+            dotted = f"{prefix}.{k}" if prefix else k
+            full_key = f"self.{dotted}"
+            if isinstance(v, dict):
+                _scan(v, dotted, layer_name)
+            else:
+                if full_key not in priority_map:
+                    priority_map[full_key] = layer_name
+
+    # Scan from highest priority (last in list) to lowest.
+    for layer_name, layer_dict in reversed(toml_layers):
+        _scan(layer_dict, "", layer_name)
+    return priority_map
+
+
+class VariableScope:
+    """Pre-materialized variable lookup table for one compile_skill() call.
+
+    Build once at engine init via VariableScope.build(); pass the frozen
+    instance into ResolveContext. Never reads the filesystem during resolve().
+    Decision 3 — two parallel cascades (YAML non-self.* and TOML self.*).
+
+    Story 1.3 supports:
+      Non-self.*: bmad-config (core/config.yaml simple YAML)
+      self.*:     toml/defaults, toml/team, toml/user (per-skill TOML stack)
+
+    Note: hyphenated include prop names (e.g. heading-level) are NOT accessible
+    as {{heading_level}} compile-time variables — verbatim match only.
+    """
+
+    def __init__(self, table: dict[str, ResolvedValue]) -> None:
+        self._table = table
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        yaml_config_path: str | None = None,
+        toml_layers: list[tuple[str, dict]] | None = None,
+    ) -> VariableScope:
+        """Build a VariableScope from config sources.
+
+        yaml_config_path: path to a flat YAML config file (bmad-config tier).
+                          None = no YAML config.
+        toml_layers: ordered list of (layer_name, parsed_dict) from lowest to
+                    highest priority: [("defaults", ...), ("team", ...), ("user", ...)].
+                    None = no TOML config.
+        """
+        table: dict[str, ResolvedValue] = {}
+
+        # Non-self.* cascade: bmad-config YAML.
+        if yaml_config_path is not None:
+            content = io.read_template(yaml_config_path)
+            parsed = _parse_flat_yaml(content)
+            for name, val in parsed.items():
+                table[name] = ResolvedValue(
+                    value=val,
+                    source="bmad-config",
+                    source_path=yaml_config_path,
+                    value_hash=io.hash_text(val),
+                )
+
+        # self.* cascade: TOML layers merged, then flattened.
+        if toml_layers:
+            priority_map = _build_priority_map(toml_layers)
+            merged = toml_merge.merge_layers(*[d for _, d in toml_layers])
+            _flatten_toml(merged, "", "", priority_map, table)
+
+        return cls(table)
+
+    def resolve(self, name: str) -> ResolvedValue:
+        """Look up `name` in the pre-materialized table.
+
+        Raises UnresolvedVariableError if not found.
+        Does NOT check local_scope — the resolver handles that first.
+        """
+        if name in self._table:
+            return self._table[name]
+        all_names = self.available_names()
+        if name.startswith("self."):
+            hint_names = [n for n in all_names if n.startswith("self.")]
+            hint = (
+                f"variable '{name}' is not defined. "
+                f"Available self.* keys: {hint_names}. "
+                "Define it in customize.toml per architecture Decision 3."
+            )
+        else:
+            hint_names = [n for n in all_names if not n.startswith("self.")]
+            hint = (
+                f"variable '{name}' is not defined. "
+                f"Available: {hint_names}. "
+                "Add it to _bmad/core/config.yaml (bmad-config) or "
+                "customize.toml (self.* TOML) per architecture Decision 3."
+            )
+        raise errors.UnresolvedVariableError(
+            "unresolved variable '{{" + name + "}}'",
+            hint=hint,
+        )
+
+    def available_names(self) -> list[str]:
+        """Return sorted list of resolvable names, for error hints."""
+        return sorted(self._table.keys())
+
+
+@dataclass(frozen=True)
 class ResolveContext:
     skill_dir: PurePosixPath
     module_roots: dict[str, PurePosixPath]
@@ -82,6 +296,10 @@ class ResolveContext:
     # `<override_root>/fragments/<current_module>/<skill>/SKILL.template.md`;
     # otherwise `"base"`.
     root_resolved_from: str = _TIER_BASE
+    # Pre-materialized variable scope. None is valid for legacy tests that
+    # have no {{var}} tokens; the resolver only raises when a VarCompile node
+    # is actually encountered with var_scope=None.
+    var_scope: VariableScope | None = None
 
 
 @dataclass
@@ -373,6 +591,54 @@ def _walk_nodes(
 
     flat: list[parser.AstNode] = []
     for node in nodes:
+        # --- VarCompile: resolve inline at the correct lexical scope. ---
+        if isinstance(node, parser.VarCompile):
+            name = node.name
+            resolved_text: str | None = None
+
+            # For non-self.* names, check local_scope (include props) first.
+            if not name.startswith("self."):
+                for prop_name, prop_value in context.local_scope:
+                    if prop_name == name:
+                        resolved_text = prop_value
+                        break
+
+            if resolved_text is None:
+                if context.var_scope is None:
+                    raise errors.UnresolvedVariableError(
+                        "unresolved variable '{{" + name + "}}'",
+                        file=enclosing_file,
+                        line=node.line,
+                        col=node.col,
+                        token=f"{{{{{name}}}}}",
+                        hint=(
+                            "no VariableScope configured — "
+                            "pass a VariableScope to engine.compile_skill()"
+                        ),
+                        source=enclosing_source,
+                    )
+                try:
+                    rv = context.var_scope.resolve(name)
+                except errors.UnresolvedVariableError as exc:
+                    raise errors.UnresolvedVariableError(
+                        exc.desc,
+                        file=enclosing_file,
+                        line=node.line,
+                        col=node.col,
+                        token=f"{{{{{name}}}}}",
+                        hint=exc.hint,
+                        source=enclosing_source,
+                    ) from None
+                resolved_text = rv.value
+
+            flat.append(parser.Text(content=resolved_text, line=node.line, col=node.col))
+            continue
+
+        # --- VarRuntime: pass through unchanged; _render() emits {name}. ---
+        if isinstance(node, parser.VarRuntime):
+            flat.append(node)
+            continue
+
         if not isinstance(node, parser.Include):
             flat.append(node)
             continue
