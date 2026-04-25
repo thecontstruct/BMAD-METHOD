@@ -1,0 +1,6 @@
+MISSING_FRAGMENT:
+missing-fragment-skill.template.md:1:1:
+fragment not found
+create
+fragments/nope.template.md
+hint:

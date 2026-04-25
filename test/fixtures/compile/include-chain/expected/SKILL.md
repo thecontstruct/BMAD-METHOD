@@ -1,0 +1,5 @@
+template_pre
+a_pre
+b_content
+a_post
+template_post

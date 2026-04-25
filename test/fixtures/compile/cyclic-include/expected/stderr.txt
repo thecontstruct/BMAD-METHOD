@@ -1,0 +1,5 @@
+CYCLIC_INCLUDE:
+/b.template.md:1:1:
+cyclic include detected
+[chain: fragments/a.template.md -> fragments/b.template.md -> fragments/a.template.md]
+hint:
