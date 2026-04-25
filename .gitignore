@@ -50,6 +50,10 @@ z*/
 
 _bmad
 _bmad-output
+# Test fixtures intentionally include _bmad/ subtrees as part of the
+# scenario-on-disk; they must be tracked so CI / fresh clones can run them.
+!test/fixtures/**/_bmad/
+!test/fixtures/**/_bmad/**
 
 # Personal customization files (team files are committed, personal files are not)
 _bmad/custom/*.user.toml
