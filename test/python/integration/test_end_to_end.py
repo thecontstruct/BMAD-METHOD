@@ -261,5 +261,51 @@ class TestCompileFixtures(unittest.TestCase):
                 self.assertIn("BASE BODY", body)
 
 
+class TestVariableResolutionFixtures(unittest.TestCase):
+    """Story 1.3 — compile-time variable interpolation end-to-end."""
+
+    def _scenario_skill(self, scenario: str, skill_name: str) -> Path:
+        return COMPILE_FIXTURES / scenario / "core" / skill_name
+
+    def test_variable_resolution_compiles_correctly(self) -> None:
+        skill = self._scenario_skill("variable-resolution", "var-resolution-skill")
+        expected = (
+            COMPILE_FIXTURES / "variable-resolution" / "expected" / "SKILL.md"
+        ).read_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli(skill, Path(tmp))
+            self.assertEqual(
+                result.returncode, 0, msg=f"stderr={result.stderr!r}"
+            )
+            out = Path(tmp) / "var-resolution-skill" / "SKILL.md"
+            self.assertEqual(out.read_bytes(), expected)
+
+    def test_runtime_var_passes_through(self) -> None:
+        skill = self._scenario_skill("variable-resolution", "var-resolution-skill")
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli(skill, Path(tmp))
+            self.assertEqual(
+                result.returncode, 0, msg=f"stderr={result.stderr!r}"
+            )
+            out = Path(tmp) / "var-resolution-skill" / "SKILL.md"
+            self.assertIn("{runtime_var}", out.read_text(encoding="utf-8"))
+
+    def test_unresolved_variable_cli_exits_nonzero(self) -> None:
+        skill = self._scenario_skill("variable-resolution-unresolved", "unresolved-skill")
+        subs = [
+            ln.strip()
+            for ln in (
+                COMPILE_FIXTURES / "variable-resolution-unresolved" / "expected" / "stderr.txt"
+            ).read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli(skill, Path(tmp))
+            self.assertNotEqual(result.returncode, 0)
+            for sub in subs:
+                self.assertIn(sub, result.stderr)
+            self.assertEqual(list(Path(tmp).rglob("SKILL.md")), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from . import io, parser, resolver
+from . import io, parser, resolver, toml_merge
 
 
 def _find_template(skill_dir):
@@ -74,22 +74,20 @@ def _find_template(skill_dir):
 def _render(nodes: Iterable[object]) -> str:
     """Render the post-resolve AST to text.
 
-    After resolver.resolve() inlines every `Include`, only `Text` nodes
-    should reach this point. Other node types (`VarCompile`/`VarRuntime`)
-    raise `RuntimeError` — their handling lands in Story 1.3.
+    After resolver.resolve() inlines every `Include` and resolves every
+    `VarCompile`, the flat list contains only `Text` and `VarRuntime` nodes.
+    `VarRuntime` nodes are emitted verbatim as `{name}` (runtime passthrough).
     """
     parts: list[str] = []
     for node in nodes:
         if isinstance(node, parser.Text):
             parts.append(node.content)
+        elif isinstance(node, parser.VarRuntime):
+            parts.append("{" + node.name + "}")
         else:
-            # RuntimeError (not AssertionError): `python -O` strips bare
-            # asserts. Use the same "not-yet-supported" semantic Story 1.1
-            # established; resolver.resolve() should have inlined every
-            # Include before we get here.
             raise RuntimeError(
                 f"engine cannot render node type {type(node).__name__}; "
-                "variable handling lands in Story 1.3"
+                "VarCompile should have been resolved by resolver.resolve()"
             )
     return "".join(parts)
 
@@ -175,6 +173,32 @@ def compile_skill(skill_dir, install_dir) -> None:
     source = io.read_template(str(template_path))
     nodes = parser.parse(source, relative_path)
 
+    # --- Variable scope (Decision 3) ---
+    # Probe for bmad-config YAML (non-self.* cascade, bmad-config tier).
+    # Convention: <scenario_root>/_bmad/core/config.yaml
+    yaml_config_path: str | None = None
+    _yaml_candidate = scenario_root / "_bmad" / "core" / "config.yaml"
+    if io.is_file(str(_yaml_candidate)):
+        yaml_config_path = str(_yaml_candidate)
+
+    # Build self.* TOML layer stack (lowest → highest: defaults → team → user).
+    _toml_layers: list[tuple[str, dict]] = []
+    _customize_toml = skill_posix / "customize.toml"
+    if io.is_file(str(_customize_toml)):
+        _toml_layers.append(("defaults", toml_merge.load_toml_file(str(_customize_toml))))
+    if override_root is not None:
+        _team_toml = override_root / f"{basename}.toml"
+        if io.is_file(str(_team_toml)):
+            _toml_layers.append(("team", toml_merge.load_toml_file(str(_team_toml))))
+        _user_toml = override_root / f"{basename}.user.toml"
+        if io.is_file(str(_user_toml)):
+            _toml_layers.append(("user", toml_merge.load_toml_file(str(_user_toml))))
+
+    var_scope = resolver.VariableScope.build(
+        yaml_config_path=yaml_config_path,
+        toml_layers=_toml_layers or None,
+    )
+
     context = resolver.ResolveContext(
         skill_dir=skill_posix,
         module_roots=module_roots,
@@ -182,6 +206,7 @@ def compile_skill(skill_dir, install_dir) -> None:
         override_root=override_root,
         target_ide=None,  # Story 1.4 wires --tools
         root_resolved_from=root_resolved_from,
+        var_scope=var_scope,
     )
     cache = resolver.CompileCache()
     flat_nodes, _dep_tree = resolver.resolve(

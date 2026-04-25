@@ -116,5 +116,85 @@ class TestFindTemplateDirectoryFilter(unittest.TestCase):
             self.assertEqual(out.read_text(encoding="utf-8"), "fallback body")
 
 
+class TestVariableScopeWiring(unittest.TestCase):
+    """Story 1.3 — VariableScope built and wired into compile pipeline."""
+
+    def test_compile_resolves_yaml_variable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.template.md", "Hello {{user_name}}!")
+            # Place config at <scenario>/_bmad/core/config.yaml
+            _write(scenario / "_bmad" / "core" / "config.yaml", "user_name: World\n")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            out = install / "skill1" / "SKILL.md"
+            self.assertTrue(out.is_file())
+            self.assertEqual(out.read_text(encoding="utf-8"), "Hello World!")
+
+    def test_compile_passthrough_runtime_var(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.template.md", "Ref: {runtime_ref}.")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "Ref: {runtime_ref}.")
+
+    def test_compile_resolves_self_toml_variable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.template.md", "Agent: {{self.agent.name}}")
+            _write(skill / "customize.toml", '[agent]\nname = "Test Agent"\n')
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "Agent: Test Agent")
+
+    def test_compile_unresolved_var_exits_nonzero_no_partial_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.template.md", "{{undefined_var}}")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            with self.assertRaises(errors.UnresolvedVariableError):
+                engine.compile_skill(skill, install)
+            # No SKILL.md should have been written.
+            skill_md = install / "skill1" / "SKILL.md"
+            self.assertFalse(skill_md.exists())
+
+    def test_compile_var_scope_none_ok_for_text_only_templates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.template.md", "No variables here.")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "No variables here.")
+
+    def test_existing_engine_suite_unchanged(self) -> None:
+        """The override slot directory-filter test still passes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = _build_skill(scenario)
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "base body")
+
+
 if __name__ == "__main__":
     unittest.main()
