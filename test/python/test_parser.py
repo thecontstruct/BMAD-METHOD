@@ -107,7 +107,8 @@ class TestIncludeTokenization(unittest.TestCase):
         self.assertEqual(len(nodes), 1)
         self.assertEqual(
             nodes[0],
-            Include(src="fragments/a.template.md", props=(), line=1, col=1),
+            Include(src="fragments/a.template.md", props=(), line=1, col=1,
+                    raw_token='<<include path="fragments/a.template.md">>'),
         )
 
     def test_parses_include_with_one_attribute(self) -> None:
@@ -445,6 +446,33 @@ class TestVariableTokenization(unittest.TestCase):
         inc_nodes = parse('<<include path="f.template.md">>', "t.md")
         self.assertEqual(len(inc_nodes), 1)
         self.assertIsInstance(inc_nodes[0], Include)
+
+
+class TestTripleBraceEdgeCases(unittest.TestCase):
+    """Story 1.4 AC 12 — triple-brace edge cases pinned against regression."""
+
+    def test_four_brace_sequence_parses_correctly(self) -> None:
+        # {{{{foo}}}} → semantically: two leading { as Text + VarCompile("foo") + Text("}}")
+        nodes = parse("{{{{foo}}}}", "t.md")
+        var_nodes = [n for n in nodes if isinstance(n, VarCompile)]
+        text_content = "".join(n.content for n in nodes if isinstance(n, Text))
+        # Exactly one VarCompile for "foo"
+        self.assertEqual(len(var_nodes), 1)
+        self.assertEqual(var_nodes[0].name, "foo")
+        # Two leading braces + two trailing braces in text nodes
+        self.assertIn("{{", text_content)
+        self.assertIn("}}", text_content)
+
+    def test_extra_trailing_brace_parses_correctly(self) -> None:
+        # {{foo}}} → VarCompile("foo") + Text("}")
+        nodes = parse("{{foo}}}", "t.md")
+        var_nodes = [n for n in nodes if isinstance(n, VarCompile)]
+        self.assertEqual(len(var_nodes), 1)
+        self.assertEqual(var_nodes[0].name, "foo")
+        text_nodes = [n for n in nodes if isinstance(n, Text)]
+        self.assertTrue(text_nodes)
+        trailing = "".join(n.content for n in text_nodes)
+        self.assertEqual(trailing, "}")
 
 
 class TestParserPurity(unittest.TestCase):

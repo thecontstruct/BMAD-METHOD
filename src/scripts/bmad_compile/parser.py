@@ -45,6 +45,7 @@ class Include:
     props: tuple[tuple[str, str], ...] = ()
     line: int = 1
     col: int = 1
+    raw_token: str = ""
 
 
 @dataclass(frozen=True)
@@ -298,7 +299,13 @@ def parse(source: str, relative_path: str) -> list[AstNode]:
                 # Sort by attribute name — deterministic order.
                 props = tuple(sorted(extras, key=lambda pair: pair[0]))
                 line, col = _line_col(source, pos)
-                nodes.append(Include(src=path_value, props=props, line=line, col=col))
+                nodes.append(Include(
+                    src=path_value,
+                    props=props,
+                    line=line,
+                    col=col,
+                    raw_token=match.group(0),
+                ))
                 pos = match.end()
                 continue
 
