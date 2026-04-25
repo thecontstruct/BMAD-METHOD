@@ -401,5 +401,81 @@ class TestCliErrorBoundary(unittest.TestCase):
             self.assertEqual(list(Path(tmp_out).rglob("SKILL.md")), [])
 
 
+class TestLockfileIntegration(unittest.TestCase):
+    """Story 1.5 — lockfile written during successful compile; not on error."""
+
+    def setUp(self) -> None:
+        self._lockfile = (
+            COMPILE_FIXTURES
+            / "variable-resolution"
+            / "_bmad"
+            / "_config"
+            / "bmad.lock"
+        )
+        # Defensive: remove any stale lockfile from a killed prior run so
+        # test_lockfile_not_written_on_compile_error cannot false-fail.
+        self._lockfile.unlink(missing_ok=True)
+
+    def tearDown(self) -> None:
+        self._lockfile.unlink(missing_ok=True)
+
+    def _var_res_skill(self) -> Path:
+        return COMPILE_FIXTURES / "variable-resolution" / "core" / "var-resolution-skill"
+
+    def test_lockfile_written_on_compile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli(self._var_res_skill(), Path(tmp))
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+        self.assertTrue(self._lockfile.is_file(), "bmad.lock must exist after compile")
+        import json
+        data = json.loads(self._lockfile.read_text(encoding="utf-8"))
+        self.assertEqual(data["version"], 1)
+
+    def test_lockfile_secret_not_plaintext(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli(self._var_res_skill(), Path(tmp))
+        self.assertEqual(result.returncode, 0)
+        text = self._lockfile.read_text(encoding="utf-8")
+        self.assertNotIn("World", text)
+        self.assertNotIn('"value":', text)
+
+    def test_lockfile_deterministic(self) -> None:
+        # AC 7: two successive compiles produce byte-identical bmad.lock —
+        # exercise the natural upsert path (no unlink between runs).
+        with tempfile.TemporaryDirectory() as tmp:
+            _run_cli(self._var_res_skill(), Path(tmp))
+            bytes1 = self._lockfile.read_bytes()
+            _run_cli(self._var_res_skill(), Path(tmp))
+            bytes2 = self._lockfile.read_bytes()
+        self.assertEqual(bytes1, bytes2)
+
+    def test_lockfile_not_written_on_compile_error(self) -> None:
+        skill = COMPILE_FIXTURES / "variable-resolution-unresolved" / "core" / "unresolved-skill"
+        unresolved_lf = (
+            COMPILE_FIXTURES / "variable-resolution-unresolved" / "_bmad" / "_config" / "bmad.lock"
+        )
+        unresolved_lf.unlink(missing_ok=True)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                result = _run_cli(skill, Path(tmp))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(unresolved_lf.exists(), "bmad.lock must not be written on compile error")
+        finally:
+            unresolved_lf.unlink(missing_ok=True)
+
+    def test_lockfile_version_mismatch_exits_nonzero(self) -> None:
+        import json
+        self._lockfile.parent.mkdir(parents=True, exist_ok=True)
+        self._lockfile.write_text(
+            json.dumps({"version": 2, "compiled_at": "1.0.0",
+                        "bmad_version": "1.0.0", "entries": []}),
+            encoding="utf-8",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli(self._var_res_skill(), Path(tmp))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("LOCKFILE_VERSION_MISMATCH", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
