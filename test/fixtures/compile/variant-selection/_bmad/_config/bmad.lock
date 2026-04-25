@@ -1,0 +1,29 @@
+{
+  "bmad_version": "1.0.0",
+  "compiled_at": "1.0.0",
+  "entries": [
+    {
+      "compiled_hash": "19562dcb4a79aeae393e38bfe2bb9f846d7b6a1e0254558c1ae5c7a3c748a5f5",
+      "fragments": [
+        {
+          "hash": "3294252ca3c457e6a32da5482494ff9e384aaa198841525ac140413bb45135b0",
+          "path": "core/variant-skill/fragments/note.cursor.template.md",
+          "resolved_from": "variant"
+        }
+      ],
+      "glob_inputs": [],
+      "skill": "variant-skill",
+      "source_hash": "d6916dc6e16247c1ac84cc2ae57908bca00b418c31c73dd6e2110792e5611658",
+      "variables": [
+        {
+          "name": "user_name",
+          "source": "bmad-config",
+          "source_path": "_bmad/core/config.yaml",
+          "value_hash": "eb97d409396a3e5392936dad92b909da6f08d8c121a45e1f088fe9768b0c0339"
+        }
+      ],
+      "variant": "cursor"
+    }
+  ],
+  "version": 1
+}

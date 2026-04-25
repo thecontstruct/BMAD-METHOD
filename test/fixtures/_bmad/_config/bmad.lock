@@ -1,0 +1,16 @@
+{
+  "bmad_version": "1.0.0",
+  "compiled_at": "1.0.0",
+  "entries": [
+    {
+      "compiled_hash": "bb7c1956da446133243aea84a9f6068a9ecea05360337188450470eb926d8f70",
+      "fragments": [],
+      "glob_inputs": [],
+      "skill": "minimal",
+      "source_hash": "bb7c1956da446133243aea84a9f6068a9ecea05360337188450470eb926d8f70",
+      "variables": [],
+      "variant": null
+    }
+  ],
+  "version": 1
+}

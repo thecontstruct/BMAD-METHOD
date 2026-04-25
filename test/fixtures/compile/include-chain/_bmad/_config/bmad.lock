@@ -1,0 +1,27 @@
+{
+  "bmad_version": "1.0.0",
+  "compiled_at": "1.0.0",
+  "entries": [
+    {
+      "compiled_hash": "a56ef4fd1cb0fb6c5a0ac70ff2e2279f59d27d4633e1e920acf893a72b42de0d",
+      "fragments": [
+        {
+          "hash": "acf5b47a45f3f24092fecba529342b5562db306ac61f3353576fe58143119f5e",
+          "path": "core/include-chain-skill/fragments/a.template.md",
+          "resolved_from": "base"
+        },
+        {
+          "hash": "2f530571568fd51f4bbb606016165dcebf9db4e7390db38d57b8389f07f0501f",
+          "path": "core/include-chain-skill/fragments/b.template.md",
+          "resolved_from": "base"
+        }
+      ],
+      "glob_inputs": [],
+      "skill": "include-chain-skill",
+      "source_hash": "2cf19661b7c29da795427bca59d9425b3feb678d4a7b7a1bdd61f76502b8c4d1",
+      "variables": [],
+      "variant": null
+    }
+  ],
+  "version": 1
+}
