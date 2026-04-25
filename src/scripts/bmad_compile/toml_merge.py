@@ -99,5 +99,5 @@ def load_toml_file(path: str) -> dict:
             file=path,
             line=None,
             col=None,
-            hint=f"TOML parse error in {path}: {exc} — fix the TOML syntax and retry",
+            hint=f"TOML parse error in '{path}': {exc} — fix the TOML syntax and retry",
         ) from exc
