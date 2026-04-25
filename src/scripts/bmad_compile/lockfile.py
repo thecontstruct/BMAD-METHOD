@@ -1,0 +1,200 @@
+"""Layer 7 — lockfile v1 writer.
+
+Emits ``_bmad/_config/bmad.lock`` after each successful compile. The file
+is JSON (not YAML) — ``json.dumps(sort_keys=True, indent=2)`` — because the
+Python port is stdlib-only and ``pyyaml`` is banned. JSON is a strict subset
+of YAML so downstream tools that parse YAML can read it.
+
+Schema v1 example::
+
+    {
+      "bmad_version": "1.0.0",
+      "compiled_at": "1.0.0",
+      "entries": [
+        {
+          "compiled_hash": "<sha256>",
+          "fragments": [
+            {
+              "hash": "<sha256>",
+              "path": "fragments/header.template.md",
+              "resolved_from": "base"
+            }
+          ],
+          "glob_inputs": [],
+          "skill": "my-skill",
+          "source_hash": "<sha256>",
+          "variant": null,
+          "variables": [
+            {
+              "name": "user_name",
+              "source": "bmad-config",
+              "source_path": "_bmad/core/config.yaml",
+              "value_hash": "<sha256>"
+            }
+          ]
+        }
+      ],
+      "version": 1
+    }
+
+Allowed imports (layer 7): errors (1), io (2), resolver (6), stdlib json.
+Must NOT import: pathlib, hashlib, time, os.listdir, os.scandir, glob, open.
+All file I/O via io.is_file / io.read_template / io.write_text.
+Path manipulation via PurePosixPath re-exported from io.
+"""
+
+from __future__ import annotations
+
+import json
+
+from . import errors, io, resolver
+from .io import PurePosixPath
+
+_VERSION = 1
+_BMAD_VERSION = "1.0.0"  # deterministic sentinel — never wall-clock
+
+
+def read_lockfile_version(path: str) -> int | None:
+    """Return the ``version`` field of an existing lockfile, or ``None`` if absent.
+
+    Returns ``0`` for malformed/unreadable content (treated as no-version,
+    allowing overwrite). Any non-dict top level (list, scalar) also returns 0.
+    """
+    if not io.is_file(path):
+        return None
+    content = io.read_template(path)
+    if content.startswith("\ufeff"):
+        # Windows authors / editors may save bmad.lock with a UTF-8 BOM;
+        # mirror _parse_flat_yaml which strips the BOM before json/yaml parse.
+        content = content[1:]
+    try:
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            return 0
+        return int(data.get("version", 0))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return 0
+
+
+def _normalize_path(absolute_path: str, scenario_root: PurePosixPath) -> str:
+    """Return scenario-root-relative POSIX string; fallback to absolute POSIX."""
+    posix = io.to_posix(absolute_path)
+    try:
+        return str(posix.relative_to(scenario_root))
+    except ValueError:
+        return str(posix)
+
+
+def _build_skill_entry(
+    scenario_root: PurePosixPath,
+    skill_basename: str,
+    *,
+    source_text: str,
+    compiled_text: str,
+    dep_tree: list,
+    var_scope: resolver.VariableScope,
+    target_ide: str | None,
+    cache: resolver.CompileCache,
+) -> dict:
+    source_hash = io.hash_text(source_text)
+    compiled_hash = io.hash_text(compiled_text)
+
+    fragments: list[dict] = []
+    for entry in dep_tree[1:]:
+        if entry is None:
+            continue
+        frag: resolver.ResolvedFragment = entry
+        frag_source = cache.get_source((frag.resolved_path, frag.resolved_from))
+        frag_hash = io.hash_text(frag_source)
+        frag_path = _normalize_path(str(frag.resolved_path), scenario_root)
+        fragments.append({
+            "hash": frag_hash,
+            "path": frag_path,
+            "resolved_from": frag.resolved_from,
+        })
+
+    variables: list[dict] = []
+    for name, rv in sorted(var_scope._table.items()):
+        if rv.source == "local-scope":
+            continue
+        var_entry: dict = {
+            "name": name,
+            "source": rv.source,
+            "value_hash": rv.value_hash,
+        }
+        if rv.source_path is not None:
+            var_entry["source_path"] = _normalize_path(rv.source_path, scenario_root)
+        if rv.toml_layer is not None:
+            var_entry["toml_layer"] = rv.toml_layer
+        variables.append(var_entry)
+
+    return {
+        "compiled_hash": compiled_hash,
+        "fragments": fragments,
+        "glob_inputs": [],
+        "skill": skill_basename,
+        "source_hash": source_hash,
+        "variant": target_ide,
+        "variables": variables,
+    }
+
+
+def write_skill_entry(
+    lockfile_path: str,
+    scenario_root: PurePosixPath,
+    skill_basename: str,
+    *,
+    source_text: str,
+    compiled_text: str,
+    dep_tree: list,
+    var_scope: resolver.VariableScope,
+    target_ide: str | None,
+    cache: resolver.CompileCache,
+) -> None:
+    """Write (or update) the skill entry in the lockfile at ``lockfile_path``."""
+    existing: dict = {}
+    if io.is_file(lockfile_path):
+        try:
+            content = io.read_template(lockfile_path)
+            if content.startswith("\ufeff"):
+                content = content[1:]
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                existing = parsed
+            # else: non-dict top level treated as malformed; leave existing = {}
+        except (json.JSONDecodeError, ValueError, TypeError):
+            existing = {}
+
+    new_entry = _build_skill_entry(
+        scenario_root,
+        skill_basename,
+        source_text=source_text,
+        compiled_text=compiled_text,
+        dep_tree=dep_tree,
+        var_scope=var_scope,
+        target_ide=target_ide,
+        cache=cache,
+    )
+
+    raw_entries = existing.get("entries", [])
+    # Defensive: a corrupted lockfile with entries=null/int/str dict-parses
+    # successfully but would TypeError on list(...) (None) or silently
+    # explode a string into a per-character list. Treat as fresh.
+    entries: list = list(raw_entries) if isinstance(raw_entries, list) else []
+    updated = False
+    for i, entry in enumerate(entries):
+        if isinstance(entry, dict) and entry.get("skill") == skill_basename:
+            entries[i] = new_entry
+            updated = True
+            break
+    if not updated:
+        entries.append(new_entry)
+
+    output = dict(existing)   # copies unknown keys (forward-compat)
+    output["version"] = _VERSION
+    output["compiled_at"] = _BMAD_VERSION
+    output["bmad_version"] = _BMAD_VERSION
+    output["entries"] = entries
+
+    serialized = json.dumps(output, sort_keys=True, indent=2) + "\n"
+    io.write_text(lockfile_path, serialized)

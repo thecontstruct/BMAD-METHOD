@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from . import errors, io, parser, resolver, toml_merge, variants
+from . import errors, io, lockfile, parser, resolver, toml_merge, variants
 
 
 def _render(nodes: Iterable[object]) -> str:
@@ -75,6 +75,19 @@ def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None
     # `.../<scenario>/_bmad/custom`. If the directory is absent, all
     # override-tier lookups short-circuit to None.
     scenario_root = skill_posix.parent.parent
+
+    _lockfile_path = str(scenario_root / "_bmad" / "_config" / "bmad.lock")
+    _lf_ver = lockfile.read_lockfile_version(_lockfile_path)
+    if _lf_ver is not None and _lf_ver > 1:
+        raise errors.LockfileVersionMismatchError(
+            f"bmad.lock declares version {_lf_ver} but this compiler reads up to version 1",
+            file=_lockfile_path,
+            hint=(
+                f"bmad.lock declares version {_lf_ver}; this compiler supports version 1 only. "
+                "Run 'bmad upgrade' to regenerate, or delete bmad.lock to start fresh. "
+                "Your overrides in _bmad/custom/ will be preserved."
+            ),
+        )
     candidate_override_root = scenario_root / "_bmad" / "custom"
     # `is_dir` (not `path_exists`) — completes the file-type discipline
     # established at every other probe site in R4/R5/R6. A regular file
@@ -190,7 +203,7 @@ def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None
         var_scope=var_scope,
     )
     cache = resolver.CompileCache()
-    flat_nodes, _dep_tree = resolver.resolve(
+    flat_nodes, dep_tree = resolver.resolve(
         nodes,
         context,
         cache,
@@ -206,4 +219,14 @@ def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None
     output_path = install_posix / basename / "SKILL.md"
     io.write_text(str(output_path), rendered)
 
-    # TODO(Story 1.5): emit lockfile entry from `_dep_tree`.
+    lockfile.write_skill_entry(
+        _lockfile_path,
+        scenario_root,
+        basename,
+        source_text=source,
+        compiled_text=rendered,
+        dep_tree=dep_tree,
+        var_scope=var_scope,
+        target_ide=target_ide,
+        cache=cache,
+    )
