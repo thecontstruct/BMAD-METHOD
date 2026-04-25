@@ -5,11 +5,16 @@ Story 1.2 scope:
   AST nodes. Extra attributes (non-`path`) land on `Include.props` as a
   tuple of `(name, value)` pairs sorted alphabetically by name.
 - Any other `<<...>>` form raises `UnknownDirectiveError`.
-- `{{var}}`, `{{self.*}}`, `{var}` tokenization remains deferred to Story 1.3;
-  such tokens pass through inside `Text` nodes.
 
-AST node dataclasses for later stories are defined here so layering is
-settled and the import graph for Stories 1.3+ is stable.
+Story 1.3 scope:
+- `{{var_name}}` and `{{self.dotted.path}}` tokenized as `VarCompile`.
+- `{var_name}` tokenized as `VarRuntime`.
+- Malformed `{{...}}` (bad name, empty, trailing dot, unterminated) raises
+  `UnknownDirectiveError` with a four-construct hint.
+- Single `{` that doesn't form a valid `{name}` passes through as `Text`.
+
+Scan order: `{{` > `<<` > `{` at tie; triple-brace `{{{foo}}}` handled by
+the `{{` branch emitting the leading `{` as Text and advancing by 1.
 
 Attribute-value quoting has no escape in v1: an embedded `\\"` inside a
 matched include token is treated as a malformed directive and raises
@@ -70,6 +75,15 @@ _INCLUDE_RE = re.compile(
 )
 _ATTR_RE = re.compile(r'(?P<name>[a-zA-Z_][a-zA-Z0-9_-]*)="(?P<value>[^"\n]*)"')
 
+# Accepts "foo_bar" or "self.agent.name" but NOT "self." or "self..foo"
+# Rationale: `(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*` means zero or more `.segment`
+# groups; each segment must start with `[a-zA-Z_]`, which rejects trailing
+# dots and consecutive dots.
+_VAR_COMPILE_RE = re.compile(
+    r'\{\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\}\}'
+)
+_VAR_RUNTIME_RE = re.compile(r'\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\}')
+
 _QUOTING_HINT = (
     "attribute-value quoting is not escapable in v1 — "
     "split the attribute or remove the embedded quote"
@@ -109,135 +123,213 @@ def _make_unknown_error(
     )
 
 
+def _var_compile_hint(line: int) -> str:
+    """Hint for malformed or unterminated `{{...}}` tokens."""
+    return (
+        f"directive '{{{{...}}}}' on line {line} is not recognized — "
+        "valid constructs are:\n"
+        '  <<include path="...">>  (fragment inclusion)\n'
+        "  {{var_name}}            (compile-time variable, resolved before install)\n"
+        "  {{self.toml.path}}      (compile-time TOML variable, e.g. {{self.agent.name}})\n"
+        "  {var_name}              (runtime placeholder, passed through unchanged)"
+    )
+
+
 def parse(source: str, relative_path: str) -> list[AstNode]:
     """Tokenize `source` into an AST.
 
     Happy paths:
-    - Source with no `<<` returns `[Text(content=source, line=1, col=1)]`
-      (single node — byte-identical passthrough for Story 1.1 fixtures).
-    - Source with one or more `<<include>>` tokens returns alternating
-      `Text` / `Include` nodes in authoring order; adjacent includes with
-      no text between them produce consecutive `Include` nodes and no
-      empty `Text` placeholder.
+    - Source with no special tokens returns `[Text(content=source, line=1, col=1)]`.
+    - Source with `<<include>>` tokens returns alternating `Text` / `Include` nodes.
+    - `{{var_name}}` → `VarCompile`; `{var_name}` → `VarRuntime`.
+    - Single `{` not forming a valid `{name}` pattern passes through as `Text`.
+    - `{{{foo}}}` → `[Text("{"), VarCompile("foo"), Text("}")]`.
+
+    Scan order at ties (same position): `{{` beats `<<` beats `{`.
 
     Errors:
-    - Any `<<...>>` token that is not a valid include raises
-      `UnknownDirectiveError`. An include-shaped token containing `\\"`
-      raises with a quoting-hint.
+    - Any `<<...>>` that is not a valid include raises `UnknownDirectiveError`.
+    - `{{...}}` where the name is malformed (leading digit, empty, trailing dot)
+      or unterminated (no `}}` before next `<<` or EOF) raises
+      `UnknownDirectiveError` with a four-construct hint.
     """
     nodes: list[AstNode] = []
     pos = 0
     source_len = len(source)
 
     while pos < source_len:
-        next_open = source.find("<<", pos)
-        if next_open == -1:
+        # Locate the next occurrence of each special opener.
+        next_double = source.find("{{", pos)
+        next_angle = source.find("<<", pos)
+        next_single = source.find("{", pos)
+
+        # Pick the earliest position; among ties {{ > << > {.
+        best_pos = source_len  # sentinel — no more special tokens
+        best_type: str | None = None
+        for typ, idx in (("{{", next_double), ("<<", next_angle), ("{", next_single)):
+            if idx == -1:
+                continue
+            if idx < best_pos:
+                best_pos = idx
+                best_type = typ
+            elif idx == best_pos and typ == "{{":
+                best_type = typ  # {{ beats << or { at the same position
+
+        if best_type is None:
+            # No more special tokens — rest of source is plain text.
             line, col = _line_col(source, pos)
             nodes.append(Text(content=source[pos:], line=line, col=col))
             break
 
-        if next_open > pos:
+        # Emit any plain text that precedes the token.
+        if best_pos > pos:
             line, col = _line_col(source, pos)
-            nodes.append(Text(content=source[pos:next_open], line=line, col=col))
+            nodes.append(Text(content=source[pos:best_pos], line=line, col=col))
 
-        match = _INCLUDE_RE.match(source, next_open)
-        if match is not None:
-            matched = match.group(0)
-            # Escape sequences aren't interpreted in v1; a literal `\"` inside
-            # the matched slice is a silent-corruption risk (value truncated
-            # at the first `"`). Reject explicitly so authors get a hint.
-            if '\\"' in matched:
-                raise _make_unknown_error(
-                    source, relative_path, next_open, matched, hint=_QUOTING_HINT
-                )
-            path_value = match.group("path")
-            # Whitespace-only path values are rejected early — authors would
-            # otherwise get a confusing MISSING_FRAGMENT with a space as the
-            # leaf name rather than a clear parse error.
-            if not path_value.strip():
-                raise _make_unknown_error(
-                    source, relative_path, next_open, matched,
-                    hint="path value must be a non-empty, non-whitespace string",
-                )
-            # Absolute POSIX paths (leading `/`) escape the tier-cascade
-            # anchoring — `skill_dir / PurePosixPath("/x")` collapses to the
-            # absolute path, so an include of `/etc/passwd` would bypass all
-            # containment and be read verbatim by the resolver. Reject at
-            # the parser so authors get a clear diagnostic instead of a
-            # silent arbitrary-file-read.
-            if path_value.startswith("/"):
-                raise _make_unknown_error(
-                    source, relative_path, next_open, matched,
-                    hint=(
-                        "absolute include paths are not allowed — use a "
-                        "relative path such as 'fragments/<name>.template.md', "
-                        "a './<name>' skill-local path, or a "
-                        "'<moduleId>/<name>' cross-module path"
-                    ),
-                )
-            # Reject ASCII control characters (`\x00`-`\x1F` and `\x7F`) in
-            # path values. The `_INCLUDE_RE` char-class `[^"\n>]+` does not
-            # exclude `\x00`, and CPython's filesystem layer raises
-            # raw `ValueError("embedded null byte")` outside the
-            # `CompilerError` taxonomy when the resolver later probes the
-            # tier-5 base candidate. Other C0 controls similarly produce
-            # confusing OS-level errors. Reject at parse so authors get a
-            # clean `UnknownDirectiveError` with the violating directive
-            # carated on the source line.
-            for ch in path_value:
-                if ord(ch) < 0x20 or ord(ch) == 0x7F:
+        pos = best_pos  # advance to token start
+
+        if best_type == "{{":
+            # Triple-brace guard: {{{foo}}} — the very first `{` is not part
+            # of the `{{` variable token; emit it as Text and restart the scan
+            # one character in.  Without this guard, `_VAR_COMPILE_RE` would
+            # fail at pos 0 of `{{{foo}}}` and incorrectly raise an error.
+            if source[pos + 2:pos + 3] == "{":
+                line, col = _line_col(source, pos)
+                nodes.append(Text(content="{", line=line, col=col))
+                pos += 1
+                continue
+
+            # Attempt to tokenize a compile-time variable.
+            m = _VAR_COMPILE_RE.match(source, pos)
+            if m:
+                line, col = _line_col(source, pos)
+                nodes.append(VarCompile(name=m.group("name"), line=line, col=col))
+                pos = m.end()
+                continue
+
+            # Regex failed → either malformed content or no closing `}}`.
+            # Determine whether it is unterminated (no `}}` before next `<<`
+            # or EOF) to pick the right token span for the error.
+            close = source.find("}}", pos + 2)
+            next_ang = source.find("<<", pos + 2)
+            if close == -1 or (next_ang != -1 and next_ang < close):
+                # Unterminated: scan to end-of-line or next `<<`.
+                newline = source.find("\n", pos)
+                end_of_line = newline if newline != -1 else source_len
+                ang = source.find("<<", pos)
+                token_end = min(end_of_line, ang if ang != -1 else source_len)
+                token = source[pos:token_end] if token_end > pos else source[pos:pos + 2]
+            else:
+                # Malformed: has `}}` but bad name content.
+                token = source[pos:close + 2]
+
+            line, col = _line_col(source, pos)
+            raise errors.UnknownDirectiveError(
+                f"unknown directive '{token}'",
+                file=relative_path,
+                line=line,
+                col=col,
+                token=token,
+                hint=_var_compile_hint(line),
+                source=source,
+            )
+
+        elif best_type == "<<":
+            match = _INCLUDE_RE.match(source, pos)
+            if match is not None:
+                matched = match.group(0)
+                # Escape sequences aren't interpreted in v1; a literal `\"` inside
+                # the matched slice is a silent-corruption risk (value truncated
+                # at the first `"`). Reject explicitly so authors get a hint.
+                if '\\"' in matched:
                     raise _make_unknown_error(
-                        source, relative_path, next_open, matched,
+                        source, relative_path, pos, matched, hint=_QUOTING_HINT
+                    )
+                path_value = match.group("path")
+                # Whitespace-only path values are rejected early — authors would
+                # otherwise get a confusing MISSING_FRAGMENT with a space as the
+                # leaf name rather than a clear parse error.
+                if not path_value.strip():
+                    raise _make_unknown_error(
+                        source, relative_path, pos, matched,
+                        hint="path value must be a non-empty, non-whitespace string",
+                    )
+                # Absolute POSIX paths (leading `/`) escape the tier-cascade
+                # anchoring — reject at the parser so authors get a clear
+                # diagnostic instead of a silent arbitrary-file-read.
+                if path_value.startswith("/"):
+                    raise _make_unknown_error(
+                        source, relative_path, pos, matched,
                         hint=(
-                            "path value contains an ASCII control "
-                            "character (0x00-0x1F or 0x7F) — these are "
-                            "not valid in include paths and indicate the "
-                            "source was authored with a binary editor or "
-                            "miscoded encoding"
+                            "absolute include paths are not allowed — use a "
+                            "relative path such as 'fragments/<name>.template.md', "
+                            "a './<name>' skill-local path, or a "
+                            "'<moduleId>/<name>' cross-module path"
                         ),
                     )
-            extras_str = match.group("extras") or ""
-            extras = _ATTR_RE.findall(extras_str)
-            # Reject a duplicate `path` key in the extras — the first `path`
-            # is consumed by the named group; a second would silently leak
-            # into props and shadow the real path in Story 1.3.
-            if any(name == "path" for name, _ in extras):
-                raise _make_unknown_error(
-                    source, relative_path, next_open, matched,
-                    hint="duplicate 'path' attribute — each attribute may appear at most once",
-                )
-            # Reject duplicate attribute names — after sort, a collision
-            # would silently keep only the alphabetically-first value.
-            names = [name for name, _ in extras]
-            if len(names) != len(set(names)):
-                raise _make_unknown_error(
-                    source, relative_path, next_open, matched,
-                    hint="duplicate attribute names are not allowed in <<include>>",
-                )
-            # Sort by attribute name — deterministic order independent of
-            # authoring keystroke order. `findall` returns tuples matching
-            # the named groups in definition order: (name, value).
-            props = tuple(sorted(extras, key=lambda pair: pair[0]))
-            line, col = _line_col(source, next_open)
-            nodes.append(Include(src=path_value, props=props, line=line, col=col))
-            pos = match.end()
+                # Reject ASCII control characters in path values.
+                for ch in path_value:
+                    if ord(ch) < 0x20 or ord(ch) == 0x7F:
+                        raise _make_unknown_error(
+                            source, relative_path, pos, matched,
+                            hint=(
+                                "path value contains an ASCII control "
+                                "character (0x00-0x1F or 0x7F) — these are "
+                                "not valid in include paths and indicate the "
+                                "source was authored with a binary editor or "
+                                "miscoded encoding"
+                            ),
+                        )
+                extras_str = match.group("extras") or ""
+                extras = _ATTR_RE.findall(extras_str)
+                # Reject a duplicate `path` key in the extras.
+                if any(name == "path" for name, _ in extras):
+                    raise _make_unknown_error(
+                        source, relative_path, pos, matched,
+                        hint="duplicate 'path' attribute — each attribute may appear at most once",
+                    )
+                # Reject duplicate attribute names.
+                names = [name for name, _ in extras]
+                if len(names) != len(set(names)):
+                    raise _make_unknown_error(
+                        source, relative_path, pos, matched,
+                        hint="duplicate attribute names are not allowed in <<include>>",
+                    )
+                # Sort by attribute name — deterministic order.
+                props = tuple(sorted(extras, key=lambda pair: pair[0]))
+                line, col = _line_col(source, pos)
+                nodes.append(Include(src=path_value, props=props, line=line, col=col))
+                pos = match.end()
+                continue
+
+            # Not a valid include — recover a reasonable token for the error.
+            newline = source.find("\n", pos)
+            close_angle = source.find(">>", pos)
+            if close_angle != -1 and (newline == -1 or close_angle < newline):
+                token = source[pos:close_angle + 2]
+            else:
+                end = newline if newline != -1 else source_len
+                token = source[pos:end]
+
+            hint: str | None = None
+            if token.startswith("<<include") and '\\"' in token:
+                hint = _QUOTING_HINT
+            raise _make_unknown_error(source, relative_path, pos, token, hint=hint)
+
+        else:  # best_type == "{"
+            # Single brace — try to tokenize a runtime variable {name}.
+            m = _VAR_RUNTIME_RE.match(source, pos)
+            if m:
+                line, col = _line_col(source, pos)
+                nodes.append(VarRuntime(name=m.group("name"), line=line, col=col))
+                pos = m.end()
+            else:
+                # Single `{` not forming a valid `{name}` — emit as passthrough
+                # text (e.g. `{` in code blocks, JSON literals, frontmatter).
+                line, col = _line_col(source, pos)
+                nodes.append(Text(content="{", line=line, col=col))
+                pos += 1
             continue
-
-        # Not a valid include. Recover a reasonable token for the error
-        # message: the `<<...>>` outline on this line if present, else the
-        # rest of the line (handles newline-inside-attr-value cases).
-        newline = source.find("\n", next_open)
-        close = source.find(">>", next_open)
-        if close != -1 and (newline == -1 or close < newline):
-            token = source[next_open:close + 2]
-        else:
-            end = newline if newline != -1 else source_len
-            token = source[next_open:end]
-
-        hint: str | None = None
-        if token.startswith("<<include") and '\\"' in token:
-            hint = _QUOTING_HINT
-        raise _make_unknown_error(source, relative_path, next_open, token, hint=hint)
 
     if not nodes:
         nodes.append(Text(content="", line=1, col=1))
