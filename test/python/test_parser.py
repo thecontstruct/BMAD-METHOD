@@ -1,4 +1,4 @@
-"""Unit tests for bmad_compile.parser — passthrough + unknown-directive."""
+"""Unit tests for bmad_compile.parser — passthrough + unknown-directive + variable tokenization."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import unittest
 
 from src.scripts.bmad_compile import parser
 from src.scripts.bmad_compile.errors import UnknownDirectiveError
-from src.scripts.bmad_compile.parser import Include, Text, parse
+from src.scripts.bmad_compile.parser import Include, Text, VarCompile, VarRuntime, parse
 
 
 class TestPassthrough(unittest.TestCase):
@@ -157,11 +157,26 @@ class TestIncludeTokenization(unittest.TestCase):
         self.assertEqual(nodes[0].src, "a.template.md")
         self.assertEqual(nodes[1].src, "b.template.md")
 
-    def test_variable_syntax_passes_through_as_text(self) -> None:
-        """Story 1.3 owns `{{var}}` / `{var}` — must remain passthrough now."""
+    def test_story_12_text_passthrough_for_var_tokens_now_tokenizes(self) -> None:
+        """Story 1.3 activates {{var}} / {var} tokenization (was deferred in 1.2).
+
+        The old assertion — that the source parses to a single Text passthrough
+        node — is replaced by the new expectation that each token is emitted as
+        the correct AST node type.
+        """
         src = "{{foo}} and {bar} and {{self.x.y}}"
         nodes = parse(src, "t.md")
-        self.assertEqual(nodes, [Text(content=src, line=1, col=1)])
+        self.assertEqual(len(nodes), 5)
+        self.assertIsInstance(nodes[0], VarCompile)
+        self.assertEqual(nodes[0].name, "foo")
+        self.assertIsInstance(nodes[1], Text)
+        self.assertEqual(nodes[1].content, " and ")
+        self.assertIsInstance(nodes[2], VarRuntime)
+        self.assertEqual(nodes[2].name, "bar")
+        self.assertIsInstance(nodes[3], Text)
+        self.assertEqual(nodes[3].content, " and ")
+        self.assertIsInstance(nodes[4], VarCompile)
+        self.assertEqual(nodes[4].name, "self.x.y")
 
     def test_malformed_include_raises_unknown_directive_missing_path(self) -> None:
         with self.assertRaises(UnknownDirectiveError) as cm:
@@ -279,6 +294,157 @@ class TestParserValidation(unittest.TestCase):
         """R7-P2 follow-on: `\\t` is `\\x09`, a C0 control. Reject."""
         with self.assertRaises(UnknownDirectiveError):
             parse('<<include path="frag\ts/a.template.md">>', "t.md")
+
+
+class TestVariableTokenization(unittest.TestCase):
+    """Story 1.3 — {{var}} VarCompile and {var} VarRuntime tokenization."""
+
+    def test_var_compile_simple(self) -> None:
+        nodes = parse("{{user_name}}", "t.md")
+        self.assertEqual(len(nodes), 1)
+        self.assertIsInstance(nodes[0], VarCompile)
+        self.assertEqual(nodes[0].name, "user_name")
+        self.assertEqual(nodes[0].line, 1)
+        self.assertEqual(nodes[0].col, 1)
+
+    def test_var_compile_self_dotted(self) -> None:
+        nodes = parse("{{self.agent.name}}", "t.md")
+        self.assertEqual(len(nodes), 1)
+        self.assertIsInstance(nodes[0], VarCompile)
+        self.assertEqual(nodes[0].name, "self.agent.name")
+
+    def test_var_compile_self_deep_dotted(self) -> None:
+        nodes = parse("{{self.workflow.title}}", "t.md")
+        self.assertEqual(len(nodes), 1)
+        self.assertIsInstance(nodes[0], VarCompile)
+        self.assertEqual(nodes[0].name, "self.workflow.title")
+
+    def test_var_runtime_simple(self) -> None:
+        nodes = parse("{runtime_var}", "t.md")
+        self.assertEqual(len(nodes), 1)
+        self.assertIsInstance(nodes[0], VarRuntime)
+        self.assertEqual(nodes[0].name, "runtime_var")
+        self.assertEqual(nodes[0].line, 1)
+        self.assertEqual(nodes[0].col, 1)
+
+    def test_var_compile_line_col(self) -> None:
+        # {{user_name}} starts at line 3, col 5 (4 spaces of indent).
+        src = "line1\nline2\n    {{user_name}}"
+        nodes = parse(src, "t.md")
+        var_nodes = [n for n in nodes if isinstance(n, VarCompile)]
+        self.assertEqual(len(var_nodes), 1)
+        self.assertEqual(var_nodes[0].line, 3)
+        self.assertEqual(var_nodes[0].col, 5)
+
+    def test_var_runtime_line_col(self) -> None:
+        # {var} starts at line 2, col 3 (two spaces of indent).
+        src = "x\n  {var}"
+        nodes = parse(src, "t.md")
+        var_nodes = [n for n in nodes if isinstance(n, VarRuntime)]
+        self.assertEqual(len(var_nodes), 1)
+        self.assertEqual(var_nodes[0].line, 2)
+        self.assertEqual(var_nodes[0].col, 3)
+
+    def test_mixed_compile_and_runtime(self) -> None:
+        src = "Hello {{name}}! Your ref is {ref}."
+        nodes = parse(src, "t.md")
+        self.assertEqual(len(nodes), 5)
+        self.assertIsInstance(nodes[0], Text)
+        self.assertEqual(nodes[0].content, "Hello ")
+        self.assertIsInstance(nodes[1], VarCompile)
+        self.assertEqual(nodes[1].name, "name")
+        self.assertIsInstance(nodes[2], Text)
+        self.assertEqual(nodes[2].content, "! Your ref is ")
+        self.assertIsInstance(nodes[3], VarRuntime)
+        self.assertEqual(nodes[3].name, "ref")
+        self.assertIsInstance(nodes[4], Text)
+        self.assertEqual(nodes[4].content, ".")
+
+    def test_triple_brace_compile_flanked(self) -> None:
+        # {{{foo}}} → [Text("{"), VarCompile("foo"), Text("}")]
+        nodes = parse("{{{foo}}}", "t.md")
+        self.assertEqual(len(nodes), 3)
+        self.assertIsInstance(nodes[0], Text)
+        self.assertEqual(nodes[0].content, "{")
+        self.assertIsInstance(nodes[1], VarCompile)
+        self.assertEqual(nodes[1].name, "foo")
+        self.assertIsInstance(nodes[2], Text)
+        self.assertEqual(nodes[2].content, "}")
+
+    def test_single_brace_not_followed_by_ident_is_text(self) -> None:
+        for src in ("{ }", "{123}", "{}"):
+            with self.subTest(src=src):
+                nodes = parse(src, "t.md")
+                # Must produce only Text nodes — no VarRuntime, no error.
+                for n in nodes:
+                    self.assertIsInstance(n, Text)
+                full = "".join(n.content for n in nodes)
+                self.assertEqual(full, src)
+
+    def test_malformed_double_brace_leading_digit_raises(self) -> None:
+        with self.assertRaises(UnknownDirectiveError) as cm:
+            parse("{{123var}}", "t.md")
+        err = cm.exception
+        self.assertEqual(err.code, "UNKNOWN_DIRECTIVE")
+        self.assertEqual(err.line, 1)
+        self.assertEqual(err.col, 1)
+
+    def test_malformed_double_brace_empty_raises(self) -> None:
+        with self.assertRaises(UnknownDirectiveError) as cm:
+            parse("{{}}", "t.md")
+        self.assertEqual(cm.exception.code, "UNKNOWN_DIRECTIVE")
+
+    def test_malformed_double_brace_trailing_dot_raises(self) -> None:
+        with self.assertRaises(UnknownDirectiveError) as cm:
+            parse("{{self.}}", "t.md")
+        self.assertEqual(cm.exception.code, "UNKNOWN_DIRECTIVE")
+
+    def test_unterminated_double_brace_raises(self) -> None:
+        with self.assertRaises(UnknownDirectiveError) as cm:
+            parse("{{unclosed", "t.md")
+        self.assertEqual(cm.exception.code, "UNKNOWN_DIRECTIVE")
+
+    def test_malformed_double_brace_hint_lists_four_constructs(self) -> None:
+        """AC 4: hint must name the four valid constructs.
+
+        R4 patch: prior tests asserted only the error code; a regression that
+        dropped one of the four bullets would not be caught.
+        """
+        with self.assertRaises(UnknownDirectiveError) as cm:
+            parse("{{123bad}}", "t.md")
+        hint = cm.exception.hint or ""
+        self.assertIn("<<include", hint)
+        self.assertIn("{{var_name}}", hint)
+        self.assertIn("{{self.", hint)
+        self.assertIn("{var_name}", hint)
+
+    def test_var_compile_and_include_in_same_source(self) -> None:
+        src = '{{name}} <<include path="fragments/x.template.md">>'
+        nodes = parse(src, "t.md")
+        self.assertEqual(len(nodes), 3)
+        self.assertIsInstance(nodes[0], VarCompile)
+        self.assertEqual(nodes[0].name, "name")
+        self.assertIsInstance(nodes[1], Text)
+        self.assertEqual(nodes[1].content, " ")
+        self.assertIsInstance(nodes[2], Include)
+        self.assertEqual(nodes[2].src, "fragments/x.template.md")
+
+    def test_existing_passthrough_suite_unchanged(self) -> None:
+        """All existing parser behaviors from Stories 1.1 and 1.2 still hold."""
+        # Plain text round-trips.
+        src = "# Heading\n\nParagraph.\n"
+        nodes = parse(src, "t.md")
+        self.assertEqual(len(nodes), 1)
+        self.assertIsInstance(nodes[0], Text)
+        self.assertEqual(nodes[0].content, src)
+
+        # Empty input still yields a single empty Text node.
+        self.assertEqual(parse("", "e.md"), [Text(content="", line=1, col=1)])
+
+        # Include still produces an Include node.
+        inc_nodes = parse('<<include path="f.template.md">>', "t.md")
+        self.assertEqual(len(inc_nodes), 1)
+        self.assertIsInstance(inc_nodes[0], Include)
 
 
 class TestParserPurity(unittest.TestCase):

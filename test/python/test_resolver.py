@@ -13,6 +13,8 @@ from src.scripts.bmad_compile.resolver import (
     CompileCache,
     ResolveContext,
     ResolvedFragment,
+    ResolvedValue,
+    VariableScope,
     resolve,
 )
 
@@ -34,6 +36,7 @@ def _context(
     override_root: Path | None = None,
     target_ide: str | None = None,
     root_resolved_from: str = "base",
+    var_scope: VariableScope | None = None,
 ) -> ResolveContext:
     skill_dir = scenario_root.joinpath(*skill_subdir)
     module_roots = {
@@ -55,6 +58,7 @@ def _context(
         ),
         target_ide=target_ide,
         root_resolved_from=root_resolved_from,
+        var_scope=var_scope,
     )
 
 
@@ -73,6 +77,21 @@ def _render(nodes: list[parser.AstNode]) -> str:
             raise AssertionError(
                 f"_render received non-Text node {type(n).__name__} — "
                 "resolver.resolve() should have inlined every Include"
+            )
+    return "".join(parts)
+
+
+def _render_v13(nodes: list[parser.AstNode]) -> str:
+    """Story 1.3 render helper: handles Text and VarRuntime passthrough."""
+    parts: list[str] = []
+    for n in nodes:
+        if isinstance(n, parser.Text):
+            parts.append(n.content)
+        elif isinstance(n, parser.VarRuntime):
+            parts.append("{" + n.name + "}")
+        else:
+            raise AssertionError(
+                f"_render_v13 received unexpected node {type(n).__name__}"
             )
     return "".join(parts)
 
@@ -780,6 +799,391 @@ class TestTransitiveAndEscape(unittest.TestCase):
             leaked = [r for r in dep if r.src == "../leaked.template.md"]
             self.assertEqual(len(leaked), 1)
             self.assertIn("..", leaked[0].resolved_path.parts)
+
+
+class TestVariableResolution(unittest.TestCase):
+    """Story 1.3 — VariableScope, VarCompile resolution, VarRuntime passthrough."""
+
+    def test_var_compile_resolved_from_yaml_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = str(root / "config.yaml")
+            _write(root / "config.yaml", "user_name: Shado\n")
+            var_scope = VariableScope.build(yaml_config_path=yaml_path)
+            src = "Hello {{user_name}}!"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "Hello Shado!")
+            # AC 5: provenance for YAML-sourced values.
+            rv = var_scope.resolve("user_name")
+            self.assertEqual(rv.source, "bmad-config")
+            self.assertEqual(rv.value, "Shado")
+            self.assertIsNone(rv.toml_layer)
+
+    def test_var_runtime_passes_through(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "Ref: {ref_id}."
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "Ref: {ref_id}.")
+
+    def test_unresolved_variable_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            var_scope = VariableScope.build()
+            src = "{{unknown_var}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            with self.assertRaises(errors.UnresolvedVariableError) as cm:
+                resolve(ast, ctx, CompileCache(), root_source=src)
+            err = cm.exception
+            self.assertEqual(err.code, "UNRESOLVED_VARIABLE")
+            self.assertEqual(err.line, 1)
+            self.assertEqual(err.col, 1)
+            # hint must mention the variable name
+            self.assertIn("unknown_var", err.hint or "")
+
+    def test_self_var_resolved_from_toml(self) -> None:
+        var_scope = VariableScope.build(
+            toml_layers=[("defaults", {"agent": {"name": "PM Agent"}})]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "Agent: {{self.agent.name}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "Agent: PM Agent")
+            # AC 8: provenance — source="toml", toml_layer="defaults".
+            rv = var_scope.resolve("self.agent.name")
+            self.assertEqual(rv.source, "toml")
+            self.assertEqual(rv.toml_layer, "defaults")
+            self.assertEqual(rv.value, "PM Agent")
+
+    def test_toml_cascade_team_wins_over_defaults(self) -> None:
+        var_scope = VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": "PM Agent"}}),
+                ("team", {"agent": {"name": "Product Manager"}}),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "{{self.agent.name}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "Product Manager")
+            # AC 9: provenance reflects winning layer, not just merged value.
+            rv = var_scope.resolve("self.agent.name")
+            self.assertEqual(rv.toml_layer, "team")
+
+    def test_toml_cascade_user_wins_over_team(self) -> None:
+        var_scope = VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": "Default"}}),
+                ("team", {"agent": {"name": "Team"}}),
+                ("user", {"agent": {"name": "User"}}),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "{{self.agent.name}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "User")
+            # AC 9: provenance reflects highest-priority layer.
+            rv = var_scope.resolve("self.agent.name")
+            self.assertEqual(rv.toml_layer, "user")
+
+    def test_toml_cascade_remove_team_reverts_to_defaults(self) -> None:
+        """AC 9 second case: removing the team layer causes the defaults
+        value to win, with toml_layer="defaults" in provenance."""
+        # With team layer present, team wins.
+        var_scope_with_team = VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": "PM Agent"}}),
+                ("team", {"agent": {"name": "Product Manager"}}),
+            ]
+        )
+        rv = var_scope_with_team.resolve("self.agent.name")
+        self.assertEqual(rv.value, "Product Manager")
+        self.assertEqual(rv.toml_layer, "team")
+
+        # Removing the team layer reverts to defaults.
+        var_scope_no_team = VariableScope.build(
+            toml_layers=[("defaults", {"agent": {"name": "PM Agent"}})]
+        )
+        rv = var_scope_no_team.resolve("self.agent.name")
+        self.assertEqual(rv.value, "PM Agent")
+        self.assertEqual(rv.toml_layer, "defaults")
+
+    def test_local_scope_wins_over_yaml_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = str(root / "config.yaml")
+            _write(root / "config.yaml", "speaker: Global\n")
+            var_scope = VariableScope.build(yaml_config_path=yaml_path)
+            # Fragment body uses {{speaker}}, include prop passes "Local".
+            skill = root / "core" / "skill1"
+            _write(
+                skill / "fragments" / "intro.template.md",
+                "{{speaker}} says hi.",
+            )
+            src_text = '<<include path="fragments/intro.template.md" speaker="Local">>'
+            ast = parser.parse(src_text, "skill1.template.md")
+            ctx = _context(root, var_scope=var_scope)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src_text)
+            self.assertEqual(_render_v13(flat), "Local says hi.")
+
+    def test_local_scope_does_not_affect_self_vars(self) -> None:
+        # Weird edge case: even if local_scope contains a "self.*" key
+        # (artificially constructed — include props cannot have dots in names),
+        # self.* resolution must still use TOML cascade, not local_scope.
+        var_scope = VariableScope.build(
+            toml_layers=[("defaults", {"agent": {"name": "TOML Name"}})]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "{{self.agent.name}}"
+            ast = parser.parse(src, "t.md")
+            # Manually inject a self.* entry into local_scope.
+            ctx = ResolveContext(
+                skill_dir=PurePosixPath((root / "core" / "skill1").as_posix()),
+                module_roots={"core": PurePosixPath((root / "core").as_posix())},
+                current_module="core",
+                local_scope=(("self.agent.name", "SCOPE"),),
+                var_scope=var_scope,
+            )
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            # self.* must use TOML, not local_scope.
+            self.assertEqual(_render_v13(flat), "TOML Name")
+
+    def test_var_compile_resolved_within_fragment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = str(root / "config.yaml")
+            _write(root / "config.yaml", "user_name: World\n")
+            var_scope = VariableScope.build(yaml_config_path=yaml_path)
+            skill = root / "core" / "skill1"
+            _write(skill / "fragments" / "frag.template.md", "Hello {{user_name}}!")
+            src_text = '<<include path="fragments/frag.template.md">>'
+            ast = parser.parse(src_text, "skill1.template.md")
+            ctx = _context(root, var_scope=var_scope)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src_text)
+            self.assertEqual(_render_v13(flat), "Hello World!")
+
+    def test_var_scope_none_raises_on_var_compile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "{{some_var}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root)  # var_scope=None
+            with self.assertRaises(errors.UnresolvedVariableError):
+                resolve(ast, ctx, CompileCache(), root_source=src)
+
+    def test_var_scope_none_ok_when_no_var_compile_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "Plain text only."
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root)  # var_scope=None
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "Plain text only.")
+
+    def test_available_names_in_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = str(root / "config.yaml")
+            _write(root / "config.yaml", "known_var: value\n")
+            var_scope = VariableScope.build(yaml_config_path=yaml_path)
+            src = "{{missing_var}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            with self.assertRaises(errors.UnresolvedVariableError) as cm:
+                resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertIn("known_var", cm.exception.hint or "")
+
+    def test_self_var_toml_integer_converted_to_string(self) -> None:
+        var_scope = VariableScope.build(
+            toml_layers=[("defaults", {"version": 3})]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "v{{self.version}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "v3")
+
+    def test_parse_flat_yaml_basic_key_value(self) -> None:
+        from src.scripts.bmad_compile.resolver import _parse_flat_yaml
+        result = _parse_flat_yaml("user_name: Shado\n")
+        self.assertEqual(result, {"user_name": "Shado"})
+
+    def test_parse_flat_yaml_skips_comments(self) -> None:
+        from src.scripts.bmad_compile.resolver import _parse_flat_yaml
+        result = _parse_flat_yaml("# comment\nkey: val\n")
+        self.assertNotIn("# comment", result)
+        self.assertEqual(result["key"], "val")
+
+    def test_parse_flat_yaml_skips_empty_lines(self) -> None:
+        from src.scripts.bmad_compile.resolver import _parse_flat_yaml
+        result = _parse_flat_yaml("\n\nkey: val\n\n")
+        self.assertEqual(result, {"key": "val"})
+
+    def test_parse_flat_yaml_skips_indented_lines(self) -> None:
+        from src.scripts.bmad_compile.resolver import _parse_flat_yaml
+        result = _parse_flat_yaml("key: val\n  nested: ignored\n")
+        self.assertNotIn("nested", result)
+        self.assertEqual(result["key"], "val")
+
+    def test_parse_flat_yaml_strips_quotes(self) -> None:
+        from src.scripts.bmad_compile.resolver import _parse_flat_yaml
+        result = _parse_flat_yaml('key: "quoted value"\n')
+        self.assertEqual(result["key"], "quoted value")
+
+    def test_parse_flat_yaml_lone_quote_not_stripped(self) -> None:
+        """Round-1 patch: len>=2 guard prevents single-char quote being stripped to ''."""
+        from src.scripts.bmad_compile.resolver import _parse_flat_yaml
+        with self.subTest("lone double-quote preserved"):
+            self.assertEqual(_parse_flat_yaml('key: "\n'), {"key": '"'})
+        with self.subTest("lone single-quote preserved"):
+            self.assertEqual(_parse_flat_yaml("key: '\n"), {"key": "'"})
+        with self.subTest("two-double-quotes strip to empty string"):
+            self.assertEqual(_parse_flat_yaml('key: ""\n'), {"key": ""})
+        with self.subTest("mixed outer double strip, inner single remain"):
+            self.assertEqual(_parse_flat_yaml("key: \"'val'\"\n"), {"key": "'val'"})
+
+    def test_parse_flat_yaml_strips_leading_utf8_bom(self) -> None:
+        """Round-3 patch: a leading UTF-8 BOM (\\ufeff) is stripped before parsing.
+
+        Without this, the first key would be stored as '\\ufeffkey' and every
+        '{{key}}' lookup would silently fail. This is common when YAML is
+        authored on Windows in Notepad or saved with a BOM.
+        """
+        from src.scripts.bmad_compile.resolver import _parse_flat_yaml
+        with self.subTest("BOM at start is stripped, first key parses cleanly"):
+            result = _parse_flat_yaml("\ufeffuser_name: Shado\n")
+            self.assertEqual(result, {"user_name": "Shado"})
+            self.assertNotIn("\ufeffuser_name", result)
+        with self.subTest("BOM-only input parses to empty dict"):
+            self.assertEqual(_parse_flat_yaml("\ufeff"), {})
+        with self.subTest("no BOM still works (no double-strip)"):
+            self.assertEqual(_parse_flat_yaml("k: v\n"), {"k": "v"})
+
+    def test_self_var_toml_bool_serialized_lowercase(self) -> None:
+        """Round-1 patch: TOML booleans serialize as lowercase 'true'/'false'."""
+        var_scope = VariableScope.build(
+            toml_layers=[("defaults", {"flags": {"enabled": True, "debug": False}})]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for var, expected in (
+                ("self.flags.enabled", "true"),
+                ("self.flags.debug", "false"),
+            ):
+                with self.subTest(var=var):
+                    src = f"{{{{{var}}}}}"
+                    ast = parser.parse(src, "t.md")
+                    ctx = _context(root, var_scope=var_scope)
+                    flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+                    self.assertEqual(_render_v13(flat), expected)
+        # Integer 1 must NOT serialize as "true" (bool subclass check).
+        var_scope_int = VariableScope.build(
+            toml_layers=[("defaults", {"count": 1})]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "{{self.count}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope_int)
+            flat, _ = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render_v13(flat), "1")
+
+    def test_resolved_value_hash_is_well_formed_sha256(self) -> None:
+        """Round-3 patch: value_hash is computed via io.hash_text and must be
+        a 64-char lowercase-hex SHA-256 of the stringified value. Story 1.5
+        will read this field from ResolvedValue directly; a regression that
+        nulls or mis-hashes it must surface here, not at lockfile-write time."""
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = str(root / "config.yaml")
+            _write(root / "config.yaml", "user_name: Shado\n")
+            var_scope = VariableScope.build(
+                yaml_config_path=yaml_path,
+                toml_layers=[("defaults", {"version": 3, "flags": {"on": True}})],
+            )
+            for name, expected_value in (
+                ("user_name", "Shado"),
+                ("self.version", "3"),
+                ("self.flags.on", "true"),
+            ):
+                with self.subTest(name=name):
+                    rv = var_scope.resolve(name)
+                    self.assertIsNotNone(rv.value_hash)
+                    self.assertEqual(len(rv.value_hash), 64)
+                    int(rv.value_hash, 16)  # well-formed hex (raises otherwise)
+                    self.assertEqual(
+                        rv.value_hash,
+                        hashlib.sha256(expected_value.encode()).hexdigest(),
+                    )
+
+    def test_unresolved_self_var_hint_shows_only_self_keys(self) -> None:
+        """Round-1 patch: self.* miss hint shows only self.* keys, not YAML keys."""
+        var_scope = VariableScope.build(
+            yaml_config_path=None,
+            toml_layers=[("defaults", {"agent": {"name": "Bot"}})],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "{{self.agent.missing}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            with self.assertRaises(errors.UnresolvedVariableError) as cm:
+                resolve(ast, ctx, CompileCache(), root_source=src)
+            hint = cm.exception.hint or ""
+            self.assertIn("self.agent.name", hint)
+            self.assertIn("customize.toml", hint)
+
+    def test_unresolved_non_self_var_hint_excludes_self_keys(self) -> None:
+        """Round-1 patch: non-self.* miss hint must NOT list self.* names."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = str(Path(tmp) / "config.yaml")
+            _write(Path(tmp) / "config.yaml", "known_var: x\n")
+            var_scope = VariableScope.build(
+                yaml_config_path=yaml_path,
+                toml_layers=[("defaults", {"agent": {"name": "Bot"}})],
+            )
+            src = "{{missing_var}}"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root, var_scope=var_scope)
+            with self.assertRaises(errors.UnresolvedVariableError) as cm:
+                resolve(ast, ctx, CompileCache(), root_source=src)
+            hint = cm.exception.hint or ""
+            self.assertIn("known_var", hint)
+            # self.* names from TOML scope must not appear in the available list.
+            self.assertNotIn("self.agent.name", hint)
+            # AC 7: hint must direct the author to _bmad/core/config.yaml.
+            # R4 patch: prior tests checked only available-name listing.
+            self.assertIn("_bmad/core/config.yaml", hint)
+
+    def test_existing_resolver_suite_unchanged(self) -> None:
+        """Smoke check: plain text still resolves without errors."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = "plain text"
+            ast = parser.parse(src, "t.md")
+            ctx = _context(root)
+            flat, dep = resolve(ast, ctx, CompileCache(), root_source=src)
+            self.assertEqual(_render(flat), "plain text")
+            self.assertEqual(len(dep), 1)
 
 
 if __name__ == "__main__":
