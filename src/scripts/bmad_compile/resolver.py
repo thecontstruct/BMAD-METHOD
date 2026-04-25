@@ -80,7 +80,7 @@ class ResolvedValue:
     """Provenance record for a resolved variable value."""
     value: str
     source: str          # "bmad-config" | "toml" | "local-scope" | etc.
-    source_path: str | None = None        # POSIX relative path to the source file
+    source_path: str | None = None        # absolute filesystem path (TOML: winning-layer file; YAML: config file path; lockfile.py normalizes to relative on write)
     toml_layer: str | None = None         # "defaults" | "team" | "user"
     contributing_paths: list[str] | None = None
     value_hash: str | None = None         # SHA-256 hex of value.encode()
@@ -139,17 +139,20 @@ def _flatten_toml(
     layer_name: str,
     priority_map: dict[str, str],
     result: dict[str, ResolvedValue],
-    source_file: str = "",
+    layer_paths: dict[str, str] | None = None,  # layer_name → absolute_path
 ) -> None:
     """Recursively flatten a merged TOML dict into `self.<dotted.path>` entries."""
+    _paths = layer_paths or {}
     for k, v in d.items():
         dotted = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
-            _flatten_toml(v, dotted, layer_name, priority_map, result, source_file)
+            _flatten_toml(v, dotted, layer_name, priority_map, result, _paths)
         elif isinstance(v, list):
+            full_key = f"self.{dotted}"
+            winning_layer = priority_map.get(full_key, layer_name)
             raise errors.UnknownDirectiveError(
                 f"self.* variable '{dotted}' resolves to a TOML array, not a scalar",
-                file=source_file or None,
+                file=_paths.get(winning_layer) or None,
                 hint=(
                     f"self.* variable path '{dotted}' resolves to a TOML array, "
                     "not a scalar — use a more specific dotted path"
@@ -164,6 +167,7 @@ def _flatten_toml(
             result[full_key] = ResolvedValue(
                 value=str_val,
                 source="toml",
+                source_path=_paths.get(winning_layer) or None,
                 toml_layer=winning_layer,
                 value_hash=io.hash_text(str_val),
             )
@@ -245,10 +249,11 @@ class VariableScope:
         if toml_layers:
             priority_map = _build_priority_map(toml_layers)
             merged = toml_merge.merge_layers(*[d for _, d in toml_layers])
-            source_file = ""
+            _layer_paths: dict[str, str] = {}
             if toml_layer_paths:
-                source_file = toml_layer_paths[-1]
-            _flatten_toml(merged, "", "", priority_map, table, source_file=source_file)
+                for (ln, _), lp in zip(toml_layers, toml_layer_paths):
+                    _layer_paths[ln] = lp
+            _flatten_toml(merged, "", "", priority_map, table, _layer_paths or None)
 
         return cls(table)
 
@@ -571,7 +576,7 @@ def _make_include_token(node: parser.Include) -> str:
         return node.raw_token
     # Legacy fallback: reconstruct from sorted props (pre-Story 1.4 Include nodes with raw_token="")
     parts = [f'<<include path="{node.src}"']
-    for name, value in node.props:
+    for name, value in sorted(node.props):
         parts.append(f' {name}="{value}"')
     parts.append(">>")
     return "".join(parts)
