@@ -116,6 +116,88 @@ class TestFindTemplateDirectoryFilter(unittest.TestCase):
             self.assertEqual(out.read_text(encoding="utf-8"), "fallback body")
 
 
+class TestVariantSelection(unittest.TestCase):
+    """Story 1.4 — target_ide wiring and variant-aware root-template selection."""
+
+    def test_compile_target_ide_cursor_selects_cursor_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.cursor.template.md", "cursor body")
+            _write(skill / "skill1.template.md", "universal body")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install, target_ide="cursor")
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "cursor body")
+
+    def test_compile_target_ide_none_selects_universal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.cursor.template.md", "cursor body")
+            _write(skill / "skill1.template.md", "universal body")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install, target_ide=None)
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "universal body")
+
+    def test_compile_target_ide_unknown_falls_back_to_universal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.cursor.template.md", "cursor body")
+            _write(skill / "skill1.template.md", "universal body")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install, target_ide="vscode")
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "universal body")
+
+    def test_compile_missing_template_raises_missing_fragment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            skill.mkdir(parents=True)  # no *.template.md
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            with self.assertRaises(errors.MissingFragmentError):
+                engine.compile_skill(skill, install)
+
+    def test_compile_resolves_user_only_toml_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.template.md", "Agent: {{self.agent.name}}")
+            # No customize.toml defaults; user TOML only via override root.
+            override = scenario / "_bmad" / "custom"
+            _write(override / "skill1.user.toml", '[agent]\nname = "UserAgent"\n')
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "Agent: UserAgent")
+
+    def test_compile_resolves_team_only_toml_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.template.md", "Agent: {{self.agent.name}}")
+            # Team TOML only via override root — no user layer.
+            override = scenario / "_bmad" / "custom"
+            _write(override / "skill1.toml", '[agent]\nname = "TeamAgent"\n')
+
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "Agent: TeamAgent")
+
+
 class TestVariableScopeWiring(unittest.TestCase):
     """Story 1.3 — VariableScope built and wired into compile pipeline."""
 

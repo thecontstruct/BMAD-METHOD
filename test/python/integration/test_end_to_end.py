@@ -307,5 +307,99 @@ class TestVariableResolutionFixtures(unittest.TestCase):
             self.assertEqual(list(Path(tmp).rglob("SKILL.md")), [])
 
 
+VARIANT_FIXTURES = COMPILE_FIXTURES / "variant-selection"
+VARIANT_SKILL = VARIANT_FIXTURES / "core" / "variant-skill"
+
+
+def _run_cli_tools(skill: Path, install_dir: Path, tools: str | None = None) -> subprocess.CompletedProcess:
+    cmd = [
+        sys.executable,
+        str(COMPILE_SCRIPT),
+        "--skill", str(skill),
+        "--install-dir", str(install_dir),
+    ]
+    if tools is not None:
+        cmd += ["--tools", tools]
+    return subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+
+
+class TestVariantSelectionFixtures(unittest.TestCase):
+    """Story 1.4 — IDE variant selection end-to-end (AC 1, 2, 3, 9)."""
+
+    def _expected(self, name: str) -> bytes:
+        return (VARIANT_FIXTURES / "expected" / name).read_bytes()
+
+    def test_claudecode_variant_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(VARIANT_SKILL, Path(tmp), tools="claudecode")
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            out = Path(tmp) / "variant-skill" / "SKILL.md"
+            self.assertEqual(out.read_bytes(), self._expected("claudecode-SKILL.md"))
+
+    def test_cursor_variant_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(VARIANT_SKILL, Path(tmp), tools="cursor")
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            out = Path(tmp) / "variant-skill" / "SKILL.md"
+            self.assertEqual(out.read_bytes(), self._expected("cursor-SKILL.md"))
+
+    def test_no_tools_uses_universal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(VARIANT_SKILL, Path(tmp), tools=None)
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            out = Path(tmp) / "variant-skill" / "SKILL.md"
+            self.assertEqual(out.read_bytes(), self._expected("universal-SKILL.md"))
+
+    def test_unknown_tools_falls_back_to_universal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(VARIANT_SKILL, Path(tmp), tools="vscode")
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            out = Path(tmp) / "variant-skill" / "SKILL.md"
+            self.assertEqual(out.read_bytes(), self._expected("universal-SKILL.md"))
+
+    def test_missing_root_template_exits_nonzero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_skill, tempfile.TemporaryDirectory() as tmp_out:
+            # Skill dir with no *.template.md at all — just a scenario layout
+            skill_dir = Path(tmp_skill) / "core" / "empty-skill"
+            skill_dir.mkdir(parents=True)
+            result = _run_cli_tools(skill_dir, Path(tmp_out))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("MISSING_FRAGMENT", result.stderr)
+            self.assertEqual(list(Path(tmp_out).rglob("SKILL.md")), [])
+
+    def test_uppercase_tools_normalized_to_lowercase(self) -> None:
+        # AC 4: --tools Cursor must be equivalent to --tools cursor (CLI lowercases).
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(VARIANT_SKILL, Path(tmp), tools="Cursor")
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            out = Path(tmp) / "variant-skill" / "SKILL.md"
+            self.assertEqual(out.read_bytes(), self._expected("cursor-SKILL.md"))
+
+    def test_empty_string_tools_falls_back_to_universal(self) -> None:
+        # AC 4: --tools "" must be treated as None (no target IDE).
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(VARIANT_SKILL, Path(tmp), tools="")
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            out = Path(tmp) / "variant-skill" / "SKILL.md"
+            self.assertEqual(out.read_bytes(), self._expected("universal-SKILL.md"))
+
+
+class TestCliErrorBoundary(unittest.TestCase):
+    """Story 1.4 AC 6 — CLI catches raw OS / encoding exceptions."""
+
+    def test_cli_handles_unicode_decode_error_on_invalid_utf8(self) -> None:
+        # AC 6: invalid UTF-8 in a template surfaces as `read error:` (no traceback, exit 1).
+        with tempfile.TemporaryDirectory() as tmp_skill, tempfile.TemporaryDirectory() as tmp_out:
+            skill_dir = Path(tmp_skill) / "core" / "bad-utf8"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "bad-utf8.template.md").write_bytes(b"\xff\xfe invalid utf-8 \x80\x81")
+            result = _run_cli(skill_dir, Path(tmp_out))
+            self.assertEqual(result.returncode, 1, msg=f"stderr={result.stderr!r}")
+            self.assertIn("read error:", result.stderr)
+            self.assertIn("UnicodeDecodeError", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertEqual(list(Path(tmp_out).rglob("SKILL.md")), [])
+
+
 if __name__ == "__main__":
     unittest.main()

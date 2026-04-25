@@ -24,51 +24,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from . import io, parser, resolver, toml_merge
-
-
-def _find_template(skill_dir):
-    """Pick the template source from a skill directory.
-
-    Preference order (deterministic):
-    1. `<skill_basename>.template.md`  (conventional single-file skill)
-    2. First `*.template.md` by sorted POSIX name (fallback)
-
-    Returns the POSIX-style path object from `io.list_dir_sorted`.
-    """
-    skill_posix = io.to_posix(skill_dir)
-    basename = skill_posix.name
-    preferred_name = f"{basename}.template.md"
-
-    entries = io.list_dir_sorted(skill_dir)
-    # `is_file` filter mirrors the resolver tier probes (R4/R5/R6): a
-    # subdirectory whose name ends in `.template.md` would otherwise be
-    # selected here and crash later in `read_template` with a raw
-    # `IsADirectoryError` outside the `CompilerError` taxonomy.
-    templates = [
-        e for e in entries
-        if e.name.endswith(".template.md") and io.is_file(str(e))
-    ]
-
-    for entry in templates:
-        if entry.name == preferred_name:
-            return entry
-
-    if len(templates) == 1:
-        return templates[0]
-
-    if templates:
-        names = [e.name for e in templates]
-        raise FileNotFoundError(
-            f"skill directory '{skill_dir}' contains {len(templates)} "
-            f"'*.template.md' files with no preferred match "
-            f"('{preferred_name}'): {names!r} — "
-            f"rename one to '{preferred_name}' to disambiguate"
-        )
-
-    raise FileNotFoundError(
-        f"no '*.template.md' found in skill directory '{skill_dir}'"
-    )
+from . import errors, io, parser, resolver, toml_merge, variants
 
 
 def _render(nodes: Iterable[object]) -> str:
@@ -92,7 +48,7 @@ def _render(nodes: Iterable[object]) -> str:
     return "".join(parts)
 
 
-def compile_skill(skill_dir, install_dir) -> None:
+def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None:
     """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
 
     Staging discipline: parse + resolve + render fully in memory. Only on
@@ -167,8 +123,28 @@ def compile_skill(skill_dir, install_dir) -> None:
         # `resolver._relative_file` for nested errors under the override.
         relative_path = str(template_path.relative_to(override_root))
     else:
-        template_path = _find_template(skill_dir)
-        relative_path = f"{basename}/{template_path.name}"
+        entries = io.list_dir_sorted(skill_dir)
+        all_templates = [
+            e for e in entries
+            if e.name.endswith(".template.md") and io.is_file(str(e))
+        ]
+        template_entry = variants.select_variant(all_templates, target_ide)
+        if template_entry is None:
+            tried = [str(skill_posix / f"{basename}.{ide}.template.md") for ide in variants.KNOWN_IDES]
+            tried.append(str(skill_posix / f"{basename}.template.md"))
+            hint = (
+                f"no '*.template.md' found in '{skill_dir}'. "
+                f"Tried: {tried!r}. "
+                f"Create '{basename}.template.md' in the skill directory."
+            )
+            raise errors.MissingFragmentError(
+                "no '*.template.md' found in skill directory",
+                file=str(skill_posix),
+                line=None, col=None,
+                hint=hint,
+            )
+        template_path = template_entry
+        relative_path = f"{basename}/{template_entry.name}"
 
     source = io.read_template(str(template_path))
     nodes = parser.parse(source, relative_path)
@@ -183,20 +159,25 @@ def compile_skill(skill_dir, install_dir) -> None:
 
     # Build self.* TOML layer stack (lowest → highest: defaults → team → user).
     _toml_layers: list[tuple[str, dict]] = []
+    _toml_layer_paths: list[str] = []
     _customize_toml = skill_posix / "customize.toml"
     if io.is_file(str(_customize_toml)):
         _toml_layers.append(("defaults", toml_merge.load_toml_file(str(_customize_toml))))
+        _toml_layer_paths.append(str(_customize_toml))
     if override_root is not None:
         _team_toml = override_root / f"{basename}.toml"
         if io.is_file(str(_team_toml)):
             _toml_layers.append(("team", toml_merge.load_toml_file(str(_team_toml))))
+            _toml_layer_paths.append(str(_team_toml))
         _user_toml = override_root / f"{basename}.user.toml"
         if io.is_file(str(_user_toml)):
             _toml_layers.append(("user", toml_merge.load_toml_file(str(_user_toml))))
+            _toml_layer_paths.append(str(_user_toml))
 
     var_scope = resolver.VariableScope.build(
         yaml_config_path=yaml_config_path,
         toml_layers=_toml_layers or None,
+        toml_layer_paths=_toml_layer_paths or None,
     )
 
     context = resolver.ResolveContext(
@@ -204,7 +185,7 @@ def compile_skill(skill_dir, install_dir) -> None:
         module_roots=module_roots,
         current_module=current_module,
         override_root=override_root,
-        target_ide=None,  # Story 1.4 wires --tools
+        target_ide=target_ide,
         root_resolved_from=root_resolved_from,
         var_scope=var_scope,
     )
