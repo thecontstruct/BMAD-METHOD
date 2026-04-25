@@ -139,15 +139,17 @@ def _flatten_toml(
     layer_name: str,
     priority_map: dict[str, str],
     result: dict[str, ResolvedValue],
+    source_file: str = "",
 ) -> None:
     """Recursively flatten a merged TOML dict into `self.<dotted.path>` entries."""
     for k, v in d.items():
         dotted = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
-            _flatten_toml(v, dotted, layer_name, priority_map, result)
+            _flatten_toml(v, dotted, layer_name, priority_map, result, source_file)
         elif isinstance(v, list):
             raise errors.UnknownDirectiveError(
                 f"self.* variable '{dotted}' resolves to a TOML array, not a scalar",
+                file=source_file or None,
                 hint=(
                     f"self.* variable path '{dotted}' resolves to a TOML array, "
                     "not a scalar — use a more specific dotted path"
@@ -213,7 +215,8 @@ class VariableScope:
         *,
         yaml_config_path: str | None = None,
         toml_layers: list[tuple[str, dict]] | None = None,
-    ) -> VariableScope:
+        toml_layer_paths: list[str] | None = None,
+    ) -> "VariableScope":
         """Build a VariableScope from config sources.
 
         yaml_config_path: path to a flat YAML config file (bmad-config tier).
@@ -221,6 +224,8 @@ class VariableScope:
         toml_layers: ordered list of (layer_name, parsed_dict) from lowest to
                     highest priority: [("defaults", ...), ("team", ...), ("user", ...)].
                     None = no TOML config.
+        toml_layer_paths: parallel list of file paths for toml_layers (same order).
+                          None = no path attribution on TOML errors.
         """
         table: dict[str, ResolvedValue] = {}
 
@@ -240,7 +245,10 @@ class VariableScope:
         if toml_layers:
             priority_map = _build_priority_map(toml_layers)
             merged = toml_merge.merge_layers(*[d for _, d in toml_layers])
-            _flatten_toml(merged, "", "", priority_map, table)
+            source_file = ""
+            if toml_layer_paths:
+                source_file = toml_layer_paths[-1]
+            _flatten_toml(merged, "", "", priority_map, table, source_file=source_file)
 
         return cls(table)
 
@@ -559,6 +567,9 @@ _MAX_INCLUDE_DEPTH = 200
 
 def _make_include_token(node: parser.Include) -> str:
     """Reconstruct the full directive text including authored props."""
+    if node.raw_token:
+        return node.raw_token
+    # Legacy fallback: reconstruct from sorted props (pre-Story 1.4 Include nodes with raw_token="")
     parts = [f'<<include path="{node.src}"']
     for name, value in node.props:
         parts.append(f' {name}="{value}"')
