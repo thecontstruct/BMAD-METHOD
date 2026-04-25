@@ -1185,6 +1185,43 @@ class TestVariableResolution(unittest.TestCase):
             self.assertEqual(_render(flat), "plain text")
             self.assertEqual(len(dep), 1)
 
+    # AC 13 — per-leaf TOML source_path provenance
+    def test_flatten_toml_team_array_error_reports_team_path(self) -> None:
+        """Array error on a team TOML key reports the team file path, not user."""
+        with self.assertRaises(errors.UnknownDirectiveError) as ctx:
+            VariableScope.build(
+                toml_layers=[("team", {"tags": ["a", "b"]})],
+                toml_layer_paths=["/fake/team.toml"],
+            )
+        self.assertEqual(ctx.exception.file, "/fake/team.toml")
+
+    def test_toml_variable_source_path_populated(self) -> None:
+        """AC 13: TOML ResolvedValue gets source_path from winning layer."""
+        scope = VariableScope.build(
+            toml_layers=[("team", {"agent": {"name": "PM"}})],
+            toml_layer_paths=["/fake/team.toml"],
+        )
+        rv = scope.resolve("self.agent.name")
+        self.assertEqual(rv.source_path, "/fake/team.toml")
+        self.assertEqual(rv.toml_layer, "team")
+
+    # AC 14 — _make_include_token legacy fallback sorted
+    def test_make_include_token_legacy_fallback(self) -> None:
+        """Fallback reconstructs token with props sorted alphabetically."""
+        from src.scripts.bmad_compile.resolver import _make_include_token
+        node = parser.Include(
+            src="fragments/a.template.md",
+            props=(("z", "1"), ("a", "2")),
+            line=1,
+            col=1,
+            raw_token="",
+        )
+        result = _make_include_token(node)
+        self.assertEqual(
+            result,
+            '<<include path="fragments/a.template.md" a="2" z="1">>',
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
