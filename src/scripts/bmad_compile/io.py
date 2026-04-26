@@ -10,7 +10,7 @@ Contract highlights:
 - UTF-8 only, no BOM, LF line endings on write.
 - Reads normalize CRLF -> LF so hash + parse are source-newline-invariant.
 - SHA-256 is always computed in binary mode over raw bytes (lowercase hex).
-- Directory listings are sorted alphabetically by POSIX path string.
+- Directory listings are sorted alphabetically by filename (basename), case-sensitive.
 - Writes are atomic (temp file + rename) so AC 10 — no partial writes on error —
   is enforceable.
 """
@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib  # pragma: allow-raw-io
 import os  # pragma: allow-raw-io
 import tempfile  # pragma: allow-raw-io
-from pathlib import Path, PurePosixPath  # pragma: allow-raw-io
+from pathlib import Path, PurePosixPath as PurePosixPath  # pragma: allow-raw-io
 from typing import Union
 
 from . import errors
@@ -28,12 +28,11 @@ from . import errors
 # Re-export PurePosixPath so downstream layered modules (variants.py,
 # resolver.py, ...) can stay inside the raw-I/O boundary with
 # `from .io import PurePosixPath` — the grep that forbids `pathlib` in
-# non-io modules never sees it in their source. The self-assignment is
-# intentional: it documents the export and survives tools that strip
-# "unused" imports.
-PurePosixPath = PurePosixPath  # pragma: allow-raw-io
+# non-io modules never sees it in their source. The `from X import Y as Y`
+# form (the `as PurePosixPath` alias in the import above) is the explicit-reexport
+# idiom mypy recognizes under --no-implicit-reexport (enabled by --strict).
 
-PathLike = Union[str, os.PathLike]
+PathLike = Union[str, os.PathLike[str]]
 
 
 def to_posix(path: PathLike) -> PurePosixPath:
@@ -128,13 +127,13 @@ def path_exists(path: PathLike) -> bool:
 
 
 def list_dir_sorted(path: PathLike) -> list[PurePosixPath]:
-    """List directory entries sorted alphabetically by POSIX path string.
+    """List directory entries sorted alphabetically by filename (basename), case-sensitive.
 
-    Case-sensitive sort. Stable across repeated calls.
+    Stable across repeated calls.
     """
     base = _fs(path)
     entries = [to_posix(e) for e in base.iterdir()]  # pragma: allow-raw-io
-    entries.sort(key=str)
+    entries.sort(key=lambda e: e.name)
     return entries
 
 
