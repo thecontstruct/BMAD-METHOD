@@ -19,6 +19,8 @@ module's source.
 
 from __future__ import annotations
 
+import re
+
 from .io import PurePosixPath
 
 # Frozen for v1. New IDE targets add to this tuple and grow their own
@@ -26,6 +28,13 @@ from .io import PurePosixPath
 KNOWN_IDES: tuple[str, ...] = ("cursor", "claudecode")
 # Public so sibling layers (resolver.py) can reuse the single definition.
 TEMPLATE_SUFFIX = ".template.md"
+
+# Detects `<base>.<ide-token>.template.md` filenames regardless of
+# KNOWN_IDES membership. Used by `_is_universal` to classify
+# universality by SHAPE (not by allowlist membership), and by
+# engine.compile_skill's MissingFragmentError hint to enumerate
+# detected variants for any IDE-shape suffix.
+_IDE_SUFFIX_RE = re.compile(r"^(?P<base>.+)\.(?P<ide>[a-zA-Z0-9_-]+)\.template\.md$")
 
 
 def _ide_suffix(ide: str) -> str:
@@ -35,8 +44,7 @@ def _ide_suffix(ide: str) -> str:
 def _is_universal(name: str) -> bool:
     if not name.endswith(TEMPLATE_SUFFIX):
         return False
-    stem = name[: -len(TEMPLATE_SUFFIX)]
-    return all(not stem.endswith(f".{ide}") for ide in KNOWN_IDES)
+    return _IDE_SUFFIX_RE.match(name) is None
 
 
 def select_variant(

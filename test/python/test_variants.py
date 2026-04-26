@@ -79,6 +79,18 @@ class TestVariantsExtended(unittest.TestCase):
         self.assertTrue(_is_universal("foo.template.md"))
         self.assertTrue(_is_universal("bar-skill.template.md"))
 
+    def test_is_universal_rejects_unknown_ide_token(self) -> None:
+        # Pure universal — no IDE token slot.
+        self.assertTrue(_is_universal("skill1.template.md"))
+        # Known IDE variant — already covered by test_is_universal_rejects_ide_suffixed,
+        # re-asserted here for completeness against the new regex.
+        self.assertFalse(_is_universal("skill1.cursor.template.md"))
+        # Unknown IDE-shape token — the regression-pinning case.
+        # Pre-fix: returns True (treated as universal — bug). Post-fix: returns False.
+        self.assertFalse(_is_universal("skill1.vscode.template.md"))
+        # No `.template.md` suffix — returns False under both old and new logic.
+        self.assertFalse(_is_universal("skill1.md"))
+
     def test_known_ides_constant(self) -> None:
         self.assertEqual(KNOWN_IDES, ("cursor", "claudecode"))
 
