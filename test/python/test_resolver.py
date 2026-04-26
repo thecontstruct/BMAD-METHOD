@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from src.scripts.bmad_compile import errors, io, parser
+from src.scripts.bmad_compile.engine import _render as _render_v13
 from src.scripts.bmad_compile.io import PurePosixPath
 from src.scripts.bmad_compile.resolver import (
     CompileCache,
@@ -77,21 +78,6 @@ def _render(nodes: list[parser.AstNode]) -> str:
             raise AssertionError(
                 f"_render received non-Text node {type(n).__name__} — "
                 "resolver.resolve() should have inlined every Include"
-            )
-    return "".join(parts)
-
-
-def _render_v13(nodes: list[parser.AstNode]) -> str:
-    """Story 1.3 render helper: handles Text and VarRuntime passthrough."""
-    parts: list[str] = []
-    for n in nodes:
-        if isinstance(n, parser.Text):
-            parts.append(n.content)
-        elif isinstance(n, parser.VarRuntime):
-            parts.append("{" + n.name + "}")
-        else:
-            raise AssertionError(
-                f"_render_v13 received unexpected node {type(n).__name__}"
             )
     return "".join(parts)
 
