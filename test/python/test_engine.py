@@ -211,6 +211,61 @@ class TestVariantSelection(unittest.TestCase):
             out = install / "skill1" / "SKILL.md"
             self.assertEqual(out.read_text(encoding="utf-8"), "Agent: TeamAgent")
 
+    def test_compile_skill_dir_lookup_is_case_sensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            # Probe filesystem case-sensitivity.
+            probe_dir = scenario / "probe"
+            probe_dir.mkdir()
+            if (scenario / "PROBE").is_dir():
+                self.skipTest("filesystem is case-insensitive (Windows-default / macOS-APFS)")
+            # Real test: write skill at lowercase path, look up at uppercase path.
+            skill_lower = scenario / "core" / "skill1"
+            _write(skill_lower / "skill1.template.md", "baseline body")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+            install = scenario / "install"
+            skill_upper = scenario / "core" / "Skill1"  # capital S
+            with self.assertRaises(NotADirectoryError):
+                engine.compile_skill(skill_upper, install)
+
+    def test_missing_template_hint_mentions_unknown_ide_variant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            # vscode is NOT in variants.KNOWN_IDES.
+            # Pre-Story-1.8: _is_universal("skill1.vscode.template.md") == True →
+            #   select_variant returns the file → engine compiles it as universal,
+            #   never reaching the MissingFragmentError branch.
+            # Post-Story-1.8: _is_universal returns False → select_variant returns None →
+            #   engine raises MissingFragmentError with hint enumerating "vscode".
+            _write(skill / "skill1.vscode.template.md", "vscode body")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+            install = scenario / "install"
+            with self.assertRaises(errors.MissingFragmentError) as cm:
+                engine.compile_skill(skill, install, target_ide=None)
+            self.assertIn("vscode", cm.exception.hint)
+            self.assertIn("--tools", cm.exception.hint)
+
+    def test_missing_template_hint_warns_when_target_ide_not_in_known_ides(self) -> None:
+        # Regression: when --tools <unrecognized> is passed AND a file
+        # matching that IDE shape exists, the hint must explain that the
+        # IDE is not recognized rather than falling through to the generic
+        # "create universal template" branch (which masks the real problem).
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            # vscode is NOT in variants.KNOWN_IDES; file shape matches the
+            # requested --tools value, so target_ide ends up in _detected_ides.
+            _write(skill / "skill1.vscode.template.md", "vscode body")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+            install = scenario / "install"
+            with self.assertRaises(errors.MissingFragmentError) as cm:
+                engine.compile_skill(skill, install, target_ide="vscode")
+            self.assertIn("vscode", cm.exception.hint)
+            self.assertIn("not a recognized IDE", cm.exception.hint)
+            # KNOWN_IDES enumeration must be present so the author sees alternatives.
+            self.assertIn("cursor", cm.exception.hint)
+
 
 class TestVariableScopeWiring(unittest.TestCase):
     """Story 1.3 — VariableScope built and wired into compile pipeline."""

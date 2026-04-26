@@ -141,16 +141,33 @@ def compile_skill(skill_dir: io.PathLike, install_dir: io.PathLike, target_ide: 
         all_templates = [e for e in all_entries if e.name.endswith(".template.md")]
         template_entry = variants.select_variant(all_templates, target_ide)
         if template_entry is None:
-            _detected_ides = sorted({
-                ide for ide in variants.KNOWN_IDES
-                if any(e.name.endswith(f".{ide}.template.md") for e in all_entries)
-            })
+            _detected_ides_set: set[str] = set()
+            for e in all_entries:
+                m = variants._IDE_SUFFIX_RE.match(e.name)
+                if m is not None and m.group("base") == basename:
+                    _detected_ides_set.add(m.group("ide"))
+            _detected_ides = sorted(_detected_ides_set)
             if _detected_ides and target_ide is None:
                 hint = (
                     f"no universal '*.template.md' found in '{skill_dir}'. "
                     f"Found IDE-specific variants for: {', '.join(_detected_ides)}. "
                     f"Compile with --tools <ide> to select one, or create "
                     f"'{basename}.template.md' as a universal fallback."
+                )
+            elif _detected_ides and target_ide is not None and target_ide in _detected_ides:
+                # A file matching `{basename}.{target_ide}.template.md` exists,
+                # but select_variant still returned None — which can only happen
+                # when target_ide is not in KNOWN_IDES (the install-time
+                # allowlist). Without this branch the author falls through to
+                # the generic "create universal" message and is never told that
+                # their requested IDE is unrecognized.
+                hint = (
+                    f"'{target_ide}' is not a recognized IDE for this install "
+                    f"(supported: {', '.join(variants.KNOWN_IDES)}). "
+                    f"A file matching '{basename}.{target_ide}.template.md' exists "
+                    f"but cannot be selected with --tools {target_ide}. "
+                    f"Use --tools {' or --tools '.join(variants.KNOWN_IDES)}, or "
+                    f"rename to '{basename}.template.md' for a universal fallback."
                 )
             elif _detected_ides and target_ide is not None and target_ide not in _detected_ides:
                 tried = [str(skill_posix / f"{basename}.{ide}.template.md") for ide in variants.KNOWN_IDES]
