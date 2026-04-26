@@ -22,7 +22,7 @@ filesystem/hash/time concern through `io`.
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 from . import errors, io, lockfile, parser, resolver, toml_merge, variants
 
@@ -48,7 +48,7 @@ def _render(nodes: Iterable[object]) -> str:
     return "".join(parts)
 
 
-def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None:
+def compile_skill(skill_dir: io.PathLike, install_dir: io.PathLike, target_ide: str | None = None) -> None:
     """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
 
     Staging discipline: parse + resolve + render fully in memory. Only on
@@ -128,6 +128,7 @@ def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None
 
     if override_root_template is not None:
         template_path = override_root_template
+        assert override_root is not None  # narrowed by the override_root_template != None branch above
         # When the root is swapped to an override-rooted file, error
         # messages must point authors to the override path — otherwise a
         # parse error in the override SKILL.template.md gets reported with
@@ -189,7 +190,7 @@ def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None
         yaml_config_path = str(_yaml_candidate)
 
     # Build self.* TOML layer stack (lowest → highest: defaults → team → user).
-    _toml_layers: list[tuple[str, dict]] = []
+    _toml_layers: list[tuple[str, dict[str, Any]]] = []
     _toml_layer_paths: list[str] = []
     _customize_toml = skill_posix / "customize.toml"
     if io.is_file(str(_customize_toml)):

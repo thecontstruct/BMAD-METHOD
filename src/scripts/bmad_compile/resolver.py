@@ -23,7 +23,8 @@ stream via DFS, enforcing:
   attribute on `CyclicIncludeError` lists the authored paths in order, with
   the closing repeat appended so the cycle reads left-to-right.
 - **Alphabetical tiebreak within a tier** (AC 4): inherited from
-  `io.list_dir_sorted`, which sorts POSIX-path strings case-sensitively.
+  `io.list_dir_sorted`, which sorts entries by filename (basename),
+  case-sensitively.
 - **Include-directive attributes become local props** (AC 5): authored
   attributes other than `path` propagate down the tree via
   `ResolveContext.local_scope`. Child props shadow parent props on key
@@ -134,7 +135,7 @@ def _parse_flat_yaml(content: str) -> dict[str, str]:
 
 
 def _flatten_toml(
-    d: dict,
+    d: dict[str, Any],
     prefix: str,
     layer_name: str,
     priority_map: dict[str, str],
@@ -174,12 +175,12 @@ def _flatten_toml(
 
 
 def _build_priority_map(
-    toml_layers: list[tuple[str, dict]],
+    toml_layers: list[tuple[str, dict[str, Any]]],
 ) -> dict[str, str]:
     """Scan layers from highest to lowest priority to record which layer wins each path."""
     priority_map: dict[str, str] = {}
 
-    def _scan(d: dict, prefix: str, layer_name: str) -> None:
+    def _scan(d: dict[str, Any], prefix: str, layer_name: str) -> None:
         for k, v in d.items():
             dotted = f"{prefix}.{k}" if prefix else k
             full_key = f"self.{dotted}"
@@ -218,7 +219,7 @@ class VariableScope:
         cls,
         *,
         yaml_config_path: str | None = None,
-        toml_layers: list[tuple[str, dict]] | None = None,
+        toml_layers: list[tuple[str, dict[str, Any]]] | None = None,
         toml_layer_paths: list[str] | None = None,
     ) -> "VariableScope":
         """Build a VariableScope from config sources.
@@ -587,7 +588,7 @@ def _walk_nodes(
     context: ResolveContext,
     cache: CompileCache,
     visited_stack: list[_StackFrame],
-    dep_tree: list,
+    dep_tree: list[Any],
     enclosing_file: str,
     enclosing_source: str | None,
     depth: int = 0,
@@ -783,7 +784,7 @@ def resolve(
     arguments; resolver tests can omit them (then `resolved_path` on the
     root entry defaults to the skill directory).
     """
-    dep_tree: list = []
+    dep_tree: list[Any] = []
     visited_stack: list[_StackFrame] = []
 
     root_rel_file = (

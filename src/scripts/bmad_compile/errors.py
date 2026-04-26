@@ -6,7 +6,7 @@ No internal imports; stdlib `enum` only.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import ClassVar
+from typing import Any, ClassVar
 
 
 class ErrorCode(StrEnum):
@@ -121,7 +121,7 @@ class MissingFragmentError(CompilerError):
 class CyclicIncludeError(CompilerError):
     CODE: ClassVar[str] = ErrorCode.CYCLIC_INCLUDE.value
 
-    def __init__(self, desc: str, *, chain: list[str] | None = None, **kwargs) -> None:
+    def __init__(self, desc: str, *, chain: list[str] | None = None, **kwargs: Any) -> None:
         super().__init__(desc, **kwargs)
         self.chain = chain
 

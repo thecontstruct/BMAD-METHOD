@@ -46,6 +46,7 @@ Path manipulation via PurePosixPath re-exported from io.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from . import errors, io, resolver
 from .io import PurePosixPath
@@ -91,15 +92,15 @@ def _build_skill_entry(
     *,
     source_text: str,
     compiled_text: str,
-    dep_tree: list,
+    dep_tree: list[Any],
     var_scope: resolver.VariableScope,
     target_ide: str | None,
     cache: resolver.CompileCache,
-) -> dict:
+) -> dict[str, Any]:
     source_hash = io.hash_text(source_text)
     compiled_hash = io.hash_text(compiled_text)
 
-    fragments: list[dict] = []
+    fragments: list[dict[str, Any]] = []
     for entry in dep_tree[1:]:
         if entry is None:
             continue
@@ -113,11 +114,11 @@ def _build_skill_entry(
             "resolved_from": frag.resolved_from,
         })
 
-    variables: list[dict] = []
+    variables: list[dict[str, Any]] = []
     for name, rv in sorted(var_scope._table.items()):
         if rv.source == "local-scope":
             continue
-        var_entry: dict = {
+        var_entry: dict[str, Any] = {
             "name": name,
             "source": rv.source,
             "value_hash": rv.value_hash,
@@ -146,13 +147,13 @@ def write_skill_entry(
     *,
     source_text: str,
     compiled_text: str,
-    dep_tree: list,
+    dep_tree: list[Any],
     var_scope: resolver.VariableScope,
     target_ide: str | None,
     cache: resolver.CompileCache,
 ) -> None:
     """Write (or update) the skill entry in the lockfile at ``lockfile_path``."""
-    existing: dict = {}
+    existing: dict[str, Any] = {}
     if io.is_file(lockfile_path):
         try:
             content = io.read_template(lockfile_path)
@@ -180,7 +181,7 @@ def write_skill_entry(
     # Defensive: a corrupted lockfile with entries=null/int/str dict-parses
     # successfully but would TypeError on list(...) (None) or silently
     # explode a string into a per-character list. Treat as fresh.
-    entries: list = list(raw_entries) if isinstance(raw_entries, list) else []
+    entries: list[Any] = list(raw_entries) if isinstance(raw_entries, list) else []
     updated = False
     for i, entry in enumerate(entries):
         if isinstance(entry, dict) and entry.get("skill") == skill_basename:

@@ -21,7 +21,7 @@ from typing import Any
 from . import errors, io
 
 
-def _keyed_field(items: list) -> str | None:
+def _keyed_field(items: list[Any]) -> str | None:
     """Return 'code' or 'id' if every item in `items` is a dict sharing that
     field, otherwise None. Both base and override lists must pass this check."""
     if not items:
@@ -32,9 +32,9 @@ def _keyed_field(items: list) -> str | None:
     return None
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Merge two TOML dicts applying structural rules."""
-    result: dict = dict(base)
+    result: dict[str, Any] = dict(base)
     for key, override_val in override.items():
         if key not in result:
             result[key] = override_val
@@ -49,7 +49,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
             if field is not None:
                 # Full replacement by key — matches upstream _merge_by_key.
                 index_by_key: dict[Any, int] = {}
-                merged_list: list = []
+                merged_list: list[Any] = []
                 for item in base_val:
                     k = item[field]
                     index_by_key[k] = len(merged_list)
@@ -73,16 +73,16 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def merge_layers(*layers: dict) -> dict:
+def merge_layers(*layers: dict[str, Any]) -> dict[str, Any]:
     """Merge zero or more TOML dicts, left=lowest priority, right=highest."""
-    result: dict = {}
+    result: dict[str, Any] = {}
     for layer in layers:
         if layer:
             result = _deep_merge(result, layer)
     return result
 
 
-def load_toml_file(path: str) -> dict:
+def load_toml_file(path: str) -> dict[str, Any]:
     """Read and parse a TOML file. Returns {} if file does not exist.
 
     Raises UnknownDirectiveError (code UNKNOWN_DIRECTIVE) on TOML parse
