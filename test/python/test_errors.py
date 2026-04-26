@@ -150,6 +150,18 @@ class TestSubclassesListed(unittest.TestCase):
         for cls in errors.SUBCLASSES:
             with self.subTest(cls=cls.__name__):
                 self.assertTrue(issubclass(cls, CompilerError))
+        self.assertEqual(
+            set(errors.SUBCLASSES),
+            {
+                errors.UnknownDirectiveError,
+                errors.UnresolvedVariableError,
+                errors.MissingFragmentError,
+                errors.CyclicIncludeError,
+                errors.OverrideOutsideRootError,
+                errors.LockfileVersionMismatchError,
+                errors.PrecedenceUndefinedError,
+            },
+        )
 
 
 if __name__ == "__main__":

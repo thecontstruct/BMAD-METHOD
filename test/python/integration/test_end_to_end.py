@@ -132,6 +132,27 @@ class TestCliArgumentValidation(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
 
+    def test_tools_flag_case_insensitive_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            skill.mkdir(parents=True)
+            (skill / "skill1.cursor.template.md").write_text("cursor-body", encoding="utf-8")
+            (skill / "skill1.template.md").write_text("universal-body", encoding="utf-8")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+            install = scenario / "install"
+            install.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(COMPILE_SCRIPT),
+                 "--skill", str(skill),
+                 "--install-dir", str(install),
+                 "--tools", "Cursor"],
+                capture_output=True, text=True, cwd=str(REPO_ROOT),
+            )
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            out = install / "skill1" / "SKILL.md"
+            self.assertEqual(out.read_text(encoding="utf-8"), "cursor-body")
+
 
 class TestCompileFixtures(unittest.TestCase):
     """Story 1.2 parametrized scenarios — `<<include>>` pipeline end-to-end."""
