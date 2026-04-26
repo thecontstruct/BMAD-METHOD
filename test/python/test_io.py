@@ -6,7 +6,7 @@ Tests verify:
 - sha256_hex: binary mode + lowercase hex + newline-invariant for the same
   canonical content only when bytes are literally equal (hash over raw bytes,
   not normalized content)
-- list_dir_sorted: stable POSIX-string ordering
+- list_dir_sorted: stable basename ordering, case-sensitive
 - ensure_within_root: raises on path escape
 """
 
@@ -140,6 +140,21 @@ class TestListFilesSorted(unittest.TestCase):
     def test_empty_dir_returns_empty_list(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(bio.list_files_sorted(d), [])
+
+    def test_missing_path_raises_file_not_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = str(Path(tmp) / "does_not_exist")
+            with self.assertRaises(FileNotFoundError):
+                bio.list_files_sorted(missing)
+
+    def test_broken_symlink_is_silently_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.symlink("nonexistent_target", os.path.join(tmp, "broken.md"))
+            except OSError:
+                self.skipTest("symlinks require elevated privileges on this platform")
+            result = bio.list_files_sorted(tmp)
+            self.assertEqual(result, [])
 
 
 class TestToPosix(unittest.TestCase):
