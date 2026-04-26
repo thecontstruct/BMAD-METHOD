@@ -1,0 +1,17 @@
+# Default: auto-detect text, normalize to LF in the repo.
+# Working-tree line endings still follow core.autocrlf for text files
+# without an explicit eol attribute.
+* text=auto eol=lf
+
+# Test fixtures are byte-compared against compiler output, which writes LF.
+# Force LF in the working tree too so they don't drift on Windows checkouts.
+test/fixtures/**/expected/*.md text eol=lf
+test/fixtures/**/expected/*.txt text eol=lf
+test/fixtures/**/expected.md text eol=lf
+test/fixtures/**/*-SKILL.md text eol=lf
+test/fixtures/**/*.lock text eol=lf
+
+# Binary file types — mark explicitly so `text=auto` never misclassifies.
+*.png binary
+*.webp binary
+*.ico binary
