@@ -138,6 +138,11 @@ def list_dir_sorted(path: PathLike) -> list[PurePosixPath]:
     return entries
 
 
+def list_files_sorted(path: PathLike) -> list[PurePosixPath]:
+    """Return only file entries from `list_dir_sorted(path)`, in the same order."""
+    return [e for e in list_dir_sorted(path) if is_file(str(e))]
+
+
 def hash_text(text: str) -> str:
     """SHA-256 hex digest of a UTF-8 string. Used for value_hash in provenance."""
     return hashlib.sha256(text.encode()).hexdigest()  # pragma: allow-raw-io

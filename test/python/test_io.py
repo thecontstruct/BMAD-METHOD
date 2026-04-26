@@ -116,8 +116,7 @@ class TestListDirSorted(unittest.TestCase):
                 (Path(d) / name).write_text("x", encoding="utf-8")
             entries = [str(e).rsplit("/", 1)[-1] for e in bio.list_dir_sorted(d)]
             # Case-sensitive: uppercase B comes before lowercase a
-            self.assertEqual(entries, sorted(entries))
-            self.assertEqual(entries[0], "B.md")
+            self.assertEqual(entries, ["B.md", "a.md", "c.md", "d.md"])
 
     def test_stable_across_calls(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -126,6 +125,21 @@ class TestListDirSorted(unittest.TestCase):
             first = bio.list_dir_sorted(d)
             second = bio.list_dir_sorted(d)
             self.assertEqual(first, second)
+
+
+class TestListFilesSorted(unittest.TestCase):
+    def test_returns_only_files_not_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "a.md").write_text("x", encoding="utf-8")
+            (Path(d) / "b.md").write_text("x", encoding="utf-8")
+            (Path(d) / "c").mkdir()
+            result = bio.list_files_sorted(d)
+            expected = [bio.to_posix(Path(d) / "a.md"), bio.to_posix(Path(d) / "b.md")]
+            self.assertEqual(result, expected)
+
+    def test_empty_dir_returns_empty_list(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(bio.list_files_sorted(d), [])
 
 
 class TestToPosix(unittest.TestCase):
