@@ -151,9 +151,14 @@ def _flatten_toml(
         elif isinstance(v, list):
             full_key = f"self.{dotted}"
             winning_layer = priority_map.get(full_key, layer_name)
+            # tomllib does not expose per-value source positions; line=1,col=1 is a
+            # deterministic locator pointing at the file head — the dotted path in
+            # the message names the offending key.
             raise errors.UnknownDirectiveError(
                 f"self.* variable '{dotted}' resolves to a TOML array, not a scalar",
                 file=_paths.get(winning_layer) or None,
+                line=1,
+                col=1,
                 hint=(
                     f"self.* variable path '{dotted}' resolves to a TOML array, "
                     "not a scalar — use a more specific dotted path"
