@@ -106,6 +106,16 @@ class TestLoadTomlFile(unittest.TestCase):
             result = load_toml_file(path)
             self.assertEqual(result, {})
 
+    def test_parse_error_includes_line_number(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "bad.toml")
+            # Two valid lines then an invalid value at line 3
+            io.write_text(path, 'a = 1\nb = 2\nbad_value = [no close\n')
+            from src.scripts.bmad_compile.errors import UnknownDirectiveError
+            with self.assertRaises(UnknownDirectiveError) as cm:
+                load_toml_file(path)
+            self.assertEqual(cm.exception.line, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

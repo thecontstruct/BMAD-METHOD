@@ -14,6 +14,7 @@ Also provides `load_toml_file()` for loading a TOML file from disk via io.
 
 from __future__ import annotations
 
+import re
 import tomllib
 from typing import Any
 
@@ -94,10 +95,15 @@ def load_toml_file(path: str) -> dict:
     try:
         return tomllib.loads(content_bytes.decode("utf-8"))
     except tomllib.TOMLDecodeError as exc:
+        _msg = str(exc)
+        _line_m = re.search(r'line (\d+)', _msg)
+        _col_m = re.search(r'column (\d+)', _msg)
+        _err_line = int(_line_m.group(1)) if _line_m else None
+        _err_col = int(_col_m.group(1)) if _col_m else None
         raise errors.UnknownDirectiveError(
             f"TOML parse error in '{path}'",
             file=path,
-            line=None,
-            col=None,
+            line=_err_line,
+            col=_err_col,
             hint=f"TOML parse error in '{path}': {exc} — fix the TOML syntax and retry",
         ) from exc
