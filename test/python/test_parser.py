@@ -296,6 +296,13 @@ class TestParserValidation(unittest.TestCase):
         with self.assertRaises(UnknownDirectiveError):
             parse('<<include path="frag\ts/a.template.md">>', "t.md")
 
+    def test_backslash_in_path_rejected(self) -> None:
+        source = '<<include path="fragments\\a.template.md">>'
+        with self.assertRaises(UnknownDirectiveError) as cm:
+            parse(source, "skill.template.md")
+        self.assertIn("backslash", cm.exception.hint)
+        self.assertIn("forward slashes", cm.exception.hint)
+
 
 class TestVariableTokenization(unittest.TestCase):
     """Story 1.3 — {{var}} VarCompile and {var} VarRuntime tokenization."""

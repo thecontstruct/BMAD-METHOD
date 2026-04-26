@@ -268,6 +268,18 @@ def parse(source: str, relative_path: str) -> list[AstNode]:
                             "'<moduleId>/<name>' cross-module path"
                         ),
                     )
+                if "\\" in path_value:
+                    raise _make_unknown_error(
+                        source, relative_path, pos, matched,
+                        hint=(
+                            "backslash characters are not allowed in include paths — "
+                            "use forward slashes ('/') as the path separator on all "
+                            "platforms. Backslash is the Windows path separator and "
+                            "is not portable; on POSIX filesystems it is a literal "
+                            "byte in filenames, which produces confusing missing-"
+                            "fragment errors when authors intended a path separator."
+                        ),
+                    )
                 # Reject ASCII control characters in path values.
                 for ch in path_value:
                     if ord(ch) < 0x20 or ord(ch) == 0x7F:
