@@ -136,20 +136,38 @@ def compile_skill(skill_dir, install_dir, target_ide: str | None = None) -> None
         # `resolver._relative_file` for nested errors under the override.
         relative_path = str(template_path.relative_to(override_root))
     else:
-        entries = io.list_dir_sorted(skill_dir)
-        all_templates = [
-            e for e in entries
-            if e.name.endswith(".template.md") and io.is_file(str(e))
-        ]
+        all_entries = io.list_files_sorted(skill_dir)
+        all_templates = [e for e in all_entries if e.name.endswith(".template.md")]
         template_entry = variants.select_variant(all_templates, target_ide)
         if template_entry is None:
-            tried = [str(skill_posix / f"{basename}.{ide}.template.md") for ide in variants.KNOWN_IDES]
-            tried.append(str(skill_posix / f"{basename}.template.md"))
-            hint = (
-                f"no '*.template.md' found in '{skill_dir}'. "
-                f"Tried: {tried!r}. "
-                f"Create '{basename}.template.md' in the skill directory."
-            )
+            _detected_ides = sorted({
+                ide for ide in variants.KNOWN_IDES
+                if any(e.name.endswith(f".{ide}.template.md") for e in all_entries)
+            })
+            if _detected_ides and target_ide is None:
+                hint = (
+                    f"no universal '*.template.md' found in '{skill_dir}'. "
+                    f"Found IDE-specific variants for: {', '.join(_detected_ides)}. "
+                    f"Compile with --tools <ide> to select one, or create "
+                    f"'{basename}.template.md' as a universal fallback."
+                )
+            elif _detected_ides and target_ide is not None and target_ide not in _detected_ides:
+                tried = [str(skill_posix / f"{basename}.{ide}.template.md") for ide in variants.KNOWN_IDES]
+                tried.append(str(skill_posix / f"{basename}.template.md"))
+                hint = (
+                    f"no '*.template.md' found for --tools {target_ide} in '{skill_dir}'. "
+                    f"Tried: {tried!r}. "
+                    f"Variants exist for: {', '.join(_detected_ides)} — did you mean "
+                    f"--tools {_detected_ides[0]}?"
+                )
+            else:
+                tried = [str(skill_posix / f"{basename}.{ide}.template.md") for ide in variants.KNOWN_IDES]
+                tried.append(str(skill_posix / f"{basename}.template.md"))
+                hint = (
+                    f"no '*.template.md' found in '{skill_dir}'. "
+                    f"Tried: {tried!r}. "
+                    f"Create '{basename}.template.md' in the skill directory."
+                )
             raise errors.MissingFragmentError(
                 "no '*.template.md' found in skill directory",
                 file=str(skill_posix),

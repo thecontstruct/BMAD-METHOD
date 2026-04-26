@@ -169,6 +169,20 @@ class TestVariantSelection(unittest.TestCase):
             with self.assertRaises(errors.MissingFragmentError):
                 engine.compile_skill(skill, install)
 
+    def test_missing_template_hint_mentions_ide_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = scenario / "core" / "skill1"
+            _write(skill / "skill1.cursor.template.md", "cursor-body")
+            (scenario / "_bmad" / "custom").mkdir(parents=True, exist_ok=True)
+
+            install = scenario / "install"
+            install.mkdir()
+            with self.assertRaises(errors.MissingFragmentError) as cm:
+                engine.compile_skill(skill, install, target_ide=None)
+            self.assertIn("Found IDE-specific variants for: cursor", cm.exception.hint)
+            self.assertIn("--tools", cm.exception.hint)
+
     def test_compile_resolves_user_only_toml_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             scenario = Path(tmp)
