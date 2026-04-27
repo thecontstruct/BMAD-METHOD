@@ -1,0 +1,3 @@
+code: no-migrated-fixture
+name: "No Migrated Fixture"
+description: "Test fixture: module with plain skills only — no *.template.md files"
