@@ -42,6 +42,20 @@ class Installer {
       const officialModules = await OfficialModules.build(config, paths);
       const existingInstall = await ExistingInstall.detect(paths.bmadDir);
 
+      // AC 1: Python 3.11+ hard check — before any file copies
+      const compiler = require('../compiler/invoke-python');
+      const modulesToInstall = config.modules || [];
+      if (await compiler.hasMigratedSkillsInScope(paths, modulesToInstall, officialModules)) {
+        const pyCheck = await compiler.checkPythonVersion();
+        if (!pyCheck.ok) {
+          const detected = pyCheck.reason === 'not found' ? `not found: ${pyCheck.detected}` : `detected: ${pyCheck.detected}`;
+          throw new Error(
+            `Python 3.11+ required but ${detected}.\n` +
+              `install Python 3.11+ from https://www.python.org/downloads/ or via your OS package manager.`,
+          );
+        }
+      }
+
       try {
         await warnPreNativeSkillsLegacy({
           projectRoot: paths.projectRoot,
@@ -244,39 +258,63 @@ class Installer {
       });
     }
 
-    installTasks.push({
-      title: 'Creating module directories',
-      task: async (message) => {
-        const verboseMode = process.env.BMAD_VERBOSE_INSTALL === 'true' || config.verbose;
-        const moduleLogger = {
-          log: async (msg) => (verboseMode ? await prompts.log.message(msg) : undefined),
-          error: async (msg) => await prompts.log.error(msg),
-          warn: async (msg) => await prompts.log.warn(msg),
-        };
+    // AC 2/3/4: compile migrated skills after file-copy, before manifest generation
+    installTasks.push(
+      {
+        title: 'Compiling migrated skills',
+        task: async (message) => {
+          const compilerHelper = require('../compiler/invoke-python');
+          if (!(await compilerHelper.hasMigratedSkillsInScope(paths, allModules, officialModules))) {
+            addResult('Compile migrated skills', 'skip', 'no migrated skills');
+            return 'Skipped — no migrated skills';
+          }
+          const result = await compilerHelper.runInstallPhase({
+            bmadDir: paths.bmadDir,
+            projectRoot: paths.projectRoot,
+            message,
+          });
+          for (const written of result.writtenFiles) {
+            this.installedFiles.add(written);
+          }
+          if (result.lockfilePath) this.installedFiles.add(result.lockfilePath);
+          addResult('Compile migrated skills', 'ok', `${result.compiled} skill(s)`);
+          return `${result.compiled} migrated skill(s) compiled`;
+        },
+      },
+      {
+        title: 'Creating module directories',
+        task: async (message) => {
+          const verboseMode = process.env.BMAD_VERBOSE_INSTALL === 'true' || config.verbose;
+          const moduleLogger = {
+            log: async (msg) => (verboseMode ? await prompts.log.message(msg) : undefined),
+            error: async (msg) => await prompts.log.error(msg),
+            warn: async (msg) => await prompts.log.warn(msg),
+          };
 
-        if (config.modules && config.modules.length > 0) {
-          for (const moduleName of config.modules) {
-            message(`Setting up ${moduleName}...`);
-            const result = await officialModules.createModuleDirectories(moduleName, paths.bmadDir, {
-              installedIDEs: config.ides || [],
-              moduleConfig: moduleConfigs[moduleName] || {},
-              existingModuleConfig: officialModules.existingConfig?.[moduleName] || {},
-              coreConfig: moduleConfigs.core || {},
-              logger: moduleLogger,
-              silent: true,
-            });
-            if (result) {
-              dirResults.createdDirs.push(...result.createdDirs);
-              dirResults.movedDirs.push(...(result.movedDirs || []));
-              dirResults.createdWdsFolders.push(...result.createdWdsFolders);
+          if (config.modules && config.modules.length > 0) {
+            for (const moduleName of config.modules) {
+              message(`Setting up ${moduleName}...`);
+              const result = await officialModules.createModuleDirectories(moduleName, paths.bmadDir, {
+                installedIDEs: config.ides || [],
+                moduleConfig: moduleConfigs[moduleName] || {},
+                existingModuleConfig: officialModules.existingConfig?.[moduleName] || {},
+                coreConfig: moduleConfigs.core || {},
+                logger: moduleLogger,
+                silent: true,
+              });
+              if (result) {
+                dirResults.createdDirs.push(...result.createdDirs);
+                dirResults.movedDirs.push(...(result.movedDirs || []));
+                dirResults.createdWdsFolders.push(...result.createdWdsFolders);
+              }
             }
           }
-        }
 
-        addResult('Module directories', 'ok');
-        return 'Module directories created';
+          addResult('Module directories', 'ok');
+          return 'Module directories created';
+        },
       },
-    });
+    );
 
     const configTask = {
       title: 'Generating configurations',
