@@ -11,11 +11,14 @@ Exercises the `_run_install_phase` dispatcher end-to-end:
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+from src.scripts.bmad_compile import io as bmad_io
 
 
 def _write(path: Path, content: str) -> None:
@@ -248,6 +251,70 @@ class TestInstallPhaseJsonContract(unittest.TestCase):
             lp = summary["lockfile_path"]
             self.assertTrue(Path(lp).is_absolute(), f"lockfile_path not absolute: {lp}")
             self.assertTrue(lp.endswith("bmad.lock"))
+
+
+_BMAD_HELP_SRC = Path(__file__).resolve().parents[2] / "src" / "core-skills" / "bmad-help"
+
+
+class TestBmadHelpInstallPhase(unittest.TestCase):
+    """(AC 4) Real bmad-help skill: install-phase subprocess end-to-end contract.
+
+    Exercises compile.py --install-phase against a fixture install_dir populated
+    with the real bmad-help template, asserting byte-equal output to the
+    checked-in frozen baseline at src/core-skills/bmad-help/SKILL.md.
+    """
+
+    def setUp(self) -> None:
+        self._tmp_obj = tempfile.TemporaryDirectory()
+        self._install = Path(self._tmp_obj.name)
+        dest = self._install / "core" / "bmad-help" / "bmad-help.template.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(_BMAD_HELP_SRC / "bmad-help.template.md"), str(dest))
+        (self._install / "custom").mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self._tmp_obj.cleanup()
+
+    def test_exit_code_and_ndjson_events(self) -> None:
+        code, events, _ = _run_install_phase(self._install)
+        self.assertEqual(code, 0)
+        skill_events = [e for e in events if e["kind"] == "skill"]
+        summary_events = [e for e in events if e["kind"] == "summary"]
+        self.assertEqual(len(skill_events), 1)
+        self.assertEqual(len(summary_events), 1)
+        self.assertEqual(skill_events[0]["skill"], "core/bmad-help")
+        self.assertEqual(skill_events[0]["status"], "ok")
+        self.assertEqual(summary_events[0]["compiled"], 1)
+        self.assertEqual(summary_events[0]["errors"], 0)
+
+    def test_compiled_skill_md_byte_equal_to_baseline(self) -> None:
+        code, _, _ = _run_install_phase(self._install)
+        self.assertEqual(code, 0)
+        compiled = self._install / "core" / "bmad-help" / "SKILL.md"
+        self.assertTrue(compiled.is_file(), f"SKILL.md not found at {compiled}")
+        self.assertEqual(compiled.read_bytes(), (_BMAD_HELP_SRC / "SKILL.md").read_bytes())
+
+    def test_lockfile_version_and_skill_hashes(self) -> None:
+        code, _, _ = _run_install_phase(self._install)
+        self.assertEqual(code, 0)
+        lockfile_path = self._install / "_config" / "bmad.lock"
+        self.assertTrue(lockfile_path.is_file(), f"bmad.lock not found at {lockfile_path}")
+        lf = json.loads(lockfile_path.read_bytes())
+        self.assertEqual(lf["version"], 1)
+
+        entries = [e for e in lf["entries"] if e["skill"] == "bmad-help"]
+        self.assertEqual(len(entries), 1, "expected exactly one lockfile entry for skill=bmad-help")
+        entry = entries[0]
+
+        compiled_md = self._install / "core" / "bmad-help" / "SKILL.md"
+        template_md = self._install / "core" / "bmad-help" / "bmad-help.template.md"
+        expected_compiled = bmad_io.hash_text(bmad_io.read_template(str(compiled_md)))
+        expected_source = bmad_io.hash_text(bmad_io.read_template(str(template_md)))
+
+        self.assertRegex(entry["compiled_hash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(entry["source_hash"], r"^[0-9a-f]{64}$")
+        self.assertEqual(entry["compiled_hash"], expected_compiled)
+        self.assertEqual(entry["source_hash"], expected_source)
 
 
 if __name__ == "__main__":
