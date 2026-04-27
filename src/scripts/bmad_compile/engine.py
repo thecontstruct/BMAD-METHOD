@@ -48,12 +48,24 @@ def _render(nodes: Iterable[object]) -> str:
     return "".join(parts)
 
 
-def compile_skill(skill_dir: io.PathLike, install_dir: io.PathLike, target_ide: str | None = None) -> None:
+def compile_skill(
+    skill_dir: io.PathLike,
+    install_dir: io.PathLike,
+    target_ide: str | None = None,
+    *,
+    lockfile_root: io.PathLike | None = None,
+    override_root: io.PathLike | None = None,
+) -> None:
     """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
 
     Staging discipline: parse + resolve + render fully in memory. Only on
     full success do we call `io.write_text`. Any `CompilerError` raised
     mid-compile leaves the filesystem untouched (Story 1.1 AC 10).
+
+    AC 6 (Story 2.1): optional keyword-only `lockfile_root` and `override_root`
+    params allow the install-phase caller to override the derived paths.
+    When either is None, today's `skill_dir.parent.parent / "_bmad"` derivation
+    is used, preserving full backward compatibility.
     """
     skill_posix = io.to_posix(skill_dir)
     if not io.is_dir(str(skill_posix)):
@@ -76,7 +88,11 @@ def compile_skill(skill_dir: io.PathLike, install_dir: io.PathLike, target_ide: 
     # override-tier lookups short-circuit to None.
     scenario_root = skill_posix.parent.parent
 
-    _lockfile_path = str(scenario_root / "_bmad" / "_config" / "bmad.lock")
+    # AC 6: lockfile_root param overrides the default derivation.
+    if lockfile_root is not None:
+        _lockfile_path = str(io.to_posix(lockfile_root) / "_config" / "bmad.lock")
+    else:
+        _lockfile_path = str(scenario_root / "_bmad" / "_config" / "bmad.lock")
     _lf_ver = lockfile.read_lockfile_version(_lockfile_path)
     if _lf_ver is not None and _lf_ver > 1:
         raise errors.LockfileVersionMismatchError(
@@ -88,7 +104,11 @@ def compile_skill(skill_dir: io.PathLike, install_dir: io.PathLike, target_ide: 
                 "Your overrides in _bmad/custom/ will be preserved."
             ),
         )
-    candidate_override_root = scenario_root / "_bmad" / "custom"
+    # AC 6: override_root param overrides the default derivation (no implicit /custom suffix).
+    if override_root is not None:
+        candidate_override_root = io.to_posix(override_root)
+    else:
+        candidate_override_root = scenario_root / "_bmad" / "custom"
     # `is_dir` (not `path_exists`) — completes the file-type discipline
     # established at every other probe site in R4/R5/R6. A regular file
     # at `<scenario>/_bmad/custom` would otherwise pass `path_exists`,
@@ -202,7 +222,12 @@ def compile_skill(skill_dir: io.PathLike, install_dir: io.PathLike, target_ide: 
     # Probe for bmad-config YAML (non-self.* cascade, bmad-config tier).
     # Convention: <scenario_root>/_bmad/core/config.yaml
     yaml_config_path: str | None = None
-    _yaml_candidate = scenario_root / "_bmad" / "core" / "config.yaml"
+    # AC 6: when lockfile_root is provided (install-phase), yaml config lives at
+    # <lockfile_root>/core/config.yaml; the default derives via scenario_root/_bmad/core/.
+    if lockfile_root is not None:
+        _yaml_candidate = io.to_posix(lockfile_root) / "core" / "config.yaml"
+    else:
+        _yaml_candidate = scenario_root / "_bmad" / "core" / "config.yaml"
     if io.is_file(str(_yaml_candidate)):
         yaml_config_path = str(_yaml_candidate)
 
@@ -252,7 +277,14 @@ def compile_skill(skill_dir: io.PathLike, install_dir: io.PathLike, target_ide: 
     rendered = _render(flat_nodes)
 
     install_posix = io.to_posix(install_dir)
-    output_path = install_posix / basename / "SKILL.md"
+    # AC 6: when lockfile_root is provided (install-phase mode), output gains
+    # the <module>/ segment so SKILL.md lands at <install_dir>/<module>/<skill>/SKILL.md.
+    # When lockfile_root is None (per-skill CLI mode), preserve today's layout.
+    if lockfile_root is not None:
+        module = skill_posix.parent.name
+        output_path = install_posix / module / basename / "SKILL.md"
+    else:
+        output_path = install_posix / basename / "SKILL.md"
     io.write_text(str(output_path), rendered)
 
     lockfile.write_skill_entry(

@@ -347,5 +347,122 @@ class TestVariableScopeWiring(unittest.TestCase):
             self.assertEqual(out.read_text(encoding="utf-8"), "base body")
 
 
+class TestEngineAC6LockfileOverrides(unittest.TestCase):
+    """AC 6 (Story 2.1): explicit lockfile_root / override_root params.
+
+    Regression contract: all existing tests must pass with both params unset.
+    New tests pin the install-phase code path.
+    """
+
+    def test_default_args_preserve_today_lockfile_path(self) -> None:
+        """No overrides → lockfile lands at <scenario_root>/_bmad/_config/bmad.lock."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = _build_skill(scenario)
+            install = scenario / "install"
+
+            engine.compile_skill(skill, install)
+
+            lockfile = scenario / "_bmad" / "_config" / "bmad.lock"
+            self.assertTrue(lockfile.is_file(), f"lockfile not found at {lockfile}")
+            skill_md = install / "skill1" / "SKILL.md"
+            self.assertTrue(skill_md.is_file())
+
+    def test_explicit_lockfile_root_writes_to_that_root(self) -> None:
+        """Explicit lockfile_root → lockfile at <lockfile_root>/_config/bmad.lock (no doubled _bmad)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            # Simulate install-phase layout: skill under <install>/<module>/<skill>/
+            install = scenario / "_bmad"
+            skill = install / "core" / "skill1"
+            _write(skill / "skill1.template.md", "install-phase body")
+            (install / "custom").mkdir(parents=True, exist_ok=True)
+
+            engine.compile_skill(
+                skill,
+                install,
+                lockfile_root=install,
+                override_root=install / "custom",
+            )
+
+            # Lockfile at <install>/_config/bmad.lock (no _bmad doubling)
+            lockfile = install / "_config" / "bmad.lock"
+            self.assertTrue(lockfile.is_file(), f"lockfile not found at {lockfile}")
+
+            # SKILL.md at <install>/<module>/<skill>/SKILL.md
+            skill_md = install / "core" / "skill1" / "SKILL.md"
+            self.assertTrue(skill_md.is_file(), f"SKILL.md not found at {skill_md}")
+            self.assertEqual(skill_md.read_text(encoding="utf-8"), "install-phase body")
+
+    def test_explicit_lockfile_root_no_doubled_bmad_segment(self) -> None:
+        """Empirical AC 6 regression: lockfile must NOT be at <install>/_bmad/_config/bmad.lock."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            install = scenario / "_bmad"
+            skill = install / "mymod" / "my-skill"
+            _write(skill / "my-skill.template.md", "content")
+            (install / "custom").mkdir(parents=True, exist_ok=True)
+
+            engine.compile_skill(skill, install, lockfile_root=install, override_root=install / "custom")
+
+            # The WRONG path (pre-AC6 bug): <install>/_bmad/_config/bmad.lock
+            doubled = install / "_bmad" / "_config" / "bmad.lock"
+            self.assertFalse(doubled.exists(), "Doubled _bmad segment detected — AC 6 regression!")
+
+            # The correct path
+            correct = install / "_config" / "bmad.lock"
+            self.assertTrue(correct.is_file())
+
+    def test_install_phase_skill_md_path_has_module_segment(self) -> None:
+        """When lockfile_root provided: SKILL.md at <install>/<module>/<skill>/SKILL.md."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            install = scenario / "_bmad"
+            skill = install / "bmm" / "bmad-help"
+            _write(skill / "bmad-help.template.md", "help content")
+            (install / "custom").mkdir(parents=True, exist_ok=True)
+
+            engine.compile_skill(skill, install, lockfile_root=install, override_root=install / "custom")
+
+            # Must have module segment
+            correct = install / "bmm" / "bmad-help" / "SKILL.md"
+            self.assertTrue(correct.is_file(), f"SKILL.md not found at {correct}")
+
+            # Must NOT be at the flat path (no module segment)
+            flat = install / "bmad-help" / "SKILL.md"
+            self.assertFalse(flat.exists(), "SKILL.md found at flat path — module segment missing!")
+
+    def test_explicit_override_root_probes_at_that_path(self) -> None:
+        """override_root provided → override probes use that path directly (no /custom suffix)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            install = scenario / "_bmad"
+            skill = install / "core" / "skill1"
+            _write(skill / "skill1.template.md", "base")
+            # Place override directly at override_root (not at override_root/custom)
+            override_root = install / "custom"
+            _write(
+                override_root / "fragments" / "core" / "skill1" / "SKILL.template.md",
+                "override content",
+            )
+
+            engine.compile_skill(skill, install, lockfile_root=install, override_root=override_root)
+
+            skill_md = install / "core" / "skill1" / "SKILL.md"
+            self.assertEqual(skill_md.read_text(encoding="utf-8"), "override content")
+
+    def test_default_params_unchanged_existing_tests_still_pass(self) -> None:
+        """Regression: all existing test-fixture paths work with new params unset."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = Path(tmp)
+            skill = _build_skill(scenario)
+            install = scenario / "install"
+            engine.compile_skill(skill, install)
+            self.assertEqual(
+                (install / "skill1" / "SKILL.md").read_text(encoding="utf-8"),
+                "base body",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
