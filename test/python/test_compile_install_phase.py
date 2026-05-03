@@ -18,7 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.scripts.bmad_compile import io as bmad_io
+from src.scripts.bmad_compile import engine, io as bmad_io
 
 
 def _write(path: Path, content: str) -> None:
@@ -315,6 +315,107 @@ class TestBmadHelpInstallPhase(unittest.TestCase):
         self.assertRegex(entry["source_hash"], r"^[0-9a-f]{64}$")
         self.assertEqual(entry["compiled_hash"], expected_compiled)
         self.assertEqual(entry["source_hash"], expected_source)
+
+
+class TestModuleDiscovery(unittest.TestCase):
+    """(Story 3.0) Engine module-discovery prerequisite for Epic 3.
+
+    Exercises `_discover_module_roots` and the install-phase `current_module`
+    derivation that routes override probes to the correct module namespace
+    for non-core skills. Per-skill mode (lockfile_root=None) is covered by
+    the existing 282-test baseline.
+    """
+
+    def test_current_module_from_skill_path(self) -> None:
+        """AC 1 smoke check: non-core module skill compiles without error.
+
+        Note: not an AC-1 regression-pin — install-phase output path uses
+        `skill_posix.parent.name` since Story 2.1, so this would pass against
+        the pre-3.0 hardcoded `current_module="core"` too. The true AC-1
+        regression-pin is `test_override_probe_routes_to_correct_module`.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            (t / "ext-mod" / "ext-skill").mkdir(parents=True)
+            (t / "ext-mod" / "ext-skill" / "ext-skill.template.md").write_text(
+                "Simple content\n", encoding="utf-8"
+            )
+            engine.compile_skill(
+                t / "ext-mod" / "ext-skill", t, lockfile_root=t
+            )
+            compiled = t / "ext-mod" / "ext-skill" / "SKILL.md"
+            self.assertTrue(compiled.is_file(), f"SKILL.md not found at {compiled}")
+
+    def test_override_probe_routes_to_correct_module(self) -> None:
+        """AC 5: end-to-end tier-2 override probe for non-core module.
+
+        Pre-Story-3.0 (hardcoded current_module="core") this raised
+        MissingFragmentError because the tier-2 probe looked in
+        `custom/fragments/core/ext-skill/...` instead of
+        `custom/fragments/ext-mod/ext-skill/...`.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            (t / "ext-mod" / "ext-skill").mkdir(parents=True)
+            (t / "ext-mod" / "ext-skill" / "ext-skill.template.md").write_text(
+                'Lead: <<include path="fragments/greet.template.md">>\n',
+                encoding="utf-8",
+            )
+            (t / "custom" / "fragments" / "ext-mod" / "ext-skill").mkdir(parents=True)
+            (
+                t / "custom" / "fragments" / "ext-mod" / "ext-skill" / "greet.template.md"
+            ).write_text("Hello from ext-mod override!\n", encoding="utf-8")
+            (t / "_config").mkdir()
+
+            engine.compile_skill(
+                t / "ext-mod" / "ext-skill",
+                t,
+                lockfile_root=t,
+                override_root=t / "custom",
+            )
+            compiled = (t / "ext-mod" / "ext-skill" / "SKILL.md").read_text(
+                encoding="utf-8"
+            )
+            # Double newline: fragment's trailing \n + template's trailing \n
+            # after include token (verbatim substitution per R2 empirical trace).
+            self.assertEqual(compiled, "Lead: Hello from ext-mod override!\n\n")
+
+    def test_reserved_dirs_excluded_from_module_roots(self) -> None:
+        """AC 3: reserved + underscore-prefixed dirs are not module roots."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            for reserved in ("_config", "custom", "scripts", "memory", "_memory", "_shim"):
+                (t / reserved).mkdir()
+            (t / "ext-mod" / "ext-skill").mkdir(parents=True)
+            (t / "ext-mod" / "ext-skill" / "ext-skill.template.md").write_text(
+                "x\n", encoding="utf-8"
+            )
+
+            install_root = bmad_io.to_posix(t)
+            roots = engine._discover_module_roots(
+                install_root, "ext-mod", install_root / "ext-mod"
+            )
+            self.assertEqual(set(roots.keys()), {"ext-mod"})
+
+    def test_module_roots_contains_all_module_dirs(self) -> None:
+        """AC 2: cross-module routing — both `core` and `bmm` discovered."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            (t / "core" / "core-skill").mkdir(parents=True)
+            (t / "core" / "core-skill" / "core-skill.template.md").write_text(
+                "x\n", encoding="utf-8"
+            )
+            (t / "bmm" / "bmm-skill").mkdir(parents=True)
+            (t / "bmm" / "bmm-skill" / "bmm-skill.template.md").write_text(
+                "y\n", encoding="utf-8"
+            )
+
+            install_root = bmad_io.to_posix(t)
+            roots = engine._discover_module_roots(
+                install_root, "bmm", install_root / "bmm"
+            )
+            self.assertIn("core", roots)
+            self.assertIn("bmm", roots)
 
 
 if __name__ == "__main__":

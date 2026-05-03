@@ -15,9 +15,11 @@ Story 1.2 additions:
 - Allocates a fresh `resolver.CompileCache` per `compile_skill()` call.
 
 Story 1.3 will wire in variable interpolation, Story 1.4 multi-IDE
-(`--tools`), Story 1.5 lockfile writes. Real module discovery (reading
-`module.yaml` etc.) lands in Story 2.x. This module routes every
-filesystem/hash/time concern through `io`.
+(`--tools`), Story 1.5 lockfile writes. Story 3.0 added
+directory-convention module discovery for install-phase mode
+(`lockfile_root` not None); per-skill mode (`lockfile_root=None`)
+preserves Story 1.2 hardcoded-`core` routing for backward compat.
+This module routes every filesystem/hash/time concern through `io`.
 """
 
 from __future__ import annotations
@@ -25,6 +27,15 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from . import errors, io, lockfile, parser, resolver, toml_merge, variants
+
+# Story 3.0: reserved dir names at install-root depth-1; mirrors
+# compile.py's _SKIP_AT_DEPTH_1. Same set, same rationale — these dirs are
+# not modules and must not appear in `module_roots`. The two definitions are
+# intentionally duplicated because compile.py sits outside the bmad_compile
+# package boundary; unifying is a separate single-source-of-truth concern.
+_MODULE_DIR_SKIP: frozenset[str] = frozenset(
+    {"_config", "custom", "scripts", "memory", "_memory"}
+)
 
 
 def _render(nodes: Iterable[object]) -> str:
@@ -46,6 +57,33 @@ def _render(nodes: Iterable[object]) -> str:
                 "VarCompile should have been resolved by resolver.resolve()"
             )
     return "".join(parts)
+
+
+def _discover_module_roots(
+    install_root: io.PurePosixPath,
+    current_module: str,
+    current_module_dir: io.PurePosixPath,
+) -> dict[str, io.PurePosixPath]:
+    """Enumerate module dirs under install_root for install-phase module routing.
+
+    A directory qualifies when it does not start with '_' and is not in
+    _MODULE_DIR_SKIP. Mirrors compile.py depth-1 skip logic so the same
+    dirs are invisible at both the walker (compile.py) and the resolver
+    (engine.py) layers. current_module/current_module_dir are inserted
+    unconditionally as a fallback so the calling skill always has a valid
+    module root even in sparse test fixtures.
+    """
+    roots: dict[str, io.PurePosixPath] = {}
+    for entry in io.list_dir_sorted(str(install_root)):
+        if (
+            io.is_dir(str(entry))
+            and not entry.name.startswith("_")
+            and entry.name not in _MODULE_DIR_SKIP
+        ):
+            roots[entry.name] = entry
+    if current_module not in roots:
+        roots[current_module] = current_module_dir
+    return roots
 
 
 def compile_skill(
@@ -75,12 +113,16 @@ def compile_skill(
         )
     basename = skill_posix.name
 
-    # Story 1.2: hardcoded-`core` module discovery. Real discovery (reading
-    # `module.yaml`, enumerating installed modules) lands in Story 2.x. The
-    # fixture convention `<scenario>/core/<scenario>-skill/` makes
-    # `skill_dir.parent` the synthetic module root.
-    module_roots = {"core": skill_posix.parent}
-    current_module = "core"
+    # Story 3.0: Real module discovery. Per-skill mode (lockfile_root=None)
+    # preserves Story 1.2 hardcoded-core behavior for backward compat.
+    if lockfile_root is not None:
+        current_module = skill_posix.parent.name
+        module_roots = _discover_module_roots(
+            io.to_posix(lockfile_root), current_module, skill_posix.parent
+        )
+    else:
+        current_module = "core"
+        module_roots = {"core": skill_posix.parent}
 
     # Override root probes `<skill>.parent.parent / _bmad / custom`. For a
     # fixture `.../<scenario>/core/<scenario>-skill/` this lands at
