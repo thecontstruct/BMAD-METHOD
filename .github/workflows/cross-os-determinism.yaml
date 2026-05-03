@@ -1,0 +1,90 @@
+name: Cross-OS Determinism
+
+# Verifies byte-identical compile output across platforms.
+# PR commits: Linux-only fast path (correctness already pinned by quality.yaml).
+# Merge to main / nightly / release-tag: full 4-platform matrix + hash diff.
+
+"on":
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cross-os-det-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile-hash:
+    # PR: ubuntu-latest only (fast path).
+    # Push/schedule/tag: all 4 required platforms.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: >-
+          ${{
+            github.event_name == 'pull_request'
+            && fromJson('["ubuntu-latest"]')
+            || fromJson('["ubuntu-latest", "macos-13", "macos-latest", "windows-latest"]')
+          }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run Python test suite (AC 4a — verifies python3 on PATH)
+        run: npm run test:python
+
+      - name: Compile migrated skills and record hashes
+        run: >-
+          python3 tools/ci-hash.py
+          --output-file hashes-${{ runner.os }}-${{ runner.arch }}.json
+
+      - name: Upload hash artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-hashes-${{ runner.os }}-${{ runner.arch }}
+          path: hashes-${{ runner.os }}-${{ runner.arch }}.json
+          if-no-files-found: error
+
+  consolidate:
+    needs: [compile-hash]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download all platform hash artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: compile-hashes-*
+          path: hashes/
+          merge-multiple: true
+
+      - name: Consolidate and diff hashes across platforms
+        run: python3 tools/ci-hash-consolidate.py --hashes-dir hashes/
