@@ -418,5 +418,134 @@ class TestModuleDiscovery(unittest.TestCase):
             self.assertIn("bmm", roots)
 
 
+class TestProseFragmentOverrides(unittest.TestCase):
+    """(Story 3.1) Prose fragment override tier resolution + lockfile schema.
+
+    Pins all five precedence tiers via 4 integration tests:
+      - AC 1: tier-5 (base) wins when no override exists.
+      - AC 2: tier-2 (user-module-fragment) wins; lockfile carries
+        base_hash + override_path.
+      - AC 3: tier-1 (user-full-skill) wins over tier-2 per the precedence
+        ladder; compiled-output assertion only (lockfile root-tier provenance
+        deferred to Story 4.2 per Open Question 4).
+      - AC 4: identical-content override still uses the override tier;
+        tier selection is path-existence-based, not content-comparison-based.
+    """
+
+    def _make_base_tree(self, tmp: Path) -> None:
+        skill_dir = tmp / "core" / "skill1"
+        _write(
+            skill_dir / "skill1.template.md",
+            'Lead: <<include path="fragments/persona-guard.template.md">>\n',
+        )
+        _write(skill_dir / "fragments" / "persona-guard.template.md", "Core guard.\n")
+
+    def test_base_tier_recorded_in_lockfile(self) -> None:
+        """AC 1: no override → base tier wins; lockfile records resolved_from='base'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            self._make_base_tree(t)
+
+            engine.compile_skill(t / "core" / "skill1", t, lockfile_root=t)
+
+            compiled = (t / "core" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "Lead: Core guard.\n\n")
+
+            lf = json.loads((t / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry = next(e for e in lf["entries"] if e["skill"] == "skill1")
+            self.assertEqual(len(entry["fragments"]), 1)
+            frag = entry["fragments"][0]
+            self.assertEqual(frag["resolved_from"], "base")
+            base_text = bmad_io.read_template(
+                str(t / "core" / "skill1" / "fragments" / "persona-guard.template.md")
+            )
+            self.assertEqual(frag["hash"], bmad_io.hash_text(base_text))
+            self.assertNotIn("base_hash", frag)
+            self.assertNotIn("override_path", frag)
+
+    def test_user_module_fragment_override_wins(self) -> None:
+        """AC 2: tier-2 override wins; lockfile carries base_hash + override_path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            self._make_base_tree(t)
+            override_file = (
+                t / "custom" / "fragments" / "core" / "skill1" / "persona-guard.template.md"
+            )
+            _write(override_file, "Override guard.\n")
+
+            engine.compile_skill(
+                t / "core" / "skill1", t, lockfile_root=t, override_root=t / "custom"
+            )
+
+            compiled = (t / "core" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "Lead: Override guard.\n\n")
+
+            lf = json.loads((t / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry = next(e for e in lf["entries"] if e["skill"] == "skill1")
+            frag = entry["fragments"][0]
+            self.assertEqual(frag["resolved_from"], "user-module-fragment")
+
+            override_text = bmad_io.read_template(str(override_file))
+            base_text = bmad_io.read_template(
+                str(t / "core" / "skill1" / "fragments" / "persona-guard.template.md")
+            )
+            self.assertEqual(frag["hash"], bmad_io.hash_text(override_text))
+            self.assertEqual(frag["base_hash"], bmad_io.hash_text(base_text))
+            self.assertEqual(
+                frag["override_path"],
+                "custom/fragments/core/skill1/persona-guard.template.md",
+            )
+            # Schema-v1 compat: `path` retained alongside `override_path`; for
+            # override tiers they reference the same winning file.
+            self.assertEqual(frag["path"], frag["override_path"])
+
+    def test_user_full_skill_override_wins_over_fragment_override(self) -> None:
+        """AC 3: tier-1 (user-full-skill) beats tier-2 (user-module-fragment)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            self._make_base_tree(t)
+            _write(
+                t / "custom" / "fragments" / "core" / "skill1" / "persona-guard.template.md",
+                "Override guard.\n",
+            )
+            _write(
+                t / "custom" / "fragments" / "core" / "skill1" / "SKILL.template.md",
+                "Full-skill replacement.\n",
+            )
+
+            engine.compile_skill(
+                t / "core" / "skill1", t, lockfile_root=t, override_root=t / "custom"
+            )
+
+            compiled = (t / "core" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "Full-skill replacement.\n")
+            self.assertNotIn("Override guard.", compiled)
+            self.assertNotIn("Core guard.", compiled)
+            # Lockfile root-tier assertion deferred per OQ 4 (Story 4.2 territory).
+
+    def test_identical_content_override_uses_override_tier(self) -> None:
+        """AC 4: byte-identical override still uses override tier; tier wins on path existence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            self._make_base_tree(t)
+            override_file = (
+                t / "custom" / "fragments" / "core" / "skill1" / "persona-guard.template.md"
+            )
+            _write(override_file, "Core guard.\n")
+
+            engine.compile_skill(
+                t / "core" / "skill1", t, lockfile_root=t, override_root=t / "custom"
+            )
+
+            compiled = (t / "core" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "Lead: Core guard.\n\n")
+
+            lf = json.loads((t / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry = next(e for e in lf["entries"] if e["skill"] == "skill1")
+            frag = entry["fragments"][0]
+            self.assertEqual(frag["resolved_from"], "user-module-fragment")
+            self.assertEqual(frag["base_hash"], frag["hash"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -361,6 +361,12 @@ class ResolvedFragment:
     # observability; Story 1.3 variable resolution will consume this.
     merged_scope: tuple[tuple[str, str], ...]
     nodes: list[parser.AstNode]
+    # Tier-5 (base) candidate path, populated only when an override tier
+    # (`user-module-fragment` or `user-override`) wins AND the base file
+    # exists on disk. None for non-override tiers and for override wins where
+    # no upstream base exists. Story 3.1: enables lockfile.py to compute
+    # `base_hash` without re-probing tier 5 itself.
+    base_path: PurePosixPath | None = None
 
 
 @dataclass
@@ -748,6 +754,14 @@ def _walk_nodes(
         )
         visited_stack.pop()
 
+        base_path_for_frag: PurePosixPath | None = None
+        if tier_won in (_TIER_USER_MODULE_FRAGMENT, _TIER_USER_OVERRIDE):
+            base_candidate = _base_candidate(
+                context, effective_module, relative_subpath, had_prefix
+            )
+            if base_candidate is not None and io.is_file(str(base_candidate)):
+                base_path_for_frag = base_candidate
+
         resolved = ResolvedFragment(
             src=node.src,
             resolved_path=resolved_path,
@@ -755,6 +769,7 @@ def _walk_nodes(
             local_props=node.props,
             merged_scope=child_scope,
             nodes=child_flat,
+            base_path=base_path_for_frag,
         )
         dep_tree[placeholder_idx] = resolved
         flat.extend(child_flat)

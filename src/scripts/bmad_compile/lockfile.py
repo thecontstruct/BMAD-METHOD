@@ -108,11 +108,23 @@ def _build_skill_entry(
         frag_source = cache.get_source((frag.resolved_path, frag.resolved_from))
         frag_hash = io.hash_text(frag_source)
         frag_path = _normalize_path(str(frag.resolved_path), scenario_root)
-        fragments.append({
+        frag_entry: dict[str, Any] = {
             "hash": frag_hash,
             "path": frag_path,
             "resolved_from": frag.resolved_from,
-        })
+        }
+        # Story 3.1: when an override tier wins, record the override file
+        # path explicitly and the base file's hash (or null when the
+        # override has no upstream base — a brand-new fragment).
+        if frag.resolved_from in ("user-module-fragment", "user-override"):
+            frag_entry["override_path"] = frag_path
+            if frag.base_path is not None:
+                # read_template normalizes CRLF→LF, matching cache.get_source (also LF-normalized).
+                base_text = io.read_template(str(frag.base_path))
+                frag_entry["base_hash"] = io.hash_text(base_text)
+            else:
+                frag_entry["base_hash"] = None
+        fragments.append(frag_entry)
 
     variables: list[dict[str, Any]] = []
     for name, rv in sorted(var_scope._table.items()):
