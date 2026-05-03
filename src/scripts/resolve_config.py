@@ -28,6 +28,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 try:
     import tomllib
@@ -37,12 +38,13 @@ except ImportError:
     )
     sys.exit(3)
 
+from bmad_compile.toml_merge import merge_layers
+
 
 _MISSING = object()
-_KEYED_MERGE_FIELDS = ("code", "id")
 
 
-def load_toml(file_path: Path, required: bool = False) -> dict:
+def load_toml(file_path: Path, required: bool = False) -> dict[str, Any]:
     if not file_path.exists():
         if required:
             sys.stderr.write(f"error: required config file not found: {file_path}\n")
@@ -68,64 +70,9 @@ def load_toml(file_path: Path, required: bool = False) -> dict:
         return {}
 
 
-def _detect_keyed_merge_field(items):
-    if not items or not all(isinstance(item, dict) for item in items):
-        return None
-    for candidate in _KEYED_MERGE_FIELDS:
-        if all(item.get(candidate) is not None for item in items):
-            return candidate
-    return None
-
-
-def _merge_by_key(base, override, key_name):
-    result = []
-    index_by_key = {}
-    for item in base:
-        if not isinstance(item, dict):
-            continue
-        if item.get(key_name) is not None:
-            index_by_key[item[key_name]] = len(result)
-        result.append(dict(item))
-    for item in override:
-        if not isinstance(item, dict):
-            result.append(item)
-            continue
-        key = item.get(key_name)
-        if key is not None and key in index_by_key:
-            result[index_by_key[key]] = dict(item)
-        else:
-            if key is not None:
-                index_by_key[key] = len(result)
-            result.append(dict(item))
-    return result
-
-
-def _merge_arrays(base, override):
-    base_arr = base if isinstance(base, list) else []
-    override_arr = override if isinstance(override, list) else []
-    keyed_field = _detect_keyed_merge_field(base_arr + override_arr)
-    if keyed_field:
-        return _merge_by_key(base_arr, override_arr, keyed_field)
-    return base_arr + override_arr
-
-
-def deep_merge(base, override):
-    if isinstance(base, dict) and isinstance(override, dict):
-        result = dict(base)
-        for key, over_val in override.items():
-            if key in result:
-                result[key] = deep_merge(result[key], over_val)
-            else:
-                result[key] = over_val
-        return result
-    if isinstance(base, list) and isinstance(override, list):
-        return _merge_arrays(base, override)
-    return override
-
-
-def extract_key(data, dotted_key: str):
+def extract_key(data: dict[str, Any], dotted_key: str) -> Any:
     parts = dotted_key.split(".")
-    current = data
+    current: Any = data
     for part in parts:
         if isinstance(current, dict) and part in current:
             current = current[part]
@@ -134,7 +81,7 @@ def extract_key(data, dotted_key: str):
     return current
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Resolve BMad central config using four-layer TOML merge.",
     )
@@ -156,10 +103,9 @@ def main():
     custom_team = load_toml(bmad_dir / "custom" / "config.toml")
     custom_user = load_toml(bmad_dir / "custom" / "config.user.toml")
 
-    merged = deep_merge(base_team, base_user)
-    merged = deep_merge(merged, custom_team)
-    merged = deep_merge(merged, custom_user)
+    merged = merge_layers(base_team, base_user, custom_team, custom_user)
 
+    output: dict[str, Any]
     if args.key:
         output = {}
         for key in args.key:

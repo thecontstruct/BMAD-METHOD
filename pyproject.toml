@@ -6,3 +6,6 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["mypy"]
+
+[tool.mypy]
+mypy_path = "src/scripts"

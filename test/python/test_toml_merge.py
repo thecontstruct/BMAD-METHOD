@@ -87,6 +87,80 @@ class TestMergeLayers(unittest.TestCase):
         self.assertEqual(r1, r2)
 
 
+class TestAoTMergeEdgeCases(unittest.TestCase):
+    """Edge cases for arrays-of-tables (AoT) merge — Story 3.2 AC 3."""
+
+    def test_aot_id_keyed_three_layer_full_replacement(self) -> None:
+        # Base: two id-keyed items, both with `enabled = true`.
+        base = {"steps": [
+            {"id": "plan", "label": "Plan", "enabled": True},
+            {"id": "review", "label": "Review", "enabled": True},
+        ]}
+        # Team layer: overrides "plan" — `enabled` NOT present, must be DROPPED.
+        team = {"steps": [
+            {"id": "plan", "label": "Plan (Team)"},
+        ]}
+        # User layer: overrides "review" with explicit `enabled = false`.
+        user = {"steps": [
+            {"id": "review", "label": "Review (User)", "enabled": False},
+        ]}
+
+        result = merge_layers(base, team, user)["steps"]
+        self.assertEqual(len(result), 2)
+
+        plan = next(s for s in result if s["id"] == "plan")
+        self.assertEqual(plan["label"], "Plan (Team)")
+        self.assertNotIn("enabled", plan)  # full replacement — base field dropped
+
+        review = next(s for s in result if s["id"] == "review")
+        self.assertEqual(review["label"], "Review (User)")
+        self.assertIs(review["enabled"], False)
+
+    def test_aot_code_keyed_full_replacement(self) -> None:
+        base = {"agents": [
+            {"code": "pm", "name": "PM", "bio": "manages product"},
+            {"code": "dev", "name": "Dev"},
+        ]}
+        override = {"agents": [
+            {"code": "pm", "name": "PM Override"},  # bio NOT present → dropped
+        ]}
+        result = merge_layers(base, override)["agents"]
+        self.assertEqual(len(result), 2)
+        pm = next(a for a in result if a["code"] == "pm")
+        self.assertEqual(pm["name"], "PM Override")
+        self.assertNotIn("bio", pm)
+        dev = next(a for a in result if a["code"] == "dev")
+        self.assertEqual(dev["name"], "Dev")
+
+    def test_aot_three_layer_distinct_keys_all_survive(self) -> None:
+        # Each layer contributes a distinct id-keyed item — no key collisions.
+        # Keyed-merge semantics still apply (every item has `id`), so all 3
+        # survive in deterministic order.
+        base = {"steps": [{"id": "a", "label": "A"}]}
+        team = {"steps": [{"id": "b", "label": "B"}]}
+        user = {"steps": [{"id": "c", "label": "C"}]}
+        result = merge_layers(base, team, user)["steps"]
+        self.assertEqual(len(result), 3)
+        self.assertEqual([s["id"] for s in result], ["a", "b", "c"])
+
+    def test_aot_mixed_key_fallback_plain_append(self) -> None:
+        # Mixed: one item has `id`, one has `code`, one has neither.
+        # _keyed_field returns None → plain append.
+        base = {"items": [
+            {"id": "x", "label": "X"},
+            {"name": "no-key"},
+        ]}
+        override = {"items": [
+            {"code": "y", "label": "Y"},
+        ]}
+        result = merge_layers(base, override)["items"]
+        # Plain append: 2 + 1 = 3 items, no merging by id/code.
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0], {"id": "x", "label": "X"})
+        self.assertEqual(result[1], {"name": "no-key"})
+        self.assertEqual(result[2], {"code": "y", "label": "Y"})
+
+
 class TestLoadTomlFile(unittest.TestCase):
     def test_load_toml_file_returns_empty_for_missing(self) -> None:
         result = load_toml_file("/nonexistent/path/to/file.toml")
