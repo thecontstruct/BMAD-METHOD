@@ -214,7 +214,8 @@ def _run_diff_mode(
     diff = list(difflib.unified_diff(
         old_lines, new_lines,
         fromfile=skill_rel,
-        tofile=f"{skill_rel} (recompiled)",
+        tofile=skill_rel,
+        tofiledate="(recompiled)",
     ))
     if diff:
         output = _colorize_diff(diff) if sys.stdout.isatty() else "".join(diff)
@@ -272,7 +273,7 @@ def _resolve_skill_canonical(canonical: str, install_dir: Path) -> "Path | None"
             )
             return None
         if len(matches) > 1:
-            sorted_matches = sorted(matches)
+            sorted_matches = sorted(matches, key=lambda p: (p.parent.name, p.name))
             qualified = ", ".join(
                 f"{p.parent.name}/{p.name}" for p in sorted_matches
             )
@@ -307,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Dry-run mode: emit unified diff to stdout; no file writes.",
     )
     args = ap.parse_args(argv)
+    # Normalize empty-string positional to None (argparse can produce '' for nargs="?")
+    args.skill_canonical = args.skill_canonical or None
 
     # Validation guards
     if args.skill_canonical is not None and args.skill:
