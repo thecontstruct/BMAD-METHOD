@@ -62,6 +62,21 @@ def _run_install_phase(install_dir: Path) -> int:
         )
 
         if is_skill:
+            module = dirpath.parent.name
+            _full_skill_override = (
+                install_dir / "custom" / "fragments" / module / dir_name / "SKILL.template.md"
+            )
+            if _full_skill_override.is_file():
+                _emit({
+                    "schema_version": 1,
+                    "kind": "warning",
+                    "skill": f"{module}/{dir_name}",
+                    "message": (
+                        f"warning: full-skill override at '{_full_skill_override}' "
+                        "bypasses fragment-level upgrade safety; this skill will not "
+                        "receive fragment-level upgrades from the base module"
+                    ),
+                })
             try:
                 engine.compile_skill(
                     dirpath,
@@ -70,7 +85,6 @@ def _run_install_phase(install_dir: Path) -> int:
                     lockfile_root=install_dir,
                     override_root=install_dir / "custom",
                 )
-                module = dirpath.parent.name
                 skill_md = install_dir / module / dir_name / "SKILL.md"
                 _emit({
                     "schema_version": 1,
@@ -192,6 +206,22 @@ def main(argv: list[str] | None = None) -> int:
 
     target_ide = args.tools.lower().strip() if args.tools else None
     target_ide = target_ide or None  # "" → None
+
+    # Per-skill mode: engine hardcodes current_module="core" (engine.py:128-130
+    # for the lockfile_root=None branch; preserves Story 1.2 behavior). The
+    # warning probe must mirror that — using `skill_path.parent.name` here
+    # would fire on a non-effective path and miss the override the engine
+    # actually picks up at fragments/core/<skill>/SKILL.template.md.
+    _per_skill_override_root = skill_path.parent.parent / "_bmad" / "custom"
+    _full_skill_override = (
+        _per_skill_override_root / "fragments" / "core" / skill_path.name / "SKILL.template.md"
+    )
+    if _full_skill_override.is_file():
+        sys.stderr.write(
+            f"warning: full-skill override at '{_full_skill_override}' "
+            "bypasses fragment-level upgrade safety; this skill will not "
+            "receive fragment-level upgrades from the base module\n"
+        )
 
     try:
         engine.compile_skill(

@@ -687,5 +687,62 @@ class TestYamlVariableOverrides(unittest.TestCase):
             self.assertEqual(ve_empty["value_hash"], bmad_io.hash_text(""))
 
 
+class TestModuleBoundaryEnforcement(unittest.TestCase):
+    """(Story 3.4) Module co-existence and full-skill escape hatch warning."""
+
+    def test_namespaced_module_coexists_with_core(self) -> None:
+        """AC 1: non-core module fragment installs alongside core without conflict."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            # Core skill: base-tier fragment in fragments/ subdir
+            _write(
+                t / "core" / "skill1" / "skill1.template.md",
+                '<<include path="fragments/persona-guard.template.md">>\n',
+            )
+            _write(
+                t / "core" / "skill1" / "fragments" / "persona-guard.template.md",
+                "Core guard.\n",
+            )
+            # Third-party skill: same-named fragment in its own namespace — no conflict
+            _write(
+                t / "thirdparty" / "skill2" / "skill2.template.md",
+                '<<include path="fragments/persona-guard.template.md">>\n',
+            )
+            _write(
+                t / "thirdparty" / "skill2" / "fragments" / "persona-guard.template.md",
+                "ThirdParty guard.\n",
+            )
+            (t / "custom").mkdir(parents=True, exist_ok=True)
+
+            code, events, _ = _run_install_phase(t)
+
+            self.assertEqual(code, 0)
+            summary = next(e for e in events if e["kind"] == "summary")
+            self.assertEqual(summary["compiled"], 2)
+            self.assertEqual(summary["errors"], 0)
+            self.assertTrue((t / "core" / "skill1" / "SKILL.md").is_file())
+            self.assertTrue((t / "thirdparty" / "skill2" / "SKILL.md").is_file())
+
+    def test_user_full_skill_override_emits_warning(self) -> None:
+        """AC 2: SKILL.template.md user override emits kind:"warning" NDJSON event."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            _write(t / "mymod" / "skill1" / "skill1.template.md", "Original content\n")
+            _write(
+                t / "custom" / "fragments" / "mymod" / "skill1" / "SKILL.template.md",
+                "Override: complete\n",
+            )
+
+            code, events, _ = _run_install_phase(t)
+
+            self.assertEqual(code, 0)
+            compiled = (t / "mymod" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "Override: complete\n")
+
+            warning_events = [e for e in events if e["kind"] == "warning"]
+            self.assertTrue(len(warning_events) >= 1, "Expected at least one kind:warning event")
+            self.assertIn("bypasses fragment-level upgrade safety", warning_events[0]["message"])
+
+
 if __name__ == "__main__":
     unittest.main()
