@@ -10,6 +10,7 @@ Exercises the `_run_install_phase` dispatcher end-to-end:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -41,6 +42,17 @@ def _run_install_phase(install_dir: Path) -> tuple[int, list[dict], str]:
         if line:
             events.append(json.loads(line))
     return result.returncode, events, result.stderr
+
+
+def _run_compile_skill(install_dir: Path, args: list[str]) -> tuple[int, str, str]:
+    """Invoke compile.py with given args and return (exit_code, stdout, stderr)."""
+    compile_py = Path(__file__).resolve().parent.parent.parent / "src" / "scripts" / "compile.py"
+    result = subprocess.run(
+        [sys.executable, str(compile_py), "--install-dir", str(install_dir)] + args,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stdout, result.stderr
 
 
 class TestInstallPhaseHappyPath(unittest.TestCase):
@@ -807,6 +819,221 @@ class TestOverrideRootContainment(unittest.TestCase):
                 override_root=custom,
             )
             self.assertIsNone(result)
+
+
+class TestCompileSkillPositional(unittest.TestCase):
+    """Tests for positional <skill> argument (AC 1)."""
+
+    def test_positional_qualified_resolves_and_compiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello from my-skill!")
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            self.assertTrue(skill_md.is_file())
+            self.assertEqual(skill_md.read_text(encoding="utf-8"), "Hello from my-skill!")
+
+    def test_positional_short_resolves_unique(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello from my-skill!")
+            code, stdout, stderr = _run_compile_skill(install, ["my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            self.assertTrue(skill_md.is_file())
+
+    def test_positional_ambiguous_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "core version")
+            _write(install / "thirdparty" / "my-skill" / "my-skill.template.md", "thirdparty version")
+            code, stdout, stderr = _run_compile_skill(install, ["my-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("core/my-skill", stderr)
+            self.assertIn("thirdparty/my-skill", stderr)
+
+    def test_positional_not_found_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            (install / "core").mkdir(parents=True)
+            code, stdout, stderr = _run_compile_skill(install, ["nonexistent-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("not found", stderr)
+
+    def test_positional_full_skill_override_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello!")
+            _write(
+                install / "custom" / "fragments" / "core" / "my-skill" / "SKILL.template.md",
+                "Full override",
+            )
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn("full-skill override", stderr)
+
+
+class TestCompileSkillDiff(unittest.TestCase):
+    """Tests for --diff mode (AC 2, AC 3, AC 4, AC 5)."""
+
+    def _minimal_lock(self, install: Path) -> None:
+        """Write a minimal valid bmad.lock so the engine sees version=1 and proceeds."""
+        lock_content = (
+            json.dumps(
+                {"bmad_version": "1.0.0", "compiled_at": "1.0.0", "entries": [], "version": 1},
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        )
+        _write(install / "_config" / "bmad.lock", lock_content)
+
+    def test_diff_shows_changes_when_installed_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "New content\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "Old content\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill", "--diff"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn("-Old content", stdout)
+            self.assertIn("+New content", stdout)
+
+    def test_diff_no_writes_to_skill_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "New content\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "Old content\n")
+            self._minimal_lock(install)
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            sha_before = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            _run_compile_skill(install, ["core/my-skill", "--diff"])
+            sha_after = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_diff_no_writes_to_lockfile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "New content\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "Old content\n")
+            self._minimal_lock(install)
+            lock = install / "_config" / "bmad.lock"
+            sha_before = hashlib.sha256(lock.read_bytes()).hexdigest()
+            _run_compile_skill(install, ["core/my-skill", "--diff"])
+            sha_after = hashlib.sha256(lock.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_diff_unchanged_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Same content\n")
+            # First: normal compile to produce SKILL.md and bmad.lock
+            code, _, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"Initial compile failed: {stderr}")
+            # Second: --diff against the freshly compiled output should be empty
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill", "--diff"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertEqual(stdout, "")
+
+    def test_diff_pristine_no_custom_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Same content\n")
+            # Compile once without any custom/ directory
+            code, _, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"Initial compile failed: {stderr}")
+            # Ensure no custom/ directory exists (engine never creates one)
+            custom_dir = install / "custom"
+            if custom_dir.exists():
+                shutil.rmtree(str(custom_dir))
+            # --diff with no custom/ should be empty and silent
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill", "--diff"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+
+    def test_diff_plain_when_no_tty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "New content\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "Old content\n")
+            self._minimal_lock(install)
+            # subprocess capture_output=True redirects stdout to a pipe → isatty() == False
+            code, stdout, _ = _run_compile_skill(install, ["core/my-skill", "--diff"])
+            self.assertEqual(code, 0)
+            self.assertNotIn("\033[", stdout)
+
+    def test_determinism_twice_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Deterministic content\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "Old content\n")
+            self._minimal_lock(install)
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            lock = install / "_config" / "bmad.lock"
+
+            sha_skill_1 = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            sha_lock_1 = hashlib.sha256(lock.read_bytes()).hexdigest()
+            code1, stdout1, _ = _run_compile_skill(install, ["core/my-skill", "--diff"])
+            self.assertEqual(code1, 0)
+            self.assertEqual(hashlib.sha256(skill_md.read_bytes()).hexdigest(), sha_skill_1)
+            self.assertEqual(hashlib.sha256(lock.read_bytes()).hexdigest(), sha_lock_1)
+
+            sha_skill_2 = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            sha_lock_2 = hashlib.sha256(lock.read_bytes()).hexdigest()
+            code2, stdout2, _ = _run_compile_skill(install, ["core/my-skill", "--diff"])
+            self.assertEqual(code2, 0)
+            self.assertEqual(hashlib.sha256(skill_md.read_bytes()).hexdigest(), sha_skill_2)
+            self.assertEqual(hashlib.sha256(lock.read_bytes()).hexdigest(), sha_lock_2)
+
+            # Both runs produce byte-identical stdout
+            self.assertEqual(stdout1, stdout2)
+            # Files unchanged across both runs
+            self.assertEqual(sha_skill_1, sha_skill_2)
+            self.assertEqual(sha_lock_1, sha_lock_2)
+
+
+class TestExitCodeAlignment(unittest.TestCase):
+    """Tests for exit code convention (fold-in 5b): exit 1 for CompilerError, exit 2 for LockfileVersionMismatchError."""
+
+    def test_compiler_error_exits_1_via_positional(self) -> None:
+        """Skill dir with no template file → MissingFragmentError → exit 1 (not 2)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            # Create skill dir with NO template file
+            (install / "core" / "my-skill").mkdir(parents=True)
+            code, _, _ = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 1)
+
+    def test_compiler_error_exits_1_via_skill_flag(self) -> None:
+        """Same scenario via --skill <path> → exit 1 (regression for fold-in 5b fix)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "out"
+            install.mkdir()
+            skill_dir = Path(tmp) / "src" / "my-skill"
+            skill_dir.mkdir(parents=True)
+            # No template file → MissingFragmentError → exit 1
+            code, _, _ = _run_compile_skill(install, ["--skill", str(skill_dir)])
+            self.assertEqual(code, 1)
+
+    def test_lockfile_version_mismatch_exits_2(self) -> None:
+        """bmad.lock with version > 1 → LockfileVersionMismatchError → exit 2."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello!")
+            # Write a lockfile with version=2 (future, unsupported)
+            future_lock = (
+                json.dumps(
+                    {"bmad_version": "99.0.0", "compiled_at": "99.0.0", "entries": [], "version": 2},
+                    sort_keys=True,
+                    indent=2,
+                )
+                + "\n"
+            )
+            _write(install / "_config" / "bmad.lock", future_lock)
+            code, _, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 2, f"stderr: {stderr}")
 
 
 if __name__ == "__main__":

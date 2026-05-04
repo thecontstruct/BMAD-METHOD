@@ -9,19 +9,28 @@ No subcommands, no --verbose, no config loading, no plugin discovery.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from bmad_compile import engine, variants
-from bmad_compile.errors import CompilerError
+from bmad_compile.errors import CompilerError, LockfileVersionMismatchError
 
 
-def _emit(obj: dict) -> None:
+_ANSI_GREEN = "\033[32m"
+_ANSI_RED   = "\033[31m"
+_ANSI_CYAN  = "\033[36m"
+_ANSI_BOLD  = "\033[1m"
+_ANSI_RESET = "\033[0m"
+
+
+def _emit(obj: dict[str, Any]) -> None:
     """Write a JSON event to stdout (sort_keys=True) and flush."""
     print(json.dumps(obj, sort_keys=True), flush=True)
 
@@ -145,6 +154,136 @@ def _run_install_phase(install_dir: Path) -> int:
     return 0 if errors == 0 else 1
 
 
+def _colorize_diff(lines: list[str]) -> str:
+    out = []
+    for line in lines:
+        if line.startswith(("+++", "---")):
+            out.append(_ANSI_BOLD + line + _ANSI_RESET)
+        elif line.startswith("+"):
+            out.append(_ANSI_GREEN + line + _ANSI_RESET)
+        elif line.startswith("-"):
+            out.append(_ANSI_RED + line + _ANSI_RESET)
+        elif line.startswith("@@"):
+            out.append(_ANSI_CYAN + line + _ANSI_RESET)
+        else:
+            out.append(line)
+    return "".join(out)
+
+
+def _run_diff_mode(
+    skill_path: Path,
+    install_path: Path,
+    target_ide: str | None,
+    install_flags: dict[str, str],
+) -> int:
+    module_name = skill_path.parent.name
+    skill_md_path = install_path / module_name / skill_path.name / "SKILL.md"
+    lock_path = install_path / "_config" / "bmad.lock"
+
+    # Save pre-compile state (bytes, not text — exact restore)
+    old_skill = skill_md_path.read_bytes() if skill_md_path.is_file() else None
+    old_lock = lock_path.read_bytes() if lock_path.is_file() else None
+
+    new_skill_text: str | None = None
+    try:
+        engine.compile_skill(
+            skill_path, install_path, target_ide=target_ide,
+            lockfile_root=install_path,
+            override_root=install_path / "custom",
+            install_flags=install_flags or None,
+        )
+        new_skill_text = skill_md_path.read_text(encoding="utf-8")
+    finally:
+        # Restore — unconditional; runs on success, error, and KeyboardInterrupt
+        if old_skill is not None:
+            skill_md_path.write_bytes(old_skill)
+        elif skill_md_path.is_file():
+            skill_md_path.unlink()
+        if old_lock is not None:
+            lock_path.write_bytes(old_lock)
+        elif lock_path.is_file():
+            lock_path.unlink()
+
+    # Invariant: if an exception was raised in the try block, it propagated
+    # through the finally and this line is never reached. new_skill_text is set.
+    assert new_skill_text is not None
+    old_skill_text = old_skill.decode("utf-8") if old_skill is not None else ""
+    old_lines = old_skill_text.splitlines(keepends=True)
+    new_lines = new_skill_text.splitlines(keepends=True)
+    skill_rel = f"{module_name}/{skill_path.name}/SKILL.md"
+    diff = list(difflib.unified_diff(
+        old_lines, new_lines,
+        fromfile=skill_rel,
+        tofile=f"{skill_rel} (recompiled)",
+    ))
+    if diff:
+        output = _colorize_diff(diff) if sys.stdout.isatty() else "".join(diff)
+        sys.stdout.write(output)
+    return 0
+
+
+# _RESOLVE_SKIP mirrors _SKIP_AT_DEPTH_1 in _run_install_phase and _MODULE_DIR_SKIP in engine.py
+_RESOLVE_SKIP = frozenset({"_config", "custom", "scripts", "memory", "_memory"})
+
+
+def _resolve_skill_canonical(canonical: str, install_dir: Path) -> "Path | None":
+    # OQ-4: Reject backslash separators and path traversal components
+    if "\\" in canonical:
+        sys.stderr.write(f"error: invalid skill name (backslash not allowed): {canonical!r}\n")
+        return None
+    if "/" in canonical:
+        if canonical.count("/") > 1:
+            sys.stderr.write(f"error: invalid skill name (too many '/' separators): {canonical!r}\n")
+            return None
+        module, _, skill_name = canonical.partition("/")
+        if not module or not skill_name or module in (".", "..") or skill_name in (".", ".."):
+            sys.stderr.write(f"error: invalid skill name (path traversal not allowed): {canonical!r}\n")
+            return None
+        if module in _RESOLVE_SKIP or module.startswith("_"):
+            sys.stderr.write(f"error: invalid skill name: module {module!r} is reserved\n")
+            return None
+        skill_path = install_dir / module / skill_name
+        if not skill_path.is_dir():
+            sys.stderr.write(
+                f"error: skill not found: {canonical!r} — no directory at {skill_path}\n"
+            )
+            return None
+        return skill_path
+    else:
+        if not canonical or canonical in (".", ".."):
+            sys.stderr.write(f"error: invalid skill name: {canonical!r}\n")
+            return None
+        try:
+            entries = list(install_dir.iterdir())
+        except OSError as exc:
+            sys.stderr.write(f"error: cannot read install directory: {exc}\n")
+            return None
+        matches = [
+            entry / canonical
+            for entry in entries
+            if entry.is_dir()
+            and not entry.name.startswith("_")
+            and entry.name not in _RESOLVE_SKIP
+            and (entry / canonical).is_dir()
+        ]
+        if len(matches) == 0:
+            sys.stderr.write(
+                f"error: skill not found: {canonical!r} — no match under {install_dir}\n"
+            )
+            return None
+        if len(matches) > 1:
+            sorted_matches = sorted(matches)
+            qualified = ", ".join(
+                f"{p.parent.name}/{p.name}" for p in sorted_matches
+            )
+            sys.stderr.write(
+                f"error: ambiguous skill name {canonical!r} — found in multiple modules: {qualified}\n"
+                f"hint: use the qualified form, e.g. '{sorted_matches[0].parent.name}/{canonical}'\n"
+            )
+            return None
+        return matches[0]
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="bmad compile", description="Compile a BMAD skill."
@@ -159,7 +298,32 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Override a compile-time variable (repeatable). Format: KEY=VALUE.",
     )
+    ap.add_argument(
+        "skill_canonical", nargs="?", default=None,
+        help="Canonical skill name: 'module/skill' (qualified) or 'skill' (short, searched).",
+    )
+    ap.add_argument(
+        "--diff", action="store_true",
+        help="Dry-run mode: emit unified diff to stdout; no file writes.",
+    )
     args = ap.parse_args(argv)
+
+    # Validation guards
+    if args.skill_canonical is not None and args.skill:
+        sys.stderr.write("error: positional skill argument cannot be combined with --skill\n")
+        return 1
+    if args.skill_canonical is not None and args.install_phase:
+        sys.stderr.write("error: positional skill argument cannot be combined with --install-phase\n")
+        return 1
+    if args.diff and args.install_phase:
+        sys.stderr.write("error: --diff cannot be used with --install-phase\n")
+        return 1
+    if args.diff and args.skill_canonical is None and not args.skill:
+        sys.stderr.write("error: --diff requires a skill argument\n")
+        return 1
+    if args.diff and args.skill and args.skill_canonical is None:
+        sys.stderr.write("error: --diff is not supported with --skill; use the positional <skill> argument instead\n")
+        return 1
 
     install_flags: dict[str, str] = {}
     for kv in (args.var_overrides or []):
@@ -180,6 +344,62 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(f"invalid --install-dir: must be an existing directory for --install-phase: {install_path}\n")
             return 1
         return _run_install_phase(install_path)
+
+    # Positional <skill> mode (AC 1, AC 2)
+    if args.skill_canonical is not None:
+        if not install_path.is_dir():
+            sys.stderr.write(f"invalid --install-dir: must be an existing directory: {install_path}\n")
+            return 1
+        skill_path = _resolve_skill_canonical(args.skill_canonical, install_path)
+        if skill_path is None:
+            return 1
+        target_ide = args.tools.lower().strip() if args.tools else None
+        target_ide = target_ide or None  # "" → None
+        # Full-skill override warning (mirrors per-skill mode pattern, Story 3.4)
+        _module_name = skill_path.parent.name
+        _fso = install_path / "custom" / "fragments" / _module_name / skill_path.name / "SKILL.template.md"
+        if _fso.is_file():
+            sys.stderr.write(
+                f"warning: full-skill override at '{_fso}' "
+                "bypasses fragment-level upgrade safety; this skill will not "
+                "receive fragment-level upgrades from the base module\n"
+            )
+        if args.diff:
+            try:
+                return _run_diff_mode(skill_path, install_path, target_ide, install_flags)
+            except CompilerError as e:
+                sys.stderr.write(e.format() + "\n")
+                return 2 if isinstance(e, LockfileVersionMismatchError) else 1
+            except FileNotFoundError as e:
+                sys.stderr.write(f"file not found: {e}\n")
+                return 1
+            except (UnicodeDecodeError, PermissionError, IsADirectoryError, OSError) as e:
+                sys.stderr.write(f"read error: {type(e).__name__}: {e}\n")
+                return 1
+            except RuntimeError as e:
+                sys.stderr.write(f"internal error: {e}\n")
+                return 1
+        # Normal compile via positional
+        try:
+            engine.compile_skill(
+                skill_path, install_path, target_ide=target_ide,
+                lockfile_root=install_path,
+                override_root=install_path / "custom",
+                install_flags=install_flags or None,
+            )
+        except CompilerError as e:
+            sys.stderr.write(e.format() + "\n")
+            return 2 if isinstance(e, LockfileVersionMismatchError) else 1
+        except FileNotFoundError as e:
+            sys.stderr.write(f"file not found: {e}\n")
+            return 1
+        except (UnicodeDecodeError, PermissionError, IsADirectoryError, OSError) as e:
+            sys.stderr.write(f"read error: {type(e).__name__}: {e}\n")
+            return 1
+        except RuntimeError as e:
+            sys.stderr.write(f"internal error: {e}\n")
+            return 1
+        return 0
 
     # Per-skill mode (unchanged)
     if not args.skill:
@@ -230,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except CompilerError as e:
         sys.stderr.write(e.format() + "\n")
-        return 2
+        return 2 if isinstance(e, LockfileVersionMismatchError) else 1
     except FileNotFoundError as e:
         sys.stderr.write(f"file not found: {e}\n")
         return 1
