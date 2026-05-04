@@ -1036,5 +1036,424 @@ class TestExitCodeAlignment(unittest.TestCase):
             self.assertEqual(code, 2, f"stderr: {stderr}")
 
 
+def _run_explain(install_dir: Path, args: list[str]) -> tuple[int, str, str]:
+    """Story 4.2: invoke compile.py with --explain prepended to `args`."""
+    return _run_compile_skill(install_dir, ["--explain"] + args)
+
+
+class TestExplainMode(unittest.TestCase):
+    """Story 4.2: --explain Markdown output with <Include> and <Variable> tags."""
+
+    def _minimal_lock(self, install: Path) -> None:
+        lock_content = (
+            json.dumps(
+                {"bmad_version": "1.0.0", "compiled_at": "1.0.0", "entries": [], "version": 1},
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        )
+        _write(install / "_config" / "bmad.lock", lock_content)
+
+    # ---------- AC 1: <Include> tags ----------
+
+    def test_explain_basic_include_wraps_fragment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "Body content\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('<Include src="fragments/body.template.md"', stdout)
+            self.assertIn('resolved-from="base"', stdout)
+            self.assertIn("hash=", stdout)
+            self.assertIn("Body content", stdout)
+
+    def test_explain_root_wraps_entire_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertTrue(stdout.startswith("<Include "), f"got: {stdout[:80]!r}")
+            self.assertTrue(stdout.rstrip().endswith("</Include>"), f"got tail: {stdout[-80:]!r}")
+
+    def test_explain_include_attrs_required_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "Body\n")
+            self._minimal_lock(install)
+            code, stdout, _ = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0)
+            # Each <Include opening tag carries src=, resolved-from=, hash=
+            for line in stdout.splitlines():
+                if line.startswith("<Include "):
+                    self.assertIn(' src="', line)
+                    self.assertIn(' resolved-from="', line)
+                    self.assertIn(' hash="', line)
+
+    def test_explain_variant_attr_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "universal\n")
+            _write(install / "core" / "my-skill" / "fragments" / "body.cursor.template.md", "cursor variant\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill", "--tools", "cursor"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('resolved-from="variant"', stdout)
+            self.assertIn('variant="cursor"', stdout)
+
+    def test_explain_no_writes_to_skill_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "OLD\n")
+            self._minimal_lock(install)
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            sha_before = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            _run_explain(install, ["core/my-skill"])
+            sha_after = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_explain_no_writes_to_lockfile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            lock = install / "_config" / "bmad.lock"
+            sha_before = hashlib.sha256(lock.read_bytes()).hexdigest()
+            _run_explain(install, ["core/my-skill"])
+            sha_after = hashlib.sha256(lock.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_explain_mutual_exclusion_with_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, _, stderr = _run_explain(install, ["core/my-skill", "--diff"])
+            self.assertEqual(code, 1)
+            self.assertIn("mutually exclusive", stderr)
+
+    def test_explain_requires_skill_arg(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            self._minimal_lock(install)
+            code, _, stderr = _run_explain(install, [])
+            self.assertEqual(code, 1)
+            self.assertIn("--explain requires a skill argument", stderr)
+
+    # ---------- AC 2: <Variable> tags ----------
+
+    def test_explain_variable_compile_time(self) -> None:
+        # Skill lives under a non-core module so the install-phase
+        # module-config probe (lockfile_root/<module>/config.yaml) does NOT
+        # collide with the bmad-config probe (lockfile_root/core/config.yaml).
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "mod1" / "my-skill" / "my-skill.template.md", "User: {{user_name}}\n")
+            _write(install / "core" / "config.yaml", "user_name: TestUser\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["mod1/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('<Variable name="user_name"', stdout)
+            self.assertIn('source="bmad-config"', stdout)
+            self.assertIn('resolved-at="compile-time"', stdout)
+            self.assertIn("TestUser", stdout)
+            # Fold-in 3 — source-path attribute present for YAML-tier vars
+            self.assertIn('source-path="', stdout)
+
+    # ---------- AC 3: VarRuntime passthrough ----------
+
+    def test_explain_variable_runtime_passthrough(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Token: {runtime_var}\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn("{runtime_var}", stdout)
+            self.assertNotIn('<Variable name="runtime_var"', stdout)
+
+    # ---------- AC 4: override <Include> attrs ----------
+
+    def test_explain_override_fragment_attrs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "BASE\n")
+            _write(install / "custom" / "fragments" / "body.template.md", "OVERRIDE\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('resolved-from="user-override"', stdout)
+            self.assertIn('override-path="custom/fragments/body.template.md"', stdout)
+            self.assertIn("base-hash=", stdout)
+            self.assertIn("override-hash=", stdout)
+            self.assertIn("OVERRIDE", stdout)
+
+    def test_explain_user_module_fragment_attrs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "BASE\n")
+            _write(install / "custom" / "fragments" / "core" / "my-skill" / "body.template.md", "MODFRAG\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('resolved-from="user-module-fragment"', stdout)
+            self.assertIn('override-path="custom/fragments/core/my-skill/body.template.md"', stdout)
+            self.assertIn("base-hash=", stdout)
+            self.assertIn("MODFRAG", stdout)
+
+    # ---------- AC 5: determinism ----------
+
+    def test_explain_determinism_twice_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "User: {{user_name}}\n")
+            _write(install / "core" / "config.yaml", "user_name: Determ\n")
+            self._minimal_lock(install)
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            lock = install / "_config" / "bmad.lock"
+            # SKILL.md does not exist yet (no compile run); record absence as None
+            sha_lock_before = hashlib.sha256(lock.read_bytes()).hexdigest()
+            code1, stdout1, _ = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code1, 0)
+            self.assertFalse(skill_md.exists(), "explain mode must not write SKILL.md")
+            self.assertEqual(hashlib.sha256(lock.read_bytes()).hexdigest(), sha_lock_before)
+            code2, stdout2, _ = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code2, 0)
+            self.assertEqual(stdout1, stdout2)
+            self.assertEqual(hashlib.sha256(lock.read_bytes()).hexdigest(), sha_lock_before)
+
+    def test_explain_no_timestamps_in_output(self) -> None:
+        import re as _re
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "User: {{user_name}}\n")
+            _write(install / "core" / "config.yaml", "user_name: NoStamp\n")
+            self._minimal_lock(install)
+            code, stdout, _ = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0)
+            # No date pattern (YYYY-MM-DD) anywhere in output
+            self.assertIsNone(_re.search(r"\b\d{4}-\d{2}-\d{2}\b", stdout))
+            # Static phase tag present
+            self.assertIn('resolved-at="compile-time"', stdout)
+
+    # ---------- Additional integration tests ----------
+
+    def test_explain_user_full_skill_root_attrs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "BASE\n")
+            _write(
+                install / "custom" / "fragments" / "core" / "my-skill" / "SKILL.template.md",
+                "OVERRIDE_ROOT\n",
+            )
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('resolved-from="user-full-skill"', stdout)
+            # base-hash present because the base SKILL.template.md still exists
+            self.assertIn("base-hash=", stdout)
+            self.assertIn("OVERRIDE_ROOT", stdout)
+
+    def test_contributing_paths_multi_layer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Tag: {{self.tag}}\n")
+            _write(install / "core" / "my-skill" / "customize.toml", 'tag = "default-val"\n')
+            _write(install / "custom" / "my-skill.toml", 'tag = "team-val"\n')
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('contributing-paths="', stdout)
+            # Both paths appear in the joined attribute (semicolon-separated, sorted)
+            self.assertIn("customize.toml", stdout)
+            self.assertIn("my-skill.toml", stdout)
+
+    def test_explain_local_scope_variable(self) -> None:
+        # A fragment receives a custom prop via the include directive; the
+        # fragment template references it as {{user}} → resolved from
+        # local_scope (no var_scope file source).
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/greet.template.md" user="Alice">>',
+            )
+            _write(
+                install / "core" / "my-skill" / "fragments" / "greet.template.md",
+                "Hello {{user}}\n",
+            )
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('<Variable name="user"', stdout)
+            self.assertIn('source="local-scope"', stdout)
+            # No source-path / toml-layer attrs for local-scope wins
+            # (find the specific <Variable name="user"...> tag and inspect it)
+            tag_start = stdout.find('<Variable name="user"')
+            tag_end = stdout.find(">", tag_start)
+            tag = stdout[tag_start:tag_end + 1]
+            self.assertNotIn("source-path", tag)
+            self.assertNotIn("toml-layer", tag)
+            self.assertIn("Alice", stdout)
+
+    def test_explain_nested_include_nesting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/a.template.md">>',
+            )
+            _write(
+                install / "core" / "my-skill" / "fragments" / "a.template.md",
+                'A-start\n<<include path="fragments/b.template.md">>\nA-end\n',
+            )
+            _write(
+                install / "core" / "my-skill" / "fragments" / "b.template.md",
+                "B-content\n",
+            )
+            self._minimal_lock(install)
+            code, stdout, _ = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0)
+            # DFS pre-order: <Include a> opens before <Include b>; b closes before a closes.
+            a_open = stdout.find('<Include src="fragments/a.template.md"')
+            b_open = stdout.find('<Include src="fragments/b.template.md"')
+            self.assertNotEqual(a_open, -1)
+            self.assertNotEqual(b_open, -1)
+            self.assertLess(a_open, b_open)
+            # Find the `</Include>` that closes b (first one after b_open) and
+            # the one that closes a (must come AFTER b's close).
+            b_close = stdout.find("</Include>", b_open)
+            a_close_search_from = b_close + len("</Include>")
+            a_close = stdout.find("</Include>", a_close_search_from)
+            self.assertNotEqual(b_close, -1)
+            self.assertNotEqual(a_close, -1)
+            self.assertLess(b_close, a_close)
+
+    def test_explain_override_base_file_absent(self) -> None:
+        # Override exists at user-override tier, but the base file in the
+        # skill dir does NOT exist — base-hash must be absent from <Include>.
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            # No base fragments/body.template.md in skill dir.
+            _write(install / "custom" / "fragments" / "body.template.md", "OVERRIDE_ONLY\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn('resolved-from="user-override"', stdout)
+            # Locate the user-override <Include ...> tag and assert no base-hash inside it.
+            tag_start = stdout.find('<Include src="fragments/body.template.md"')
+            tag_end = stdout.find(">", tag_start)
+            tag = stdout[tag_start:tag_end + 1]
+            self.assertNotIn("base-hash", tag)
+            self.assertIn("override-hash", tag)
+            self.assertIn("OVERRIDE_ONLY", stdout)
+
+    # ---------- R1 patches: XML escaping ----------
+
+    def test_explain_variable_value_with_xml_metacharacters(self) -> None:
+        """R1 P1: a resolved value containing `</Variable>` or `&` or `<`
+        must be XML-escaped in element content so it cannot prematurely
+        close the wrapping tag or break downstream XML parsing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "mod1" / "my-skill" / "my-skill.template.md", "X={{user_name}}\n")
+            # value contains `<` and `&` and a literal closing-tag fragment
+            _write(install / "core" / "config.yaml", 'user_name: "a < b & c </Variable>"\n')
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain(install, ["mod1/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            # Raw `<` and `</Variable>` must NOT appear inside the variable's
+            # element content (escaped to &lt; / &amp;).
+            # Find the <Variable name="user_name" ...>VALUE</Variable> block
+            tag_open = stdout.find('<Variable name="user_name"')
+            self.assertNotEqual(tag_open, -1)
+            tag_close_open = stdout.find(">", tag_open)
+            tag_close_end = stdout.find("</Variable>", tag_close_open)
+            self.assertNotEqual(tag_close_end, -1)
+            content = stdout[tag_close_open + 1:tag_close_end]
+            self.assertIn("&lt;", content)
+            self.assertIn("&amp;", content)
+            # The literal `</Variable>` substring must be escaped, not appear
+            # raw inside the value.
+            self.assertNotIn("</Variable>", content)
+
+    def test_explain_attribute_value_with_quote_escaped(self) -> None:
+        """R1 P1: an attribute value (e.g. file path with `&`) must be
+        escaped to `&amp;` so it doesn't break attribute parsing.
+        We test via a contributing-paths fixture that produces a path with
+        an `&` in it (rare but possible).
+        """
+        # The simplest test: assert that `_xml_escape_attr` handles the
+        # important characters. This is a unit test on the helper.
+        from src.scripts.bmad_compile.engine import _xml_escape_attr
+        self.assertEqual(_xml_escape_attr('a "b" c'), "a &quot;b&quot; c")
+        self.assertEqual(_xml_escape_attr('x<y>z'), "x&lt;y&gt;z")
+        self.assertEqual(_xml_escape_attr('a&b'), "a&amp;b")
+        # Order matters: escape & first so we don't double-escape.
+        self.assertEqual(_xml_escape_attr('a & "b"'), "a &amp; &quot;b&quot;")
+
+    def test_xml_escape_strips_illegal_control_chars(self) -> None:
+        """R2 P1: XML 1.0-illegal control characters (U+0000..U+0008,
+        U+000B-C, U+000E..U+001F) must be replaced with U+FFFD before any
+        other escaping — otherwise downstream `xml.etree.parse` would
+        reject the explain output regardless of attribute/element escaping.
+        """
+        from src.scripts.bmad_compile.engine import _xml_escape_attr, _xml_escape_text
+        # NUL, BEL, VT, FF, ESC are all XML 1.0-illegal
+        weird = "a\x00b\x07c\x0bd\x0ce\x1bf"
+        out_attr = _xml_escape_attr(weird)
+        self.assertNotIn("\x00", out_attr)
+        self.assertNotIn("\x07", out_attr)
+        self.assertNotIn("\x0b", out_attr)
+        self.assertNotIn("\x0c", out_attr)
+        self.assertNotIn("\x1b", out_attr)
+        self.assertIn("�", out_attr)
+        out_text = _xml_escape_text(weird)
+        self.assertNotIn("\x00", out_text)
+        self.assertIn("�", out_text)
+        # \n \r \t are XML-LEGAL whitespace; they must NOT be replaced with U+FFFD
+        # in attr-escape (they get entity-encoded instead).
+        self.assertNotIn("�", _xml_escape_attr("line1\nline2\ttabbed"))
+
+    # ---------- AC 10 fold-in 4: zip mismatch guard (unit) ----------
+
+    def test_zip_mismatch_guard(self) -> None:
+        from src.scripts.bmad_compile.resolver import VariableScope
+        with self.assertRaises(ValueError) as ctx:
+            VariableScope.build(
+                toml_layers=[("d", {})],
+                toml_layer_paths=["path1", "extra_path"],
+            )
+        self.assertIn("equal length", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -187,16 +187,25 @@ def _flatten_toml(
     priority_map: dict[str, str],
     result: dict[str, ResolvedValue],
     layer_paths: dict[str, str] | None = None,  # layer_name → absolute_path
+    list_priority_map: dict[str, str] | None = None,  # Story 4.2: array-error file attribution
 ) -> None:
     """Recursively flatten a merged TOML dict into `self.<dotted.path>` entries."""
     _paths = layer_paths or {}
+    _list_priority = list_priority_map or {}
     for k, v in d.items():
         dotted = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
-            _flatten_toml(v, dotted, layer_name, priority_map, result, _paths)
+            _flatten_toml(v, dotted, layer_name, priority_map, result, _paths, list_priority_map)
         elif isinstance(v, list):
             full_key = f"self.{dotted}"
-            winning_layer = priority_map.get(full_key, layer_name)
+            # Story 4.2 fold-in 2: list-valued keys are intentionally absent
+            # from `priority_map` (which records scalar provenance only), so
+            # consult `list_priority_map` first to preserve array-error file
+            # attribution.
+            winning_layer = (
+                _list_priority.get(full_key)
+                or priority_map.get(full_key, layer_name)
+            )
             # tomllib does not expose per-value source positions; line=1,col=1 is a
             # deterministic locator pointing at the file head — the dotted path in
             # the message names the offending key.
@@ -227,9 +236,17 @@ def _flatten_toml(
 
 def _build_priority_map(
     toml_layers: list[tuple[str, dict[str, Any]]],
-) -> dict[str, str]:
-    """Scan layers from highest to lowest priority to record which layer wins each path."""
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Scan layers from highest to lowest priority to record which layer wins each path.
+
+    Story 4.2 fold-in 2: returns `(scalar_priority_map, list_priority_map)`.
+    Scalar paths and list paths are tracked separately so a list-valued entry
+    in a higher-priority tier cannot misattribute a scalar value that wins from
+    a lower tier (the cross-shape misattribution bug). The list map preserves
+    array-error file attribution that callers depend on.
+    """
     priority_map: dict[str, str] = {}
+    list_priority_map: dict[str, str] = {}
 
     def _scan(d: dict[str, Any], prefix: str, layer_name: str) -> None:
         for k, v in d.items():
@@ -237,6 +254,9 @@ def _build_priority_map(
             full_key = f"self.{dotted}"
             if isinstance(v, dict):
                 _scan(v, dotted, layer_name)
+            elif isinstance(v, list):
+                if full_key not in list_priority_map:
+                    list_priority_map[full_key] = layer_name
             else:
                 if full_key not in priority_map:
                     priority_map[full_key] = layer_name
@@ -244,7 +264,7 @@ def _build_priority_map(
     # Scan from highest priority (last in list) to lowest.
     for layer_name, layer_dict in reversed(toml_layers):
         _scan(layer_dict, "", layer_name)
-    return priority_map
+    return priority_map, list_priority_map
 
 
 class VariableScope:
@@ -341,13 +361,54 @@ class VariableScope:
 
         # self.* cascade: TOML layers merged, then flattened.
         if toml_layers:
-            priority_map = _build_priority_map(toml_layers)
+            # Story 4.2 fold-in 4: parallel-list contract.
+            # engine.py constructs matched-length toml_layers/toml_layer_paths;
+            # mismatch indicates a buggy caller, so fail fast rather than let
+            # zip() silently truncate (closes deferred-work.md line 138).
+            if toml_layer_paths is not None and len(toml_layers) != len(toml_layer_paths):
+                raise ValueError(
+                    f"toml_layers and toml_layer_paths must have equal length; "
+                    f"got {len(toml_layers)} layers and {len(toml_layer_paths)} paths"
+                )
+            priority_map, list_priority_map = _build_priority_map(toml_layers)
             merged = toml_merge.merge_layers(*[d for _, d in toml_layers])
             _layer_paths: dict[str, str] = {}
             if toml_layer_paths:
                 for (ln, _), lp in zip(toml_layers, toml_layer_paths):
                     _layer_paths[ln] = lp
-            _flatten_toml(merged, "", "", priority_map, table, _layer_paths or None)
+            _flatten_toml(
+                merged, "", "", priority_map, table, _layer_paths or None,
+                list_priority_map=list_priority_map or None,
+            )
+
+            # Story 4.2 fold-in 1: populate contributing_paths for any
+            # self.* scalar key that appears in MORE THAN ONE TOML layer.
+            # Single-source keys keep contributing_paths=None (no schema
+            # change). Closes deferred-work.md line 85.
+            if toml_layer_paths:
+                _key_to_paths: dict[str, list[str]] = {}
+
+                def _collect(
+                    d: dict[str, Any], prefix: str, path: str
+                ) -> None:
+                    for k, v in d.items():
+                        dotted = f"{prefix}.{k}" if prefix else k
+                        if isinstance(v, dict):
+                            _collect(v, dotted, path)
+                        elif isinstance(v, list):
+                            # mirrors _flatten_toml + _build_priority_map list-skip
+                            continue
+                        else:
+                            full_key = f"self.{dotted}"
+                            _key_to_paths.setdefault(full_key, []).append(path)
+
+                for (_ln, layer_dict), layer_path in zip(toml_layers, toml_layer_paths):
+                    _collect(layer_dict, "", layer_path)
+
+                for full_key, paths in _key_to_paths.items():
+                    if full_key in table and len(paths) > 1:
+                        rv = table[full_key]
+                        table[full_key] = replace(rv, contributing_paths=sorted(paths))
 
         return cls(table)
 
@@ -408,6 +469,19 @@ class ResolveContext:
     # have no {{var}} tokens; the resolver only raises when a VarCompile node
     # is actually encountered with var_scope=None.
     var_scope: VariableScope | None = None
+    # Story 4.2: explain mode toggles two behaviors in `_walk_nodes`:
+    #   1) Inject `FragmentBoundary` sentinels around each fragment's
+    #      contribution so `_render_explain` can wrap it in `<Include>`.
+    #   2) Replace `parser.Text` emission for `VarCompile` resolution with
+    #      `ExplainVar` carrying the full `ResolvedValue` provenance.
+    # Default False preserves all existing behavior — `compile_skill` never
+    # sets it, only `explain_skill` does.
+    explain_mode: bool = False
+    # Story 4.2 fold-in 5: tier-5 (base) candidate path for the ROOT template
+    # when `root_resolved_from == "user-full-skill"`. Engine sets this; the
+    # resolver only forwards it to `dep_tree[0].base_path`. None for the
+    # `base` root (no override) and for non-explain compiles.
+    root_base_path: PurePosixPath | None = None
 
 
 @dataclass
@@ -456,6 +530,36 @@ class ResolvedFragment:
     # no upstream base exists. Story 3.1: enables lockfile.py to compute
     # `base_hash` without re-probing tier 5 itself.
     base_path: PurePosixPath | None = None
+
+
+@dataclass(frozen=True)
+class FragmentBoundary:
+    """Story 4.2: explain-mode sentinel injected around each fragment's
+    contribution in the flat node stream. `is_start=True` is emitted
+    before a fragment's child nodes, `is_start=False` after — so a linear
+    walker can emit `<Include>` / `</Include>` wrappers without a tree
+    reconstruction pass. Never produced when `explain_mode=False`."""
+    fragment: ResolvedFragment
+    is_start: bool
+
+
+@dataclass(frozen=True)
+class ExplainVar:
+    """Story 4.2: explain-mode replacement for the resolved-text `parser.Text`
+    that `_walk_nodes` would otherwise emit for a `VarCompile` node. Carries
+    the full `ResolvedValue` provenance so `_render_explain` can synthesize
+    a `<Variable>` tag with `source`, `source-path`, `toml-layer`,
+    `contributing-paths`, etc. Never produced when `explain_mode=False`."""
+    name: str
+    value: str
+    rv: ResolvedValue
+    line: int
+    col: int
+
+
+# Story 4.2: union for explain-mode flat node streams. Non-explain compiles
+# return `list[parser.AstNode]`; explain compiles return `list[ExplainNode]`.
+ExplainNode = Union[parser.AstNode, FragmentBoundary, ExplainVar]
 
 
 @dataclass
@@ -701,8 +805,15 @@ def _walk_nodes(
     enclosing_file: str,
     enclosing_source: str | None,
     depth: int = 0,
-) -> list[parser.AstNode]:
-    """DFS pre-order node walk. Includes get expanded in place."""
+) -> list[Any]:
+    """DFS pre-order node walk. Includes get expanded in place.
+
+    Return type is `list[Any]` because explain-mode walks emit
+    `FragmentBoundary` and `ExplainVar` sentinels alongside the standard
+    `parser.AstNode` items (see `ExplainNode` union). Non-explain compiles
+    still produce only `parser.AstNode` items, so `_render` continues to
+    work unchanged.
+    """
     if depth >= _MAX_INCLUDE_DEPTH:
         raise errors.CyclicIncludeError(
             f"include depth reached the {_MAX_INCLUDE_DEPTH}-level cap — "
@@ -715,12 +826,13 @@ def _walk_nodes(
             ),
         )
 
-    flat: list[parser.AstNode] = []
+    flat: list[Any] = []
     for node in nodes:
         # --- VarCompile: resolve inline at the correct lexical scope. ---
         if isinstance(node, parser.VarCompile):
             name = node.name
             resolved_text: str | None = None
+            resolved_rv: ResolvedValue | None = None  # populated when var_scope wins
 
             # For non-self.* names, check local_scope (include props) first.
             if not name.startswith("self."):
@@ -756,8 +868,31 @@ def _walk_nodes(
                         source=enclosing_source,
                     ) from None
                 resolved_text = rv.value
+                resolved_rv = rv
 
-            flat.append(parser.Text(content=resolved_text, line=node.line, col=node.col))
+            # By construction `resolved_text` is set by this point: either a
+            # local_scope match (props are always strings) or `rv.value` from
+            # `var_scope.resolve()` (always str), or the function has raised
+            # `UnresolvedVariableError` above. The assert narrows the type
+            # for mypy (R1 P3) and serves as a tripwire if a future code
+            # path forgets to set it.
+            assert resolved_text is not None
+            if context.explain_mode:
+                # Story 4.2: explain mode emits ExplainVar carrying the full
+                # ResolvedValue (or a synthetic one for local-scope wins).
+                explain_rv = resolved_rv if resolved_rv is not None else ResolvedValue(
+                    value=resolved_text,
+                    source="local-scope",
+                )
+                flat.append(ExplainVar(
+                    name=name,
+                    value=resolved_text,
+                    rv=explain_rv,
+                    line=node.line,
+                    col=node.col,
+                ))
+            else:
+                flat.append(parser.Text(content=resolved_text, line=node.line, col=node.col))
             continue
 
         # --- VarRuntime: pass through unchanged; _render() emits {name}. ---
@@ -870,7 +1005,15 @@ def _walk_nodes(
             base_path=base_path_for_frag,
         )
         dep_tree[placeholder_idx] = resolved
-        flat.extend(child_flat)
+        if context.explain_mode:
+            # Story 4.2: bracket the fragment's contribution with
+            # FragmentBoundary sentinels so _render_explain can emit the
+            # corresponding <Include>...</Include> wrapper inline.
+            flat.append(FragmentBoundary(fragment=resolved, is_start=True))
+            flat.extend(child_flat)
+            flat.append(FragmentBoundary(fragment=resolved, is_start=False))
+        else:
+            flat.extend(child_flat)
     return flat
 
 
@@ -929,6 +1072,12 @@ def resolve(
         local_props=context.local_scope,
         merged_scope=context.local_scope,
         nodes=flat,
+        # Story 4.2 fold-in 5: when the engine probed and found a
+        # `user-full-skill` override, it sets `context.root_base_path` to the
+        # tier-5 base template path so `_render_explain` can hash-and-attribute
+        # the upstream base via `<Include base-hash="...">` on the root.
+        # `None` for `base` roots (no override) and for non-explain compiles.
+        base_path=context.root_base_path,
     )
     dep_tree[placeholder_idx] = root_entry
     return flat, dep_tree

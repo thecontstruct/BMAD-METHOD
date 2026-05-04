@@ -223,6 +223,28 @@ def _run_diff_mode(
     return 0
 
 
+def _run_explain_mode(
+    skill_path: Path,
+    install_path: Path,
+    target_ide: str | None,
+    install_flags: dict[str, str],
+) -> int:
+    """Story 4.2: dry-run inspect mode. Compiles in memory only, writes
+    nothing, and emits a Markdown+XML provenance view of the resolved
+    skill to stdout.
+    """
+    flat_nodes, dep_tree, var_scope, cache, scenario_root = engine.explain_skill(
+        skill_path, install_path,
+        target_ide=target_ide,
+        lockfile_root=install_path,
+        override_root=install_path / "custom",
+        install_flags=install_flags or None,
+    )
+    output = engine._render_explain(flat_nodes, dep_tree, var_scope, cache, scenario_root)
+    sys.stdout.write(output)
+    return 0
+
+
 # _RESOLVE_SKIP mirrors _SKIP_AT_DEPTH_1 in _run_install_phase and _MODULE_DIR_SKIP in engine.py
 _RESOLVE_SKIP = frozenset({"_config", "custom", "scripts", "memory", "_memory"})
 
@@ -307,6 +329,10 @@ def main(argv: list[str] | None = None) -> int:
         "--diff", action="store_true",
         help="Dry-run mode: emit unified diff to stdout; no file writes.",
     )
+    ap.add_argument(
+        "--explain", action="store_true",
+        help="Emit Markdown-with-inline-XML provenance view; no file writes.",
+    )
     args = ap.parse_args(argv)
     # Normalize empty-string positional to None (argparse can produce '' for nargs="?")
     args.skill_canonical = args.skill_canonical or None
@@ -326,6 +352,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.diff and args.skill and args.skill_canonical is None:
         sys.stderr.write("error: --diff is not supported with --skill; use the positional <skill> argument instead\n")
+        return 1
+    # Story 4.2: --explain validation guards (mirror --diff structure)
+    if args.explain and args.install_phase:
+        sys.stderr.write("error: --explain cannot be used with --install-phase\n")
+        return 1
+    if args.explain and args.skill_canonical is None and not args.skill:
+        sys.stderr.write("error: --explain requires a skill argument\n")
+        return 1
+    if args.explain and args.skill and args.skill_canonical is None:
+        sys.stderr.write("error: --explain is not supported with --skill; use the positional <skill> argument instead\n")
+        return 1
+    if args.explain and args.diff:
+        sys.stderr.write("error: --explain and --diff are mutually exclusive\n")
         return 1
 
     install_flags: dict[str, str] = {}
@@ -367,6 +406,21 @@ def main(argv: list[str] | None = None) -> int:
                 "bypasses fragment-level upgrade safety; this skill will not "
                 "receive fragment-level upgrades from the base module\n"
             )
+        if args.explain:
+            try:
+                return _run_explain_mode(skill_path, install_path, target_ide, install_flags)
+            except CompilerError as e:
+                sys.stderr.write(e.format() + "\n")
+                return 2 if isinstance(e, LockfileVersionMismatchError) else 1
+            except FileNotFoundError as e:
+                sys.stderr.write(f"file not found: {e}\n")
+                return 1
+            except (UnicodeDecodeError, PermissionError, IsADirectoryError, OSError) as e:
+                sys.stderr.write(f"read error: {type(e).__name__}: {e}\n")
+                return 1
+            except RuntimeError as e:
+                sys.stderr.write(f"internal error: {e}\n")
+                return 1
         if args.diff:
             try:
                 return _run_diff_mode(skill_path, install_path, target_ide, install_flags)

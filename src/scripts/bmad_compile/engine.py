@@ -86,29 +86,39 @@ def _discover_module_roots(
     return roots
 
 
-def compile_skill(
+def _compile_core(
     skill_dir: io.PathLike,
     install_dir: io.PathLike,
-    target_ide: str | None = None,
+    target_ide: str | None,
     *,
-    lockfile_root: io.PathLike | None = None,
-    override_root: io.PathLike | None = None,
-    install_flags: dict[str, str] | None = None,
-) -> None:
-    """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
+    lockfile_root: io.PathLike | None,
+    override_root: io.PathLike | None,
+    install_flags: dict[str, str] | None,
+    explain_mode: bool = False,
+) -> tuple[
+    list[Any],                          # flat_nodes (post-resolve, possibly with explain sentinels)
+    list[resolver.ResolvedFragment],    # dep_tree
+    resolver.VariableScope,              # var_scope
+    resolver.CompileCache,               # cache
+    io.PurePosixPath,                    # scenario_root
+    str,                                 # basename
+    str,                                 # source_text (raw root template)
+    str,                                 # lockfile_path
+    io.PurePosixPath,                    # output_path (computed pre-render for explain)
+    str | None,                          # target_ide (passed through unchanged from caller)
+]:
+    """Story 4.2: shared compile core for compile_skill + explain_skill.
 
-    Staging discipline: parse + resolve + render fully in memory. Only on
-    full success do we call `io.write_text`. Any `CompilerError` raised
-    mid-compile leaves the filesystem untouched (Story 1.1 AC 10).
+    Performs every step of the compile pipeline EXCEPT rendering and disk
+    writes. Returns the resolved AST plus all metadata callers need to
+    finish the job. `compile_skill` calls `_render` on the result and writes
+    SKILL.md + lockfile. `explain_skill` returns the flat node stream
+    directly so `_render_explain` can synthesize the XML provenance view.
 
-    AC 6 (Story 2.1): optional keyword-only `lockfile_root` and `override_root`
-    params allow the install-phase caller to override the derived paths.
-    When either is None, today's `skill_dir.parent.parent / "_bmad"` derivation
-    is used, preserving full backward compatibility.
-
-    Story 3.3: `install_flags` carries CLI `--set KEY=VALUE` overrides. They
-    win over all YAML tiers (bmad-config / module-config / user-config).
-    None or empty = no install-flag tier.
+    `explain_mode=True` is forwarded into `ResolveContext` so `_walk_nodes`
+    injects `FragmentBoundary` sentinels and emits `ExplainVar` nodes for
+    `VarCompile` resolutions; otherwise behavior is byte-identical to the
+    pre-Story-4.2 `compile_skill` body.
     """
     skill_posix = io.to_posix(skill_dir)
     if not io.is_dir(str(skill_posix)):
@@ -190,6 +200,19 @@ def compile_skill(
         else:
             override_root_template = None
 
+    # Story 4.2 fold-in 5: when the root template was swapped to a
+    # `user-full-skill` override, locate the tier-5 base template (the
+    # non-overridden file in the skill dir) so `dep_tree[0].base_path`
+    # carries it through to the explain renderer for `<Include base-hash>`.
+    # `None` for `base` roots — there is no upstream base to record.
+    root_base_path: io.PurePosixPath | None = None
+    if root_resolved_from == "user-full-skill":
+        _base_entries = io.list_files_sorted(skill_dir)
+        _base_templates = [e for e in _base_entries if e.name.endswith(".template.md")]
+        _base_template = variants.select_variant(_base_templates, target_ide)
+        if _base_template is not None and io.is_file(str(_base_template)):
+            root_base_path = _base_template
+
     if override_root_template is not None:
         template_path = override_root_template
         assert override_root is not None  # narrowed by the override_root_template != None branch above
@@ -260,7 +283,7 @@ def compile_skill(
         relative_path = f"{basename}/{template_entry.name}"
 
     source = io.read_template(str(template_path))
-    nodes = parser.parse(source, relative_path)
+    parsed_nodes = parser.parse(source, relative_path)
 
     # --- Variable scope (Decision 3) ---
     # Probe for bmad-config YAML (non-self.* cascade, bmad-config tier).
@@ -332,10 +355,12 @@ def compile_skill(
         target_ide=target_ide,
         root_resolved_from=root_resolved_from,
         var_scope=var_scope,
+        explain_mode=explain_mode,
+        root_base_path=root_base_path,
     )
     cache = resolver.CompileCache()
     flat_nodes, dep_tree = resolver.resolve(
-        nodes,
+        parsed_nodes,
         context,
         cache,
         root_src=relative_path,
@@ -343,8 +368,16 @@ def compile_skill(
         root_source=source,
     )
 
-    # Render fully in memory — AC 10 (no partial writes on error).
-    rendered = _render(flat_nodes)
+    # Story 4.2: seed the cache with the root template's parsed AST + raw
+    # source under the same key shape `_render_explain` looks up. The walker
+    # does not seed it (the cache is for nested includes); without this seed,
+    # `cache.get_source((root.resolved_path, root.resolved_from))` would
+    # raise KeyError. Gated on explain_mode to avoid mutating cache state on
+    # the normal compile path (where this entry is never read).
+    if explain_mode:
+        root_cache_key = (dep_tree[0].resolved_path, dep_tree[0].resolved_from)
+        if root_cache_key not in cache:
+            cache.put(root_cache_key, parsed_nodes, source)
 
     install_posix = io.to_posix(install_dir)
     # AC 6: when lockfile_root is provided (install-phase mode), output gains
@@ -355,16 +388,296 @@ def compile_skill(
         output_path = install_posix / module / basename / "SKILL.md"
     else:
         output_path = install_posix / basename / "SKILL.md"
-    io.write_text(str(output_path), rendered)
 
-    lockfile.write_skill_entry(
-        _lockfile_path,
+    return (
+        flat_nodes,
+        dep_tree,
+        var_scope,
+        cache,
         scenario_root,
         basename,
-        source_text=source,
+        source,
+        _lockfile_path,
+        output_path,
+        target_ide,
+    )
+
+
+def compile_skill(
+    skill_dir: io.PathLike,
+    install_dir: io.PathLike,
+    target_ide: str | None = None,
+    *,
+    lockfile_root: io.PathLike | None = None,
+    override_root: io.PathLike | None = None,
+    install_flags: dict[str, str] | None = None,
+) -> None:
+    """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
+
+    Staging discipline: parse + resolve + render fully in memory. Only on
+    full success do we call `io.write_text`. Any `CompilerError` raised
+    mid-compile leaves the filesystem untouched (Story 1.1 AC 10).
+
+    AC 6 (Story 2.1): optional keyword-only `lockfile_root` and `override_root`
+    params allow the install-phase caller to override the derived paths.
+    When either is None, today's `skill_dir.parent.parent / "_bmad"` derivation
+    is used, preserving full backward compatibility.
+
+    Story 3.3: `install_flags` carries CLI `--set KEY=VALUE` overrides. They
+    win over all YAML tiers (bmad-config / module-config / user-config).
+    None or empty = no install-flag tier.
+
+    Story 4.2: body extracted into `_compile_core`; this wrapper renders the
+    output, writes SKILL.md, and writes the lockfile entry. `_render` is the
+    only renderer for normal compiles; explain-mode never enters this path.
+    """
+    (
+        flat_nodes,
+        dep_tree,
+        var_scope,
+        cache,
+        scenario_root,
+        basename,
+        source_text,
+        lockfile_path,
+        output_path,
+        tid,
+    ) = _compile_core(
+        skill_dir, install_dir, target_ide,
+        lockfile_root=lockfile_root,
+        override_root=override_root,
+        install_flags=install_flags,
+        explain_mode=False,
+    )
+    rendered = _render(flat_nodes)
+    io.write_text(str(output_path), rendered)
+    lockfile.write_skill_entry(
+        lockfile_path,
+        scenario_root,
+        basename,
+        source_text=source_text,
         compiled_text=rendered,
         dep_tree=dep_tree,
         var_scope=var_scope,
-        target_ide=target_ide,
+        target_ide=tid,
         cache=cache,
     )
+
+
+def explain_skill(
+    skill_dir: io.PathLike,
+    install_dir: io.PathLike,
+    target_ide: str | None = None,
+    *,
+    lockfile_root: io.PathLike | None = None,
+    override_root: io.PathLike | None = None,
+    install_flags: dict[str, str] | None = None,
+) -> tuple[
+    list[Any],
+    list[resolver.ResolvedFragment],
+    resolver.VariableScope,
+    resolver.CompileCache,
+    io.PurePosixPath,
+]:
+    """Story 4.2: like `compile_skill` but never writes to disk.
+
+    Returns the explain-mode flat node stream (carries `FragmentBoundary`
+    and `ExplainVar` sentinels), the dep tree, the variable scope, the
+    fragment cache (with the root template seeded), and the scenario root.
+    Caller (`_render_explain`) walks `flat_nodes` to synthesize the
+    Markdown+XML provenance view.
+    """
+    (
+        flat_nodes,
+        dep_tree,
+        var_scope,
+        cache,
+        scenario_root,
+        _basename,
+        _source_text,
+        _lockfile_path,
+        _output_path,
+        _tid,
+    ) = _compile_core(
+        skill_dir, install_dir, target_ide,
+        lockfile_root=lockfile_root,
+        override_root=override_root,
+        install_flags=install_flags,
+        explain_mode=True,
+    )
+    return flat_nodes, dep_tree, var_scope, cache, scenario_root
+
+
+# Story 4.2 R2 P1: precompiled regex matching XML 1.0-illegal control
+# characters. The XML 1.0 spec forbids U+0000–U+0008, U+000B–U+000C,
+# U+000E–U+001F in any position (including escaped entities). A raw byte
+# in this range from a YAML/TOML value would defeat the whole point of
+# the R1 escape work — `xml.etree.parse` would reject the explain output.
+# Replace with U+FFFD (REPLACEMENT CHARACTER) — the standard "lost data"
+# substitute, well-formed in XML 1.0.
+import re as _re
+_XML_ILLEGAL_RE = _re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xml_escape_attr(value: str) -> str:
+    """Story 4.2 R1 P1 + R2 P1: escape a string for safe inclusion as an
+    XML double-quoted attribute value. Without this, an attribute value
+    containing `"`, `&`, `<`, or `>` produces malformed XML that downstream
+    consumers (the LLM, `xml.etree`, lint tooling) parse incorrectly.
+    Newlines and tabs are escaped to numeric entities so multi-line values
+    don't break attribute parsing. Illegal control chars (R2 P1) are
+    replaced with U+FFFD before any other transformation so we don't emit
+    `&#10;` for a forbidden code point.
+    """
+    return (
+        _XML_ILLEGAL_RE.sub("�", value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("\n", "&#10;")
+        .replace("\r", "&#13;")
+        .replace("\t", "&#9;")
+    )
+
+
+def _xml_escape_text(value: str) -> str:
+    """Story 4.2 R1 P1 + R2 P1: escape a string for safe inclusion as
+    element text content. Specifically, a resolved variable value
+    containing the literal `</Variable>` would otherwise close its
+    wrapping tag prematurely; escaping `<` and `&` prevents tag-content
+    injection. We do NOT escape `>`, `"`, or whitespace — they are valid
+    text content. Illegal control chars (R2 P1) are replaced with U+FFFD.
+    """
+    return (
+        _XML_ILLEGAL_RE.sub("�", value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+    )
+
+
+def _include_attrs(
+    frag: resolver.ResolvedFragment,
+    cache: resolver.CompileCache,
+    scenario_root: io.PurePosixPath,
+) -> str:
+    """Story 4.2: compose the attribute string for one `<Include>` tag.
+
+    Required attrs (fixed order, most-important-first): `src`,
+    `resolved-from`, `hash`. Conditional attrs in alphabetical order for
+    twice-run determinism: `base-hash`, `override-hash`, `override-path`,
+    `variant`. See AC 5 / Dev Notes "Attribute ordering".
+
+    All string-typed attribute values pass through `_xml_escape_attr` (R1
+    P1) so paths/names containing `"`, `&`, `<`, `>` produce well-formed
+    XML rather than corrupting the surrounding tag.
+    """
+    src_text = cache.get_source((frag.resolved_path, frag.resolved_from))
+    h = io.hash_text(src_text)
+    attrs: list[str] = [
+        f'src="{_xml_escape_attr(frag.src)}"',
+        f'resolved-from="{_xml_escape_attr(frag.resolved_from)}"',
+        f'hash="{h}"',  # SHA-256 hex — no escape needed
+    ]
+    # Override tiers (including user-full-skill on the root) carry override
+    # provenance attrs. `base-hash` is conditional on a base file existing
+    # AND being readable (R1 P2: defensive against TOCTOU between probe and
+    # render — without this, a deleted base file raises FileNotFoundError
+    # mid-render and kills the explain output).
+    if frag.resolved_from in ("user-module-fragment", "user-override", "user-full-skill"):
+        if frag.base_path is not None and io.is_file(str(frag.base_path)):
+            base_src = io.read_template(str(frag.base_path))
+            attrs.append(f'base-hash="{io.hash_text(base_src)}"')
+        attrs.append(f'override-hash="{h}"')
+        op = lockfile._normalize_path(str(frag.resolved_path), scenario_root)
+        attrs.append(f'override-path="{_xml_escape_attr(op)}"')
+    if frag.resolved_from == "variant":
+        # `variants._IDE_SUFFIX_RE` is a module-private regex. Cross-module
+        # private access is intentional: `variants.py` is FROZEN for this
+        # story, and promoting it to a public name would require modifying
+        # a frozen file. Documented in spec Dev Notes.
+        m = variants._IDE_SUFFIX_RE.match(frag.resolved_path.name)
+        if m:
+            attrs.append(f'variant="{_xml_escape_attr(m.group("ide"))}"')
+    return " ".join(attrs)
+
+
+def _variable_attrs(
+    node: resolver.ExplainVar,
+    scenario_root: io.PurePosixPath,
+) -> str:
+    """Story 4.2: compose the attribute string for one `<Variable>` tag.
+
+    Required attrs (fixed order): `name`, `source`, `resolved-at`.
+    Conditional attrs in alphabetical order: `contributing-paths`,
+    `source-path`, `toml-layer`. `resolved-at="compile-time"` is a static
+    phase tag, NEVER a wall-clock timestamp (AC 5 determinism).
+
+    All string-typed attribute values pass through `_xml_escape_attr` (R1
+    P1).
+    """
+    rv = node.rv
+    attrs: list[str] = [
+        f'name="{_xml_escape_attr(node.name)}"',
+        f'source="{_xml_escape_attr(rv.source)}"',
+        'resolved-at="compile-time"',
+    ]
+    if rv.contributing_paths:
+        # Normalize each contributing path to scenario-root-relative for
+        # deterministic, environment-independent output. Sort for
+        # twice-run determinism (already sorted in build(), but defensive).
+        normalized = sorted(
+            lockfile._normalize_path(p, scenario_root) for p in rv.contributing_paths
+        )
+        joined = ";".join(normalized)
+        attrs.append(f'contributing-paths="{_xml_escape_attr(joined)}"')
+    if rv.source_path is not None:
+        rel = lockfile._normalize_path(rv.source_path, scenario_root)
+        attrs.append(f'source-path="{_xml_escape_attr(rel)}"')
+    if rv.toml_layer is not None:
+        attrs.append(f'toml-layer="{_xml_escape_attr(rv.toml_layer)}"')
+    return " ".join(attrs)
+
+
+def _render_explain(
+    flat: list[Any],
+    dep_tree: list[resolver.ResolvedFragment],
+    var_scope: resolver.VariableScope,
+    cache: resolver.CompileCache,
+    scenario_root: io.PurePosixPath,
+) -> str:
+    """Story 4.2: walk the explain-mode flat node stream and emit
+    Markdown+XML provenance output.
+
+    Wraps the entire output in the root template's `<Include>` (using
+    `dep_tree[0]`'s tier). `FragmentBoundary` sentinels emit nested
+    `<Include>` / `</Include>` wrappers; `ExplainVar` emits `<Variable>`;
+    `parser.VarRuntime` passes through as `{name}` literally (AC 3);
+    `parser.Text` content is emitted verbatim.
+    """
+    _ = var_scope  # currently unused; signature preserved for future use
+    parts: list[str] = []
+    root_frag = dep_tree[0]
+    parts.append(f"<Include {_include_attrs(root_frag, cache, scenario_root)}>\n")
+    for node in flat:
+        if isinstance(node, resolver.FragmentBoundary):
+            if node.is_start:
+                parts.append(
+                    f"<Include {_include_attrs(node.fragment, cache, scenario_root)}>\n"
+                )
+            else:
+                parts.append("</Include>\n")
+        elif isinstance(node, resolver.ExplainVar):
+            attrs = _variable_attrs(node, scenario_root)
+            # R1 P1: escape `<` and `&` in element content — without this,
+            # a resolved value containing `</Variable>` would close the
+            # wrapping tag prematurely and corrupt downstream XML parsing.
+            parts.append(f"<Variable {attrs}>{_xml_escape_text(node.value)}</Variable>")
+        elif isinstance(node, parser.VarRuntime):
+            parts.append("{" + node.name + "}")
+        elif isinstance(node, parser.Text):
+            parts.append(node.content)
+        # Other AstNode types (e.g. Include — should be expanded by resolver)
+        # are silently dropped; this matches `_render`'s defensive posture.
+    parts.append("\n</Include>\n")
+    return "".join(parts)
