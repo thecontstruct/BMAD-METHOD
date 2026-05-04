@@ -547,5 +547,145 @@ class TestProseFragmentOverrides(unittest.TestCase):
             self.assertEqual(frag["base_hash"], frag["hash"])
 
 
+class TestYamlVariableOverrides(unittest.TestCase):
+    """(Story 3.3) 4-tier YAML variable cascade.
+
+    bmad-config < module-config (above-marker) < user-config < install-flag.
+    All tests use install-phase mode (lockfile_root=install_root) — per-skill
+    mode skips the module-config probe per F3 guard (OQ 5 resolution).
+    """
+
+    def _make_install_tree(
+        self, t: Path, module: str = "mod1", skill: str = "skill1"
+    ) -> tuple[Path, Path, Path]:
+        skill_dir = t / module / skill
+        _write(skill_dir / f"{skill}.template.md", "User: {{user_name}}\n")
+        _write(t / "core" / "config.yaml", "user_name: Shado\n")
+        return skill_dir, t, t / "_config" / "bmad.lock"
+
+    @staticmethod
+    def _var_entry(lockfile_path: Path, skill: str, name: str) -> dict:
+        lf = json.loads(lockfile_path.read_text(encoding="utf-8"))
+        entry = next(e for e in lf["entries"] if e["skill"] == skill)
+        return next(v for v in entry["variables"] if v["name"] == name)
+
+    def test_bmad_config_tier_source_attribution(self) -> None:
+        """AC 1: bmad-config tier baseline — source/source_path/value_hash."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            skill_dir, install_root, lf_path = self._make_install_tree(t)
+
+            engine.compile_skill(skill_dir, install_root, lockfile_root=install_root)
+
+            compiled = (install_root / "mod1" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "User: Shado\n")
+
+            ve = self._var_entry(lf_path, "skill1", "user_name")
+            self.assertEqual(ve["source"], "bmad-config")
+            self.assertTrue(ve["source_path"].endswith("core/config.yaml"))
+            self.assertEqual(ve["value_hash"], bmad_io.hash_text("Shado"))
+
+    def test_user_config_override_wins(self) -> None:
+        """AC 2: user-config (_bmad/custom/config.yaml) wins over bmad-config."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            skill_dir, install_root, lf_path = self._make_install_tree(t)
+            _write(t / "custom" / "config.yaml", "user_name: Override\n")
+
+            engine.compile_skill(skill_dir, install_root, lockfile_root=install_root)
+
+            compiled = (install_root / "mod1" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "User: Override\n")
+
+            ve = self._var_entry(lf_path, "skill1", "user_name")
+            self.assertEqual(ve["source"], "user-config")
+            self.assertTrue(ve["source_path"].endswith("custom/config.yaml"))
+            self.assertEqual(ve["value_hash"], bmad_io.hash_text("Override"))
+
+    def test_module_config_above_marker_wins_below_discarded(self) -> None:
+        """AC 3: above-marker → module-config; below-marker echo discarded.
+
+        Plus: user-config beats module-config.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            skill_dir = t / "mod1" / "skill1"
+            _write(
+                skill_dir / "skill1.template.md",
+                "Custom: {{custom_var}}, User: {{user_name}}\n",
+            )
+            _write(t / "core" / "config.yaml", "user_name: Shado\n")
+            _write(
+                t / "mod1" / "config.yaml",
+                "custom_var: ModuleValue\n\n# Core Configuration Values\nuser_name: Shado\n",
+            )
+
+            engine.compile_skill(skill_dir, t, lockfile_root=t)
+
+            compiled = (t / "mod1" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "Custom: ModuleValue, User: Shado\n")
+
+            lf_path = t / "_config" / "bmad.lock"
+            ve_custom = self._var_entry(lf_path, "skill1", "custom_var")
+            self.assertEqual(ve_custom["source"], "module-config")
+            self.assertEqual(ve_custom["value_hash"], bmad_io.hash_text("ModuleValue"))
+
+            ve_user = self._var_entry(lf_path, "skill1", "user_name")
+            # Below-marker echo is discarded — authoritative core value comes from core/config.yaml.
+            self.assertEqual(ve_user["source"], "bmad-config")
+
+            # Sub-assertion: user-config beats module-config.
+            _write(t / "custom" / "config.yaml", "custom_var: UserValue\n")
+            engine.compile_skill(skill_dir, t, lockfile_root=t)
+            compiled = (t / "mod1" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "Custom: UserValue, User: Shado\n")
+            ve_custom = self._var_entry(lf_path, "skill1", "custom_var")
+            self.assertEqual(ve_custom["source"], "user-config")
+
+    def test_install_flag_wins_all(self) -> None:
+        """AC 4: --set install-flag wins over all YAML tiers; source_path absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            skill_dir, install_root, lf_path = self._make_install_tree(t)
+            _write(t / "custom" / "config.yaml", "user_name: Override\n")
+
+            engine.compile_skill(
+                skill_dir, install_root, lockfile_root=install_root,
+                install_flags={"user_name": "Flag"},
+            )
+
+            compiled = (install_root / "mod1" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "User: Flag\n")
+
+            ve = self._var_entry(lf_path, "skill1", "user_name")
+            self.assertEqual(ve["source"], "install-flag")
+            self.assertNotIn("source_path", ve)
+            self.assertEqual(ve["value_hash"], bmad_io.hash_text("Flag"))
+
+            # Sub-variant: new key not in any config file.
+            _write(skill_dir / "skill1.template.md", "User: {{user_name}}, New: {{totally_new_key}}\n")
+            engine.compile_skill(
+                skill_dir, install_root, lockfile_root=install_root,
+                install_flags={"user_name": "Flag", "totally_new_key": "X"},
+            )
+            compiled = (install_root / "mod1" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "User: Flag, New: X\n")
+            ve_new = self._var_entry(lf_path, "skill1", "totally_new_key")
+            self.assertEqual(ve_new["source"], "install-flag")
+            self.assertEqual(ve_new["value_hash"], bmad_io.hash_text("X"))
+
+            # Sub-variant: empty value — io.hash_text("") recorded.
+            _write(skill_dir / "skill1.template.md", "User: '{{user_name}}'\n")
+            engine.compile_skill(
+                skill_dir, install_root, lockfile_root=install_root,
+                install_flags={"user_name": ""},
+            )
+            compiled = (install_root / "mod1" / "skill1" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(compiled, "User: ''\n")
+            ve_empty = self._var_entry(lf_path, "skill1", "user_name")
+            self.assertEqual(ve_empty["source"], "install-flag")
+            self.assertEqual(ve_empty["value_hash"], bmad_io.hash_text(""))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -134,6 +134,52 @@ def _parse_flat_yaml(content: str) -> dict[str, str]:
     return result
 
 
+def _parse_flat_yaml_with_marker(content: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Parse a flat YAML config file, splitting on the core-marker comment.
+
+    Splits on the first line whose `.strip()` equals `# Core Configuration Values`.
+    Lines before the marker → `above_marker`; lines after → `below_marker`.
+    Both halves are parsed with the same rules as `_parse_flat_yaml`.
+
+    Marker absent → all keys go into `above_marker`; `below_marker` is `{}`.
+    """
+    if content.startswith("\ufeff"):
+        content = content[1:]
+    above_lines: list[str] = []
+    below_lines: list[str] = []
+    seen_marker = False
+    for line in content.splitlines():
+        if not seen_marker and line.strip() == "# Core Configuration Values":
+            seen_marker = True
+            continue
+        (below_lines if seen_marker else above_lines).append(line)
+
+    def _parse(lines: list[str]) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if line[0:1] == " " or line[0:1] == "\t":
+                continue
+            if ":" not in line:
+                continue
+            key, _, raw_value = line.partition(":")
+            key = key.strip()
+            if not key:
+                continue
+            val = raw_value.strip()
+            if len(val) >= 2 and (
+                (val.startswith('"') and val.endswith('"')) or
+                (val.startswith("'") and val.endswith("'"))
+            ):
+                val = val[1:-1]
+            result[key] = val
+        return result
+
+    return _parse(above_lines), _parse(below_lines)
+
+
 def _flatten_toml(
     d: dict[str, Any],
     prefix: str,
@@ -224,6 +270,9 @@ class VariableScope:
         cls,
         *,
         yaml_config_path: str | None = None,
+        module_yaml_paths: list[str] | None = None,
+        user_yaml_path: str | None = None,
+        install_flags: dict[str, str] | None = None,
         toml_layers: list[tuple[str, dict[str, Any]]] | None = None,
         toml_layer_paths: list[str] | None = None,
     ) -> "VariableScope":
@@ -231,6 +280,12 @@ class VariableScope:
 
         yaml_config_path: path to a flat YAML config file (bmad-config tier).
                           None = no YAML config.
+        module_yaml_paths: ordered list of module-config paths (above-marker keys
+                          win over bmad-config). None = no module-config.
+        user_yaml_path: path to user-config (_bmad/custom/config.yaml). Wins over
+                          module-config. None = no user-config.
+        install_flags: CLI --set KEY=VALUE overrides. Wins over all YAML tiers.
+                          None = no install flags.
         toml_layers: ordered list of (layer_name, parsed_dict) from lowest to
                     highest priority: [("defaults", ...), ("team", ...), ("user", ...)].
                     None = no TOML config.
@@ -239,7 +294,8 @@ class VariableScope:
         """
         table: dict[str, ResolvedValue] = {}
 
-        # Non-self.* cascade: bmad-config YAML.
+        # Non-self.* cascade: 4-tier last-write-wins
+        # bmad-config < module-config < user-config < install-flag
         if yaml_config_path is not None:
             content = io.read_template(yaml_config_path)
             parsed = _parse_flat_yaml(content)
@@ -248,6 +304,38 @@ class VariableScope:
                     value=val,
                     source="bmad-config",
                     source_path=yaml_config_path,
+                    value_hash=io.hash_text(val),
+                )
+
+        if module_yaml_paths:
+            for path in module_yaml_paths:
+                content = io.read_template(path)
+                above_marker, _below = _parse_flat_yaml_with_marker(content)
+                for name, val in above_marker.items():
+                    table[name] = ResolvedValue(
+                        value=val,
+                        source="module-config",
+                        source_path=path,
+                        value_hash=io.hash_text(val),
+                    )
+
+        if user_yaml_path is not None:
+            content = io.read_template(user_yaml_path)
+            parsed = _parse_flat_yaml(content)
+            for name, val in parsed.items():
+                table[name] = ResolvedValue(
+                    value=val,
+                    source="user-config",
+                    source_path=user_yaml_path,
+                    value_hash=io.hash_text(val),
+                )
+
+        if install_flags:
+            for name, val in install_flags.items():
+                table[name] = ResolvedValue(
+                    value=val,
+                    source="install-flag",
+                    source_path=None,
                     value_hash=io.hash_text(val),
                 )
 

@@ -93,6 +93,7 @@ def compile_skill(
     *,
     lockfile_root: io.PathLike | None = None,
     override_root: io.PathLike | None = None,
+    install_flags: dict[str, str] | None = None,
 ) -> None:
     """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
 
@@ -104,6 +105,10 @@ def compile_skill(
     params allow the install-phase caller to override the derived paths.
     When either is None, today's `skill_dir.parent.parent / "_bmad"` derivation
     is used, preserving full backward compatibility.
+
+    Story 3.3: `install_flags` carries CLI `--set KEY=VALUE` overrides. They
+    win over all YAML tiers (bmad-config / module-config / user-config).
+    None or empty = no install-flag tier.
     """
     skill_posix = io.to_posix(skill_dir)
     if not io.is_dir(str(skill_posix)):
@@ -273,6 +278,28 @@ def compile_skill(
     if io.is_file(str(_yaml_candidate)):
         yaml_config_path = str(_yaml_candidate)
 
+    # Story 3.3: module-config probe — `_bmad/<current_module>/config.yaml`.
+    # Install-phase mode only. Per-skill mode (lockfile_root is None) skips
+    # this probe entirely: `current_module` is hardcoded to "core" there, and
+    # `core/config.yaml` lacks the marker — an unguarded probe would re-attribute
+    # all core keys as "module-config" and overwrite the bmad-config entries
+    # (R2-empirical F3 guard, Story 3.3 OQ 5 resolution).
+    module_yaml_paths: list[str] = []
+    if lockfile_root is not None:
+        _module_yaml = io.to_posix(lockfile_root) / current_module / "config.yaml"
+        if io.is_file(str(_module_yaml)):
+            module_yaml_paths.append(str(_module_yaml))
+
+    # Story 3.3: user-config probe — `_bmad/custom/config.yaml`.
+    # Flat path only for v1 (module-scoped / workflow-scoped paths deferred — OQ 1).
+    user_yaml_path: str | None = None
+    if lockfile_root is not None:
+        _user_yaml_candidate = io.to_posix(lockfile_root) / "custom" / "config.yaml"
+    else:
+        _user_yaml_candidate = scenario_root / "_bmad" / "custom" / "config.yaml"
+    if io.is_file(str(_user_yaml_candidate)):
+        user_yaml_path = str(_user_yaml_candidate)
+
     # Build self.* TOML layer stack (lowest → highest: defaults → team → user).
     _toml_layers: list[tuple[str, dict[str, Any]]] = []
     _toml_layer_paths: list[str] = []
@@ -292,6 +319,9 @@ def compile_skill(
 
     var_scope = resolver.VariableScope.build(
         yaml_config_path=yaml_config_path,
+        module_yaml_paths=module_yaml_paths or None,
+        user_yaml_path=user_yaml_path,
+        install_flags=install_flags,
         toml_layers=_toml_layers or None,
         toml_layer_paths=_toml_layer_paths or None,
     )

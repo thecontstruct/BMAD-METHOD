@@ -140,7 +140,24 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--install-phase", action="store_true", help="Batch-compile all migrated skills under --install-dir.")
     ap.add_argument("--install-dir", required=True, help="Output directory (per-skill) or install root (install-phase).")
     ap.add_argument("--tools", default=None, help="Target IDE for variant selection (e.g. cursor, claudecode).")
+    ap.add_argument(
+        "--set", dest="var_overrides", action="append", metavar="KEY=VALUE",
+        default=[],
+        help="Override a compile-time variable (repeatable). Format: KEY=VALUE.",
+    )
     args = ap.parse_args(argv)
+
+    install_flags: dict[str, str] = {}
+    for kv in (args.var_overrides or []):
+        if "=" not in kv:
+            sys.stderr.write(f"error: --set argument must be KEY=VALUE, got: {kv!r}\n")
+            return 1
+        k, _, v = kv.partition("=")
+        k = k.strip()
+        if not k:
+            sys.stderr.write(f"error: --set KEY is empty in: {kv!r}\n")
+            return 1
+        install_flags[k] = v
 
     install_path = Path(args.install_dir).resolve()
 
@@ -177,7 +194,10 @@ def main(argv: list[str] | None = None) -> int:
     target_ide = target_ide or None  # "" → None
 
     try:
-        engine.compile_skill(skill_path, install_path, target_ide=target_ide)
+        engine.compile_skill(
+            skill_path, install_path, target_ide=target_ide,
+            install_flags=install_flags or None,
+        )
     except CompilerError as e:
         sys.stderr.write(e.format() + "\n")
         return 2
