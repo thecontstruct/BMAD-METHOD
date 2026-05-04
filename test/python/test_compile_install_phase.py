@@ -11,6 +11,7 @@ Exercises the `_run_install_phase` dispatcher end-to-end:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.scripts.bmad_compile import engine, io as bmad_io
+from src.scripts.bmad_compile import engine, errors, io as bmad_io
 
 
 def _write(path: Path, content: str) -> None:
@@ -742,6 +743,70 @@ class TestModuleBoundaryEnforcement(unittest.TestCase):
             warning_events = [e for e in events if e["kind"] == "warning"]
             self.assertTrue(len(warning_events) >= 1, "Expected at least one kind:warning event")
             self.assertIn("bypasses fragment-level upgrade safety", warning_events[0]["message"])
+
+
+class TestOverrideRootContainment(unittest.TestCase):
+    """(Story 3.5) Override-root containment: OverrideOutsideRootError on escape."""
+
+    def test_dotdot_override_path_raises_override_outside_root(self) -> None:
+        """AC 1: override_root with ../ segments that escape scenario_root is rejected."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "core" / "skill1" / "skill1.template.md", "Hello\n")
+            # root / ".." / "evil" resolves to parent-of-root/evil — outside root.
+            with self.assertRaises(errors.OverrideOutsideRootError):
+                engine.compile_skill(
+                    root / "core" / "skill1",
+                    root,
+                    override_root=root / ".." / "evil",
+                )
+
+    @unittest.skipIf(sys.platform == "win32", "symlinks require elevated privileges on Windows")
+    def test_symlink_override_pointing_outside_raises_override_outside_root(self) -> None:
+        """AC 2: override_root that is a symlink resolving outside scenario_root is rejected."""
+        with tempfile.TemporaryDirectory() as tmp_root, tempfile.TemporaryDirectory() as tmp_outside:
+            root = Path(tmp_root)
+            outside = Path(tmp_outside)
+            _write(root / "core" / "skill1" / "skill1.template.md", "Hello\n")
+            # custom/ is a symlink pointing to a directory outside root.
+            symlink = root / "custom"
+            try:
+                os.symlink(str(outside), str(symlink))
+            except OSError as exc:
+                self.skipTest(f"symlink creation failed (may need elevated privileges): {exc}")
+            with self.assertRaises(errors.OverrideOutsideRootError):
+                engine.compile_skill(
+                    root / "core" / "skill1",
+                    root,
+                    override_root=symlink,
+                )
+
+    def test_include_dotdot_traversal_raises_override_outside_root(self) -> None:
+        """AC 5: include path with ../ segments that escape scenario_root is rejected."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # From root/core/skill1, three ../ levels escape root entirely.
+            _write(
+                root / "core" / "skill1" / "skill1.template.md",
+                '<<include path="../../../outside.template.md">>',
+            )
+            with self.assertRaises(errors.OverrideOutsideRootError):
+                engine.compile_skill(root / "core" / "skill1", root)
+
+    def test_override_root_within_root_does_not_raise(self) -> None:
+        """AC 6 (positive): override_root within scenario_root compiles without error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "core" / "skill1" / "skill1.template.md", "Hello\n")
+            custom = root / "_bmad" / "custom"
+            custom.mkdir(parents=True, exist_ok=True)
+            # override_root is within root — must not raise OverrideOutsideRootError.
+            result = engine.compile_skill(
+                root / "core" / "skill1",
+                root,
+                override_root=custom,
+            )
+            self.assertIsNone(result)
 
 
 if __name__ == "__main__":

@@ -52,6 +52,7 @@ def _context(
         skill_dir=PurePosixPath(skill_dir.as_posix()),
         module_roots=module_roots,
         current_module=current_module,
+        scenario_root=PurePosixPath(scenario_root.as_posix()),
         override_root=(
             PurePosixPath(override_root.as_posix())
             if override_root is not None
@@ -574,6 +575,7 @@ class TestModuleRouting(unittest.TestCase):
                     "bmm": PurePosixPath(bmm_root.as_posix()),
                 },
                 current_module="bmm",
+                scenario_root=PurePosixPath(root.as_posix()),
             )
             flat, dep = resolve(ast, ctx, CompileCache(), root_source=src_text)
             self.assertIn("CORE_INTRO", _render(flat))
@@ -596,6 +598,7 @@ class TestModuleRouting(unittest.TestCase):
                 skill_dir=PurePosixPath(bmm_skill.as_posix()),
                 module_roots={"bmm": PurePosixPath(bmm_root.as_posix())},
                 current_module="bmm",
+                scenario_root=PurePosixPath(root.as_posix()),
             )
             flat, _ = resolve(ast, ctx, CompileCache(), root_source=src_text)
             self.assertIn("LOCAL_BMM", _render(flat))
@@ -627,6 +630,7 @@ class TestModuleRouting(unittest.TestCase):
                 skill_dir=PurePosixPath(bmm_skill.as_posix()),
                 module_roots={"bmm": PurePosixPath(bmm_root.as_posix())},
                 current_module="bmm",
+                scenario_root=PurePosixPath(root.as_posix()),
             )
             flat, dep = resolve(ast, ctx, CompileCache(), root_source=src_text)
             self.assertIn("SKILL_LOCAL_BMM", _render(flat))
@@ -771,11 +775,15 @@ class TestTransitiveAndEscape(unittest.TestCase):
             flat, _ = resolve(ast, ctx, CompileCache(), root_source=src_text)
             self.assertIn("I_CONTENT", _render(flat))
 
-    def test_dotdot_segments_are_not_normalized_away(self) -> None:
-        """Story 3.5 needs `..` preserved on `resolved_path` for its audit."""
+    def test_dotdot_segments_resolved_by_ensure_within_root(self) -> None:
+        """Story 3.5: `..` in include paths resolved (not preserved) by ensure_within_root.
+
+        `../leaked.template.md` from root/core/skill1 resolves to
+        root/core/leaked.template.md which is within root — so no error is
+        raised, but the resolved_path has no `..` parts.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            skill = root / "core" / "skill1"
             # Create a file reachable via `..` from the skill dir.
             _write(root / "core" / "leaked.template.md", "L")
             src_text = '<<include path="../leaked.template.md">>'
@@ -784,7 +792,13 @@ class TestTransitiveAndEscape(unittest.TestCase):
             _, dep = resolve(ast, ctx, CompileCache(), root_source=src_text)
             leaked = [r for r in dep if r.src == "../leaked.template.md"]
             self.assertEqual(len(leaked), 1)
-            self.assertIn("..", leaked[0].resolved_path.parts)
+            # ensure_within_root resolves symlinks and normalises the path.
+            self.assertNotIn("..", leaked[0].resolved_path.parts)
+            # Resolved path points exactly at root/core/leaked.template.md.
+            expected = PurePosixPath(
+                (root / "core" / "leaked.template.md").resolve().as_posix()
+            )
+            self.assertEqual(leaked[0].resolved_path, expected)
 
 
 class TestVariableResolution(unittest.TestCase):
@@ -942,6 +956,7 @@ class TestVariableResolution(unittest.TestCase):
                 skill_dir=PurePosixPath((root / "core" / "skill1").as_posix()),
                 module_roots={"core": PurePosixPath((root / "core").as_posix())},
                 current_module="core",
+                scenario_root=PurePosixPath(root.as_posix()),
                 local_scope=(("self.agent.name", "SCOPE"),),
                 var_scope=var_scope,
             )

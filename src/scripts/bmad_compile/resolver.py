@@ -390,6 +390,7 @@ class ResolveContext:
     skill_dir: PurePosixPath
     module_roots: dict[str, PurePosixPath]
     current_module: str
+    scenario_root: PurePosixPath  # Story 3.5: project root for containment checks
     override_root: PurePosixPath | None = None
     target_ide: str | None = None
     # Include-directive props merged into this scope as the DFS descends.
@@ -534,8 +535,11 @@ def _base_candidate(
         root = context.module_roots.get(effective_module)
         if root is None:
             return None
-        return root / relative_subpath
-    return context.skill_dir / relative_subpath
+        path = root / relative_subpath
+    else:
+        path = context.skill_dir / relative_subpath
+    # Story 3.5: Reject ../ traversal that escapes scenario_root.
+    return io.ensure_within_root(path, context.scenario_root)
 
 
 def _variant_candidate(
@@ -564,7 +568,11 @@ def _variant_candidate(
                 # a raw `IsADirectoryError` outside the `CompilerError`
                 # taxonomy.
                 if io.is_file(str(entry)):
-                    matches.append(entry)
+                    try:
+                        safe_entry = io.ensure_within_root(entry, context.scenario_root)
+                    except errors.OverrideOutsideRootError:
+                        continue
+                    matches.append(safe_entry)
                 break
     return variants.select_variant(matches, context.target_ide)
 
@@ -588,12 +596,14 @@ def _lookup_tier(
             / skill_basename
             / leaf
         )
-        return path if io.is_file(str(path)) else None
+        _safe = io.ensure_within_root(path, context.scenario_root)
+        return _safe if io.is_file(str(_safe)) else None
     if tier == _TIER_USER_OVERRIDE:
         if context.override_root is None:
             return None
         path = context.override_root / "fragments" / leaf
-        return path if io.is_file(str(path)) else None
+        _safe = io.ensure_within_root(path, context.scenario_root)
+        return _safe if io.is_file(str(_safe)) else None
     if tier == _TIER_BASE:
         base = _base_candidate(
             context, effective_module, relative_subpath, had_module_prefix

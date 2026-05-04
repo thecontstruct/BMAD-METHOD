@@ -153,7 +153,8 @@ def compile_skill(
         )
     # AC 6: override_root param overrides the default derivation (no implicit /custom suffix).
     if override_root is not None:
-        candidate_override_root = io.to_posix(override_root)
+        # Story 3.5: Caller-supplied override_root is untrusted; reject before any filesystem probe.
+        candidate_override_root = io.ensure_within_root(override_root, scenario_root)
     else:
         candidate_override_root = scenario_root / "_bmad" / "custom"
     # `is_dir` (not `path_exists`) — completes the file-type discipline
@@ -177,13 +178,9 @@ def compile_skill(
     root_resolved_from = "base"
     override_root_template = None
     if override_root is not None:
-        override_root_template = (
-            override_root
-            / "fragments"
-            / current_module
-            / basename
-            / "SKILL.template.md"
-        )
+        _ort = override_root / "fragments" / current_module / basename / "SKILL.template.md"
+        # Story 3.5: Reject symlinks in override path pointing outside scenario_root.
+        override_root_template = io.ensure_within_root(_ort, scenario_root)
         # `is_file` (not `path_exists`) — a directory at this slot would
         # otherwise pass the probe and crash later in `read_template` with
         # a raw `IsADirectoryError` / `PermissionError` outside the
@@ -330,6 +327,7 @@ def compile_skill(
         skill_dir=skill_posix,
         module_roots=module_roots,
         current_module=current_module,
+        scenario_root=scenario_root,
         override_root=override_root,
         target_ide=target_ide,
         root_resolved_from=root_resolved_from,
