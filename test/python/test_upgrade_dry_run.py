@@ -1,7 +1,8 @@
-"""Story 5.1: Tests for `bmad upgrade --dry-run` (drift detection engine + CLI).
+"""Story 5.1 + 5.2: Tests for `bmad upgrade` (drift detection engine + CLI).
 
-16 tests covering all six drift categories, human/JSON output, schema fixture
-validation, no-write invariant, and subprocess integration (4.9–4.14).
+28 tests covering all six drift categories, human/JSON output, schema fixture
+validation, no-write invariant, subprocess integration (4.9–4.14), halt-on-drift
+(AC 1), --yes escape (AC 2), no-drift upgrade path (AC 3), and regression guards.
 """
 
 from __future__ import annotations
@@ -610,6 +611,264 @@ class TestUpgradeCLI(unittest.TestCase):
             self.assertEqual(set(before.keys()), set(after.keys()), "Files were added or removed")
             for path, mtime in before.items():
                 self.assertEqual(after[path], mtime, f"File was modified: {path}")
+
+
+def _run_upgrade_halt(project_root: Path, *extra_args: str) -> tuple[int, str, str]:
+    """Invoke upgrade.py WITHOUT --dry-run; return (exit_code, stdout, stderr)."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_UPGRADE_PY),
+            "--project-root",
+            str(project_root),
+            *extra_args,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+class TestUpgradeHalt(unittest.TestCase):
+    """Story 5.2: halt-on-drift, --yes escape, upgrade-proceeds, and regression guards."""
+
+    def setUp(self) -> None:
+        import upgrade as _upgrade_mod  # noqa: PLC0415
+        self._upgrade_mod = _upgrade_mod
+        self._upgrade_mod._COMPILE_PY_PATH = None
+
+    def tearDown(self) -> None:
+        self._upgrade_mod._COMPILE_PY_PATH = None
+
+    def _write_compile_stub(self, stub_dir: Path, exit_code: int = 0, stderr_msg: str = "") -> Path:
+        """Write a minimal compile.py stub to stub_dir and return its path."""
+        sentinel = stub_dir / "compile_ran.sentinel"
+        lines = [
+            "import sys",
+            f"open({str(sentinel)!r}, 'w').close()",
+        ]
+        if stderr_msg:
+            lines.append(f"print({stderr_msg!r}, file=sys.stderr)")
+        lines.append(f"sys.exit({exit_code})")
+        stub_path = stub_dir / "compile.py"
+        stub_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return stub_path
+
+    def _make_orphaned_only_project(self, t: Path) -> None:
+        """Set up a project with ONLY orphaned_overrides drift (no prose/toml/glob)."""
+        # Override whose base fragment does NOT exist on disk → orphaned.
+        override_rel = "custom/fragments/core/skill1/guard.md"
+        override_abs = t / "_bmad" / override_rel
+        override_abs.parent.mkdir(parents=True, exist_ok=True)
+        override_abs.write_text("Override text.\n", encoding="utf-8")
+        override_hash = bmad_io.hash_text(bmad_io.read_template(str(override_abs)))
+        base_hash = bmad_io.hash_text("Original base.\n")
+
+        root_rel = "core/skill1/fragments/root.md"
+        root_hash = _fragment_hash(t, root_rel, "Root.\n")
+
+        entry: dict = {
+            "compiled_hash": "aa" * 32,
+            "fragments": [
+                {"hash": root_hash, "path": root_rel, "resolved_from": "base"},
+                {
+                    "hash": override_hash,
+                    "path": override_rel,
+                    "resolved_from": "user-module-fragment",
+                    "base_hash": base_hash,
+                },
+            ],
+            "glob_inputs": [],
+            "skill": "skill1",
+            "source_hash": "bb" * 32,
+            "variant": None,
+            "variables": [],
+        }
+        _write_lockfile(t, [entry])
+
+    # --- halt tests (subprocess, no compile involved) ---
+
+    def test_halt_on_drift_exit_code_3(self) -> None:
+        """Drift present, no --yes → exit code 3."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            code, _, stderr = _run_upgrade_halt(t)
+            self.assertEqual(code, 3, f"Expected exit 3, got {code}. stderr: {stderr}")
+
+    def test_halt_on_drift_stderr_format(self) -> None:
+        """Halt message matches exact N/M/P/Q format from AC 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            _, _, stderr = _run_upgrade_halt(t)
+            expected = (
+                "Drift detected in 1 skills "
+                "(1 prose fragments, 0 TOML fields, 0 glob inputs). "
+                "Invoke 'bmad-customize' skill in your IDE chat to review and resolve, "
+                "then re-run 'bmad upgrade'. "
+                "Use 'bmad upgrade --yes' to ignore drift and proceed (not recommended)."
+            )
+            self.assertEqual(stderr.strip(), expected)
+
+    def test_halt_on_drift_no_file_writes(self) -> None:
+        """Halt mode must not write any files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            def _snapshot(root: Path) -> dict[str, float]:
+                return {str(p): p.stat().st_mtime for p in root.rglob("*") if p.is_file()}
+
+            before = _snapshot(t)
+            code, _, stderr = _run_upgrade_halt(t)
+            self.assertEqual(code, 3, f"Expected exit 3. stderr: {stderr}")
+            after = _snapshot(t)
+            self.assertEqual(set(before.keys()), set(after.keys()), "Files were added or removed")
+            for p, mtime in before.items():
+                self.assertEqual(after[p], mtime, f"File modified: {p}")
+
+    def test_halt_on_drift_stdout_empty(self) -> None:
+        """Halt mode emits nothing to stdout."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            _, stdout, _ = _run_upgrade_halt(t)
+            self.assertEqual(stdout, "", f"Expected empty stdout, got: {stdout!r}")
+
+    def test_halt_excluded_categories_only_exit_3(self) -> None:
+        """Only orphaned_overrides drift → exit 3, message shows 0/0/0 counts (OQ 2)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            self._make_orphaned_only_project(t)
+
+            code, stdout, stderr = _run_upgrade_halt(t)
+            self.assertEqual(code, 3, f"Expected exit 3. stderr: {stderr}")
+            self.assertEqual(stdout, "", "Expected empty stdout in halt mode")
+            self.assertIn("0 prose fragments, 0 TOML fields, 0 glob inputs", stderr)
+
+    # --- upgrade-proceeds tests (call main() directly for compile stub) ---
+
+    def test_yes_flag_no_halt(self) -> None:
+        """--yes with drift → exit 0 (compile invoked, no halt)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            self._write_compile_stub(t, exit_code=0)
+            self._upgrade_mod._COMPILE_PY_PATH = t / "compile.py"
+
+            result = self._upgrade_mod.main(["--yes", "--project-root", str(t)])
+            self.assertEqual(result, 0, "Expected exit 0 with --yes")
+
+    def test_no_drift_proceeds(self) -> None:
+        """No drift → upgrade proceeds (compile invoked), exit 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            frag_hash = _fragment_hash(t, frag_rel, "Stable content.\n")
+            entry = _make_base_entry("skill1", frag_rel, frag_hash)
+            _write_lockfile(t, [entry])
+
+            self._write_compile_stub(t, exit_code=0)
+            self._upgrade_mod._COMPILE_PY_PATH = t / "compile.py"
+
+            result = self._upgrade_mod.main(["--project-root", str(t)])
+            self.assertEqual(result, 0, "Expected exit 0 when no drift")
+
+    def test_yes_compile_failure_exits_1(self) -> None:
+        """--yes with compile.py exiting 1 → upgrade.py exits 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            self._write_compile_stub(t, exit_code=1, stderr_msg="compile error sentinel")
+            self._upgrade_mod._COMPILE_PY_PATH = t / "compile.py"
+
+            result = self._upgrade_mod.main(["--yes", "--project-root", str(t)])
+            self.assertEqual(result, 1, "Expected exit 1 when compile.py fails")
+
+    # --- --dry-run regression guards ---
+
+    def test_dry_run_unchanged_exit_0(self) -> None:
+        """--dry-run still exits 0 with drift (Story 5.1 behavior preserved)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            code, _, stderr = _run_upgrade(t)
+            self.assertEqual(code, 0, f"Expected exit 0 for --dry-run. stderr: {stderr}")
+
+    def test_dry_run_stdout_not_empty(self) -> None:
+        """--dry-run with drift emits human-format lines to stdout (not empty like halt mode)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            _, stdout, _ = _run_upgrade(t)
+            self.assertIn("[prose_fragment_changes]", stdout)
+
+    def test_dry_run_with_yes_ignored(self) -> None:
+        """--dry-run --yes: dry-run path takes precedence; compile is NOT invoked."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            frag_rel = "core/skill1/fragments/intro.md"
+            old_hash = bmad_io.hash_text("Old content.\n")
+            _fragment_hash(t, frag_rel, "New content.\n")
+            entry = _make_base_entry("skill1", frag_rel, old_hash)
+            _write_lockfile(t, [entry])
+
+            self._write_compile_stub(t, exit_code=0)
+            self._upgrade_mod._COMPILE_PY_PATH = t / "compile.py"
+
+            result = self._upgrade_mod.main(["--dry-run", "--yes", "--project-root", str(t)])
+            sentinel = t / "compile_ran.sentinel"
+            self.assertEqual(result, 0, "--dry-run always exits 0")
+            self.assertFalse(sentinel.exists(), "compile must NOT be invoked in --dry-run mode")
+
+    def test_help_shows_yes_flag(self) -> None:
+        """`upgrade.py --help` output contains --yes."""
+        result = subprocess.run(
+            [sys.executable, str(_UPGRADE_PY), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("--yes", result.stdout)
 
 
 if __name__ == "__main__":

@@ -1,16 +1,20 @@
-"""Story 5.1: `bmad upgrade --dry-run` CLI entry point.
+"""Story 5.2: `bmad upgrade` — halt-on-drift, `--yes` escape, and upgrade-proceeds.
+
+Modes:
+    --dry-run   Preview drift without writing any files (Story 5.1 behavior).
+    (bare)      Halt at exit 3 if drift detected; call compile.py --install-phase
+                and exit 0 if no drift.
+    --yes       Force upgrade past drift; call compile.py --install-phase, exit 0.
 
 Usage:
-    python3 upgrade.py --dry-run [--json] [--skill <name>] [--project-root <path>]
-
-This is a separate top-level script — NOT an extension of compile.py.
-Story 5.2 will add the no-flag (halt-on-drift) mode.
+    python3 upgrade.py [--dry-run] [--yes] [--json] [--skill <name>] [--project-root <path>]
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -34,6 +38,13 @@ from bmad_compile.drift import (
 # compile.py --install-phase uses --install-dir (_bmad/) as its anchor;
 # upgrade.py uses --project-root (parent of _bmad/) so the constant is correct.
 LOCKFILE_RELATIVE_PATH = "_bmad/_config/bmad.lock"
+
+# Test-only override: set to a Path to redirect compile.py resolution in tests.
+_COMPILE_PY_PATH: Path | None = None
+
+
+def _get_compile_py() -> Path:
+    return _COMPILE_PY_PATH if _COMPILE_PY_PATH is not None else Path(__file__).parent / "compile.py"
 
 
 def _fmt_hash(h: str | None) -> str:
@@ -199,17 +210,55 @@ def _format_json(reports: list[DriftReport]) -> str:
     return json.dumps(result, indent=2)
 
 
+def _halt_on_drift_stderr(reports: list[DriftReport]) -> str:
+    """Format the mandated AC 1 halt message with N/M/P/Q substitution."""
+    n_skills = sum(1 for r in reports if r.has_drift())
+    m_prose = sum(len(r.prose_fragment_changes) for r in reports)
+    p_toml = sum(len(r.toml_default_changes) for r in reports)
+    q_glob = sum(len(r.glob_changes) for r in reports)
+    return (
+        f"Drift detected in {n_skills} skills "
+        f"({m_prose} prose fragments, {p_toml} TOML fields, {q_glob} glob inputs). "
+        f"Invoke 'bmad-customize' skill in your IDE chat to review and resolve, "
+        f"then re-run 'bmad upgrade'. "
+        f"Use 'bmad upgrade --yes' to ignore drift and proceed (not recommended)."
+    )
+
+
+def _run_compile_install_phase(project_root: str) -> int:
+    """Call compile.py --install-phase as a subprocess. Returns 0 on success, 1 on failure."""
+    compile_py = _get_compile_py()
+    bmad_dir = Path(project_root) / "_bmad"
+    result = subprocess.run(
+        [sys.executable, str(compile_py), "--install-phase", "--install-dir", str(bmad_dir)],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr, end="")
+        return 1
+    print("Upgrade complete.", flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Exit code taxonomy for upgrade.py:
+    #   0 — success (no drift, or upgrade completed via --yes / clean path)
+    #   1 — error (missing lockfile, bad --skill arg, compile.py failure)
+    #   3 — halt (drift detected without --yes; no files written)
+    # Exit code 2 is reserved by POSIX convention (shell misuse).
     parser = argparse.ArgumentParser(
         description="bmad upgrade — drift detection and upgrade"
     )
-    # Story 5.2 note: when adding halt-on-drift mode, --dry-run becomes optional.
-    # Modify upgrade.py in Story 5.2 to handle the no-flag path.
     parser.add_argument(
         "--dry-run", action="store_true", help="Preview drift without writing any files"
     )
     parser.add_argument(
         "--json", action="store_true", help="Output JSON (requires --dry-run)"
+    )
+    parser.add_argument(
+        "--yes", action="store_true", help="Proceed with upgrade even if drift is detected"
     )
     parser.add_argument("--skill", default=None, help="Limit analysis to one skill")
     parser.add_argument(
@@ -218,13 +267,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Project root directory (default: CWD)",
     )
     args = parser.parse_args(argv)
-
-    if not args.dry_run:
-        print(
-            "Error: --dry-run is required. Story 5.2 will add halt-on-drift mode.",
-            file=sys.stderr,
-        )
-        return 1
 
     lock_path = Path(args.project_root) / LOCKFILE_RELATIVE_PATH
     if not lock_path.is_file():
@@ -245,22 +287,37 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-    reports: list[DriftReport] = []
+    if args.dry_run:
+        # Story 5.1 path — unchanged.
+        reports: list[DriftReport] = []
+        for entry in entries:
+            report = detect_drift(entry, args.project_root)
+            if report.has_drift():
+                if not args.json:
+                    print(_format_human(report), flush=True)
+                reports.append(report)
+
+        if args.json:
+            print(_format_json(reports), flush=True)
+        elif not reports:
+            print("No drift detected.", flush=True)
+        else:
+            _print_footer(reports)
+
+        return 0
+
+    # Non-dry-run path (Story 5.2): detect drift, halt or proceed.
+    drift_reports: list[DriftReport] = []
     for entry in entries:
         report = detect_drift(entry, args.project_root)
         if report.has_drift():
-            if not args.json:
-                print(_format_human(report), flush=True)
-            reports.append(report)
+            drift_reports.append(report)
 
-    if args.json:
-        print(_format_json(reports), flush=True)
-    elif not reports:
-        print("No drift detected.", flush=True)
-    else:
-        _print_footer(reports)
+    if drift_reports and not args.yes:
+        print(_halt_on_drift_stderr(drift_reports), file=sys.stderr)
+        return 3
 
-    return 0
+    return _run_compile_install_phase(args.project_root)
 
 
 if __name__ == "__main__":

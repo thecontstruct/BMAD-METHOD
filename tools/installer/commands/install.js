@@ -1,7 +1,10 @@
 const path = require('node:path');
+const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const prompts = require('../prompts');
 const { Installer } = require('../core/installer');
 const { UI } = require('../ui');
+const { runUpgradeDryRun, runUpgradeYes } = require('../compiler/invoke-python');
 
 const installer = new Installer();
 const ui = new UI();
@@ -44,6 +47,44 @@ module.exports = {
       if (options.debug) {
         process.env.BMAD_DEBUG_MANIFEST = 'true';
         await prompts.log.info('Debug mode enabled');
+      }
+
+      // AC 4/5: detect existing bmad.lock before prompting; route to upgrade if found.
+      const projectRoot = options.directory ? path.resolve(options.directory) : process.cwd();
+      const lockfilePath = path.join(projectRoot, '_bmad/_config/bmad.lock');
+      const lockfileExists = await fs.access(lockfilePath).then(() => true).catch(() => false);
+
+      if (lockfileExists) {
+        // Prefer installed upgrade.py; fall back to source path for dev environments.
+        const installedUpgradePy = path.join(projectRoot, '_bmad', 'scripts', 'upgrade.py');
+        const sourceUpgradePy = path.join(__dirname, '../../../src/scripts/upgrade.py');
+        const upgradePy = fsSync.existsSync(installedUpgradePy) ? installedUpgradePy : sourceUpgradePy;
+
+        const driftReport = await runUpgradeDryRun({ upgradePy, projectRoot });
+
+        if (driftReport.summary.total_skills_with_drift === 0) {
+          await prompts.log.info('No drift detected. Proceeding with install...');
+        } else {
+          const { total_skills_with_drift: n, prose_fragment_changes: m, toml_default_changes: p, glob_changes: q } = driftReport.summary;
+          await prompts.log.warn(
+            `Drift detected in ${n} skill(s): ${m} prose fragment(s), ${p} TOML field(s), ${q} glob input(s).`
+          );
+
+          let proceed = options.yes;
+          if (!proceed) {
+            const answer = await prompts.confirm({ message: 'Drift detected. Proceed with upgrade?' });
+            proceed = answer;
+          }
+
+          if (proceed) {
+            await prompts.log.info('Upgrading...');
+            await runUpgradeYes({ upgradePy, projectRoot });
+            await prompts.log.success('Upgrade complete.');
+            process.exit(0);
+          } else {
+            await prompts.log.info('Upgrade declined. Proceeding with standard install flow...');
+          }
+        }
       }
 
       const config = await ui.promptInstall(options);

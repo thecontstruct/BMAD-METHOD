@@ -218,4 +218,51 @@ async function runInstallPhase({ bmadDir, projectRoot, message }) {
   };
 }
 
-module.exports = { checkPythonVersion, hasMigratedSkillsInScope, runInstallPhase };
+/**
+ * Run `upgrade.py --dry-run --json` and return the parsed drift report object.
+ *
+ * @param {Object} opts
+ * @param {string} opts.upgradePy   - Path to upgrade.py
+ * @param {string} opts.projectRoot - Project root (cwd for the Python subprocess)
+ * @returns {Promise<Object>} Parsed JSON drift report (schema_version, drift, summary)
+ */
+async function runUpgradeDryRun({ upgradePy, projectRoot }) {
+  let result;
+  try {
+    result = await _spawnPython(
+      [upgradePy, '--dry-run', '--json', '--project-root', projectRoot],
+      { cwd: projectRoot }
+    );
+  } catch (error) {
+    throw new Error(`Failed to spawn upgrade.py: ${error.message}`);
+  }
+  if (result.code === 1) {
+    throw new Error(`upgrade.py --dry-run failed:\n${result.stderr}`);
+  }
+  // Exit code 0 always for --dry-run (no drift or drift found, both return 0).
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`upgrade.py --dry-run emitted non-JSON output:\n${result.stdout.slice(0, 200)}`);
+  }
+}
+
+/**
+ * Run `upgrade.py --yes` to force upgrade past drift.
+ *
+ * @param {Object} opts
+ * @param {string} opts.upgradePy   - Path to upgrade.py
+ * @param {string} opts.projectRoot - Project root (cwd for the Python subprocess)
+ * @returns {Promise<void>}
+ */
+async function runUpgradeYes({ upgradePy, projectRoot }) {
+  const result = await _spawnPython(
+    [upgradePy, '--yes', '--project-root', projectRoot],
+    { cwd: projectRoot }
+  );
+  if (result.code !== 0) {
+    throw new Error(`upgrade.py --yes failed (exit ${result.code}):\n${result.stderr}`);
+  }
+}
+
+module.exports = { checkPythonVersion, hasMigratedSkillsInScope, runInstallPhase, runUpgradeDryRun, runUpgradeYes };
