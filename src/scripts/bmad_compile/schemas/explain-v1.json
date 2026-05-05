@@ -61,6 +61,32 @@
           }
         }
       }
+    },
+    "glob_expansions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["toml_key", "pattern", "matches"],
+        "properties": {
+          "toml_key":                  {"type": "string"},
+          "pattern":                   {"type": "string"},
+          "resolved_pattern":          {"type": ["string", "null"]},
+          "match_set_hash":            {"type": ["string", "null"]},
+          "toml_layer":                {"type": "string"},
+          "contributing_source_paths": {"type": "array", "items": {"type": "string"}},
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "hash"],
+              "properties": {
+                "path": {"type": "string"},
+                "hash": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

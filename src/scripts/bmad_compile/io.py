@@ -13,13 +13,21 @@ Contract highlights:
 - Directory listings are sorted alphabetically by filename (basename), case-sensitive.
 - Writes are atomic (temp file + rename) so AC 10 — no partial writes on error —
   is enforceable.
+- `glob_expand` (Story 4.4) is the canonical glob primitive. It (a) calls
+  `ensure_within_root` on every match (containment, fold-in deferred-work:322),
+  (b) re-resolves each path so the OS-canonical case wins on case-insensitive
+  filesystems (fold-in :60), and (c) sorts with NFC-normalized keys so macOS
+  decomposed (NFD) and Linux composed (NFC) filename encodings produce the
+  same order (fold-in :47).
 """
 
 from __future__ import annotations
 
+import glob as _glob_module  # pragma: allow-raw-io
 import hashlib  # pragma: allow-raw-io
 import os  # pragma: allow-raw-io
 import tempfile  # pragma: allow-raw-io
+import unicodedata as _unicodedata  # pragma: allow-raw-io
 from pathlib import Path, PurePosixPath as PurePosixPath  # pragma: allow-raw-io
 from typing import Union
 
@@ -140,6 +148,45 @@ def list_dir_sorted(path: PathLike) -> list[PurePosixPath]:
 def list_files_sorted(path: PathLike) -> list[PurePosixPath]:
     """Return only file entries from `list_dir_sorted(path)`, in the same order."""
     return [e for e in list_dir_sorted(path) if is_file(str(e))]
+
+
+def glob_expand(pattern: str, root: PathLike) -> list[PurePosixPath]:
+    """Story 4.4: expand a glob `pattern` relative to `root`; containment-check
+    each match; return a deterministically sorted list of file paths.
+
+    Semantics:
+    - `pattern` is a glob string relative to `root` (e.g. ``"docs/**/*.md"``).
+      Absolute patterns are intentionally not supported — the containment
+      check would reject them anyway, and stripping the `file:` scheme prefix
+      is the caller's responsibility.
+    - Recursive `**` is enabled (mirrors the documented ``file:`` semantics).
+    - Each match is re-resolved through the OS so the canonical case wins
+      on case-insensitive filesystems (deferred-work fold-in :60). Without
+      this, two compiles on macOS/Windows with different-case authoring of
+      the same file would produce different hashes.
+    - Each match is then run through `ensure_within_root` to enforce the
+      Story 3.5 containment invariant (deferred-work fold-in :322). A
+      symlink or `..` segment that escapes `root` raises
+      `OverrideOutsideRootError`.
+    - Directories matched by the pattern are silently dropped (`is_file`
+      filter). The pattern `*.md` against a `dir.md/` directory returns
+      no entries for that directory.
+    - The final sort key is `unicodedata.normalize("NFC", str(path))`, so
+      filenames authored on macOS (NFD) and Linux (NFC) sort the same way
+      (deferred-work fold-in :47). Without this, twice-run determinism
+      breaks across operating systems.
+    """
+    root_abs = _fs(root).resolve()  # pragma: allow-raw-io
+    full_pattern = str(root_abs / pattern)
+    raw_matches = _glob_module.glob(full_pattern, recursive=True)  # pragma: allow-raw-io
+    result: list[PurePosixPath] = []
+    for m in raw_matches:
+        canonical = _fs(m).resolve()  # pragma: allow-raw-io
+        posix = ensure_within_root(canonical, root)
+        if is_file(str(posix)):
+            result.append(posix)
+    result.sort(key=lambda p: _unicodedata.normalize("NFC", str(p)))
+    return result
 
 
 def hash_text(text: str) -> str:

@@ -48,11 +48,20 @@ Pathlib boundary: imports `PurePosixPath` via the `io.py` re-export.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Union
 
 from . import errors, io, parser, toml_merge, variants
 from .io import PurePosixPath
+
+# Story 4.4 R1 P2: a "runtime variable reference" inside a `file:` glob
+# pattern is a `{name}` placeholder — a paired pair of braces with content
+# between them. Plain `{` or `}` characters in a filename (legal on Linux)
+# must NOT cause the glob to be deferred, so we require BOTH delimiters
+# with non-empty content between them. Regex matches `{`, then one-or-more
+# non-`}` chars, then `}`.
+_RUNTIME_VAR_RE = re.compile(r"\{[^}]+\}")
 
 # Tier names — frozen for v1.
 _TIER_USER_FULL_SKILL = "user-full-skill"
@@ -85,6 +94,83 @@ class ResolvedValue:
     toml_layer: str | None = None         # "defaults" | "team" | "user"
     contributing_paths: list[str] | None = None
     value_hash: str | None = None         # SHA-256 hex of value.encode()
+
+
+@dataclass(frozen=True)
+class GlobMatch:
+    """Story 4.4: one file matched by a `file:`-prefixed TOML array glob.  # pragma: allow-raw-io
+
+    `path` is scenario-root-relative POSIX (matches the lockfile fragment-path
+    convention). `hash` is the SHA-256 hex of the file's RAW bytes — no
+    CRLF→LF normalization, so that the lockfile's `match_set_hash` actually
+    detects byte-level edits to glob inputs (cache coherence is the whole  # pragma: allow-raw-io
+    reason this entry exists).
+    """
+    path: str
+    hash: str
+
+
+@dataclass(frozen=True)
+class GlobExpansion:
+    """Story 4.4: provenance record for one `file:`-prefixed TOML array key.
+
+    Stored on `VariableScope._glob_expansions` after `build()` runs. Read by  # pragma: allow-raw-io
+    `engine._render_explain` (markdown), `engine._render_explain_json`
+    (additive `glob_expansions[]` field), and `lockfile._build_skill_entry`  # pragma: allow-raw-io
+    (lockfile `glob_inputs[]` array — cache-coherence sentinel).  # pragma: allow-raw-io
+
+    `pattern` stores the raw authored value(s) as a single string. For
+    multi-pattern keys (same key contributed by >1 TOML layer after
+    `merge_layers` concatenation) it is a `", "`-joined list — chosen so the
+    JSON schema can keep `pattern` as `{"type": "string"}`.
+
+    `resolved_pattern` is the absolute POSIX glob path of `pattern[0]`  # pragma: allow-raw-io
+    (the first contributed pattern) anchored under `scenario_root`. It is
+    `None` when ANY pattern in the merged list contains a runtime variable
+    reference (`{...}`) — the v1 simplification: such keys are entirely
+    deferred to runtime. `match_set_hash` is `None` in that case AND when
+    the glob expanded to zero files; consumers should treat both as  # pragma: allow-raw-io
+    "no compile-time content to track".
+    """
+    toml_key: str
+    pattern: str
+    resolved_pattern: str | None
+    matches: tuple[GlobMatch, ...]
+    match_set_hash: str | None
+    toml_layer: str  # "defaults" | "team" | "user" | "merged"
+    contributing_source_paths: tuple[str, ...]
+
+
+def _normalize_rel(path: str, root: str) -> str:
+    """Story 4.4: scenario-root-relative POSIX string; absolute fallback.
+
+    Resolver-local copy of the same convention used by `lockfile._normalize_path`.
+    Resolver cannot import from `lockfile` (lockfile imports resolver), so the
+    helper is duplicated here.
+
+    R1 P3: textual `relative_to` is case- and symlink-sensitive. On a
+    case-insensitive filesystem (macOS, Windows) or when the caller passes
+    an unresolved root (with case- or symlink-different segments) against
+    a resolved match, the relative_to walk fails and we fall through to
+    the absolute POSIX path — which then leaks an environment-specific
+    string into the lockfile / explain output and breaks twice-run
+    determinism across machines. Resolve both sides through the
+    filesystem first so canonicalization (case, symlinks) matches.
+    """
+    posix = io.to_posix(path)
+    root_posix = io.to_posix(root)
+    try:
+        return str(posix.relative_to(root_posix))
+    except ValueError:
+        # Fall back to OS-resolved comparison on a textual mismatch — handles
+        # case-insensitive filesystems and symlink-prefix divergences.
+        try:
+            from pathlib import Path as _P  # local import: io.py wraps Path  # pragma: allow-raw-io
+            r_resolved = _P(path).resolve()  # pragma: allow-raw-io
+            root_resolved = _P(root).resolve()  # pragma: allow-raw-io
+            return str(io.to_posix(r_resolved).relative_to(io.to_posix(root_resolved)))
+        except (ValueError, OSError):
+            return str(posix)
 
 
 def _parse_flat_yaml(content: str) -> dict[str, str]:
@@ -188,14 +274,34 @@ def _flatten_toml(
     result: dict[str, ResolvedValue],
     layer_paths: dict[str, str] | None = None,  # layer_name → absolute_path
     list_priority_map: dict[str, str] | None = None,  # Story 4.2: array-error file attribution
+    glob_sink: list[tuple[str, list[Any], str, str | None]] | None = None,  # Story 4.4  # pragma: allow-raw-io
 ) -> None:
-    """Recursively flatten a merged TOML dict into `self.<dotted.path>` entries."""
+    """Recursively flatten a merged TOML dict into `self.<dotted.path>` entries.
+
+    Story 4.4: `glob_sink` is the opt-in escape hatch for ``file:``-prefixed  # pragma: allow-raw-io
+    array values (`persistent_facts = ["file:docs/*.md"]`). When supplied
+    and the list is non-empty AND every item is a `file:`-prefixed string,
+    append `(full_key, list(v), winning_layer, layer_path)` to `glob_sink`  # pragma: allow-raw-io
+    and continue. When `glob_sink` is `None` OR the list is empty OR any  # pragma: allow-raw-io
+    item lacks the `file:` prefix, the historical
+    `UnknownDirectiveError("...resolves to a TOML array...")` raise still
+    fires — preserving AC 8 (mixed lists, empty lists, non-`file:` lists
+    all still raise).
+    """
     _paths = layer_paths or {}
     _list_priority = list_priority_map or {}
     for k, v in d.items():
         dotted = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
-            _flatten_toml(v, dotted, layer_name, priority_map, result, _paths, list_priority_map)
+            # Story 4.4: forward `glob_sink` so `file:` arrays nested under
+            # TOML table sections (e.g. `[workflow] persistent_facts = [...]`)
+            # are intercepted too. Without this forward, the latent-bug fix
+            # for skills like `bmad-create-story` (which puts persistent_facts
+            # under `[workflow]`) silently fails.
+            _flatten_toml(
+                v, dotted, layer_name, priority_map, result, _paths,
+                list_priority_map, glob_sink=glob_sink,  # pragma: allow-raw-io
+            )
         elif isinstance(v, list):
             full_key = f"self.{dotted}"
             # Story 4.2 fold-in 2: list-valued keys are intentionally absent
@@ -206,6 +312,19 @@ def _flatten_toml(
                 _list_priority.get(full_key)
                 or priority_map.get(full_key, layer_name)
             )
+            # Story 4.4: `file:`-prefixed array → glob expansion route.
+            # The `v and` guard intentionally short-circuits on empty lists
+            # (AC 8: `persistent_facts = []` MUST raise — `file:` semantics
+            # require at least one item). Do not drop this guard.
+            if (
+                glob_sink is not None  # pragma: allow-raw-io
+                and v
+                and all(isinstance(item, str) and item.startswith("file:") for item in v)
+            ):
+                glob_sink.append(  # pragma: allow-raw-io
+                    (full_key, list(v), winning_layer, _paths.get(winning_layer))
+                )
+                continue
             # tomllib does not expose per-value source positions; line=1,col=1 is a
             # deterministic locator pointing at the file head — the dotted path in
             # the message names the offending key.
@@ -282,8 +401,16 @@ class VariableScope:
     as {{heading_level}} compile-time variables — verbatim match only.
     """
 
-    def __init__(self, table: dict[str, ResolvedValue]) -> None:
+    def __init__(
+        self,
+        table: dict[str, ResolvedValue],
+        glob_expansions: list[GlobExpansion] | None = None,  # pragma: allow-raw-io
+    ) -> None:
         self._table = table
+        # Story 4.4: defensive `list(...)` so the caller can't mutate the
+        # internal list after the scope is built. Empty list (no glob
+        # inputs) is the common case and fully valid.
+        self._glob_expansions: list[GlobExpansion] = list(glob_expansions or [])  # pragma: allow-raw-io
 
     @classmethod
     def build(
@@ -295,6 +422,7 @@ class VariableScope:
         install_flags: dict[str, str] | None = None,
         toml_layers: list[tuple[str, dict[str, Any]]] | None = None,
         toml_layer_paths: list[str] | None = None,
+        scenario_root: str | None = None,
     ) -> "VariableScope":
         """Build a VariableScope from config sources.
 
@@ -313,6 +441,11 @@ class VariableScope:
                           None = no path attribution on TOML errors.
         """
         table: dict[str, ResolvedValue] = {}
+        # Story 4.4: collected once the TOML cascade has flattened the
+        # `file:`-prefixed arrays it intercepted. Stays empty for skills
+        # without any glob inputs (the common case) — `cls(table, glob_
+        # expansions=[])` is the equivalent of the pre-Story-4.4 return.
+        glob_expansions: list[GlobExpansion] = []  # pragma: allow-raw-io
 
         # Non-self.* cascade: 4-tier last-write-wins
         # bmad-config < module-config < user-config < install-flag
@@ -376,9 +509,13 @@ class VariableScope:
             if toml_layer_paths:
                 for (ln, _), lp in zip(toml_layers, toml_layer_paths):
                     _layer_paths[ln] = lp
+            # Story 4.4: collect `file:`-prefixed arrays into a sink instead
+            # of raising on them. Non-`file:` arrays still raise (AC 8).
+            _glob_sink: list[tuple[str, list[Any], str, str | None]] = []  # pragma: allow-raw-io
             _flatten_toml(
                 merged, "", "", priority_map, table, _layer_paths or None,
                 list_priority_map=list_priority_map or None,
+                glob_sink=_glob_sink,  # pragma: allow-raw-io
             )
 
             # Story 4.2 fold-in 1: populate contributing_paths for any
@@ -410,7 +547,132 @@ class VariableScope:
                         rv = table[full_key]
                         table[full_key] = replace(rv, contributing_paths=sorted(paths))
 
-        return cls(table)
+            # Story 4.4: process the `file:` arrays collected by `_flatten_toml`
+            # into `GlobExpansion` records on the returned `VariableScope`.
+            #
+            # Per-key layer provenance: walk every layer dict looking for the
+            # same `file:`-prefix arrays and record (layer_name, layer_path)
+            # for each contribution. This mirrors the Story 4.2 contributing
+            # _paths post-pass pattern but tracks the lists `_flatten_toml`
+            # skipped instead of the scalars it kept.
+            #
+            # If `scenario_root` is None (resolver-level test caller without
+            # an engine), glob expansion is skipped entirely — the
+            # `GlobExpansion` records still get created, but with
+            # `matches=()` and `match_set_hash=None`. This keeps build()
+            # callable from unit tests that don't have a filesystem.
+            if _glob_sink:  # pragma: allow-raw-io
+                _glob_layer_paths: dict[str, list[str]] = {}  # pragma: allow-raw-io
+                _glob_layer_names: dict[str, list[str]] = {}  # pragma: allow-raw-io
+                if toml_layer_paths is not None:
+
+                    def _scan_lists(
+                        d: dict[str, Any], prefix: str, lp: str, ln: str,
+                    ) -> None:
+                        for k, v in d.items():
+                            dotted = f"{prefix}.{k}" if prefix else k
+                            full_key = f"self.{dotted}"
+                            if isinstance(v, dict):
+                                _scan_lists(v, dotted, lp, ln)
+                            elif (
+                                isinstance(v, list)
+                                and v
+                                and all(
+                                    isinstance(item, str) and item.startswith("file:")
+                                    for item in v
+                                )
+                            ):
+                                _glob_layer_paths.setdefault(full_key, []).append(lp)  # pragma: allow-raw-io
+                                _glob_layer_names.setdefault(full_key, []).append(ln)  # pragma: allow-raw-io
+
+                    for (_ln, _layer_dict), _lp in zip(toml_layers, toml_layer_paths):
+                        _scan_lists(_layer_dict, "", _lp, _ln)
+
+                for full_key, pattern_list, winning_layer, _winning_path in _glob_sink:  # pragma: allow-raw-io
+                    contributing_paths_list = _glob_layer_paths.get(full_key, [])  # pragma: allow-raw-io
+                    contributing_names = _glob_layer_names.get(full_key, [])  # pragma: allow-raw-io
+                    toml_layer = (
+                        "merged" if len(contributing_names) > 1
+                        else (contributing_names[0] if contributing_names else winning_layer)
+                    )
+                    pattern_field = (
+                        ", ".join(pattern_list) if len(pattern_list) > 1
+                        else pattern_list[0]
+                    )
+                    contributing_sorted = tuple(sorted(contributing_paths_list))
+
+                    # v1 simplification: if ANY pattern in the merged list
+                    # contains `{...}`, the entire key is treated as
+                    # runtime-deferred. Prevents partial expansions where
+                    # some patterns resolve and others don't.
+                    # R1 P2: regex match of `\{[^}]+\}` (paired braces with
+                    # content), not bare `{` substring — a literal brace in
+                    # a filename (legal on Linux) was being misclassified as
+                    # a runtime-var reference and the entire glob deferred.
+                    has_runtime_var = any(_RUNTIME_VAR_RE.search(p[5:]) for p in pattern_list)
+                    if has_runtime_var or scenario_root is None:
+                        glob_expansions.append(GlobExpansion(  # pragma: allow-raw-io
+                            toml_key=full_key,
+                            pattern=pattern_field,
+                            resolved_pattern=None,
+                            matches=(),
+                            match_set_hash=None,
+                            toml_layer=toml_layer,
+                            contributing_source_paths=contributing_sorted,
+                        ))
+                        continue
+
+                    all_matches: list[GlobMatch] = []
+                    for raw_pattern in pattern_list:
+                        stripped = raw_pattern[5:]  # strip "file:" prefix
+                        # AC 6: containment is enforced inside io.glob_expand;
+                        # OverrideOutsideRootError MUST propagate to the
+                        # caller — do NOT wrap in try/except here.
+                        match_paths = io.glob_expand(stripped, scenario_root)  # pragma: allow-raw-io
+                        for mp in match_paths:
+                            content_bytes = io.read_bytes(str(mp))
+                            content_hash = io.sha256_hex(content_bytes)
+                            rel = _normalize_rel(str(mp), scenario_root)
+                            all_matches.append(GlobMatch(path=rel, hash=content_hash))
+
+                    # R1 P4: dedupe by path before sorting + hashing. Without
+                    # this, a merged pattern list like
+                    # `["file:a.md", "file:a.md"]` (or two patterns whose
+                    # globs both match `a.md`) would emit two GlobMatch
+                    # entries for the same path, double-counting in
+                    # `match_set_hash` and breaking the cache-coherence
+                    # contract: the same effective match set must produce
+                    # the same hash regardless of pattern duplication.
+                    _seen_paths: set[str] = set()
+                    deduped: list[GlobMatch] = []
+                    for _gm in all_matches:
+                        if _gm.path not in _seen_paths:
+                            _seen_paths.add(_gm.path)
+                            deduped.append(_gm)
+                    all_matches = deduped
+                    all_matches.sort(key=lambda m: m.path)
+
+                    msh: str | None
+                    if all_matches:
+                        hash_parts = [f"{m.path}:{m.hash}" for m in all_matches]
+                        msh = io.sha256_hex("\n".join(hash_parts).encode("utf-8"))
+                    else:
+                        msh = None
+
+                    stripped0 = pattern_list[0][5:]
+                    resolved_pattern = str(io.to_posix(scenario_root) / stripped0)
+
+                    glob_expansions.append(GlobExpansion(  # pragma: allow-raw-io
+                        toml_key=full_key,
+                        pattern=pattern_field,
+                        resolved_pattern=resolved_pattern,
+                        matches=tuple(all_matches),
+                        match_set_hash=msh,
+                        toml_layer=toml_layer,
+                        contributing_source_paths=contributing_sorted,
+                    ))
+
+        return cls(table, glob_expansions=glob_expansions)  # pragma: allow-raw-io
 
     def resolve(self, name: str) -> ResolvedValue:
         """Look up `name` in the pre-materialized table.
@@ -597,6 +859,27 @@ def _parse_include_src(
       known module id (controls whether the base tier anchors at
       `module_roots[effective_module]` or at `skill_dir`).
     """
+    # Story 4.4 fold-in (deferred-work :321): the `file:` URL scheme is
+    # reserved for the Story 4.4 `<TomlGlobExpansion>` mechanism (TOML
+    # array values like `persistent_facts = ["file:docs/*.md"]`). It is
+    # NEVER valid as an `<<include path="...">>` attribute. Reject early —
+    # before any filesystem probe — so a malicious or mis-authored
+    # template like `<<include path="file:///etc/passwd">>` cannot reach
+    # any I/O primitive at all.
+    # R1 P1: case-insensitive — `FILE:`, `File:` must also reject. URL
+    # schemes are case-insensitive per RFC 3986; matching only lowercase
+    # would let `<<include path="FILE:/etc/passwd">>` slip past the guard.
+    if src[:5].lower() == "file:":
+        raise errors.UnknownDirectiveError(
+            f"include path '{src}' uses reserved 'file:' scheme",
+            file=None, line=None, col=None,
+            hint=(
+                "'file:' prefix is reserved for TOML array glob expansion "  # pragma: allow-raw-io
+                "(customize.toml persistent_facts values); it cannot be used "
+                "in <<include>> path attributes"
+            ),
+        )
+
     # `./` prefix is the author's explicit force-skill-local escape hatch.
     # PurePosixPath normalizes `./` away, so we must check the raw string
     # before the conversion to catch `./core/foo.template.md` and route it

@@ -347,6 +347,11 @@ def _compile_core(
         install_flags=install_flags,
         toml_layers=_toml_layers or None,
         toml_layer_paths=_toml_layer_paths or None,
+        # Story 4.4: scenario_root enables `file:`-prefix array glob expansion
+        # inside VariableScope.build(). When None (resolver-level unit tests),
+        # `_glob_expansions` records get created with `matches=()` and
+        # `match_set_hash=None` — no filesystem access.
+        scenario_root=str(scenario_root),
     )
 
     context = resolver.ResolveContext(
@@ -672,7 +677,6 @@ def _render_explain(
     `parser.VarRuntime` passes through as `{name}` literally (AC 3);
     `parser.Text` content is emitted verbatim.
     """
-    _ = var_scope  # currently unused; signature preserved for future use
     parts: list[str] = []
     root_frag = dep_tree[0]
     parts.append(f"<Include {_include_attrs(root_frag, cache, scenario_root)}>\n")
@@ -696,6 +700,43 @@ def _render_explain(
             parts.append(node.content)
         # Other AstNode types (e.g. Include — should be expanded by resolver)
         # are silently dropped; this matches `_render`'s defensive posture.
+
+    # Story 4.4: append <TomlGlobExpansion> blocks for each `file:` array.
+    # Placed BEFORE the closing root `</Include>` so the output stays a
+    # single-rooted XML document (downstream parsers + xmllint rely on
+    # this). Empty when no `file:` arrays exist (the common case —
+    # bmad-help baseline, every Story 1.x–4.3 fixture).
+    #
+    # R2 P1: sort by `toml_key` to match `_render_explain_json`'s ordering,
+    # so markdown and JSON outputs agree on order. TOML insertion order is
+    # stable on the same machine but a future re-author could swap two
+    # `[section]` blocks; the resulting markdown should not flip with it
+    # while the JSON stays sorted. Aligning both on `toml_key` removes the
+    # divergence.
+    for ge in sorted(var_scope._glob_expansions, key=lambda g: g.toml_key):  # pragma: allow-raw-io
+        rp_attr = (
+            _xml_escape_attr(ge.resolved_pattern)
+            if ge.resolved_pattern is not None else "(deferred)"
+        )
+        tag_parts: list[str] = [
+            f'<TomlGlobExpansion pattern="{_xml_escape_attr(ge.pattern)}"',
+            f' resolved_pattern="{rp_attr}"',
+            f' toml-layer="{_xml_escape_attr(ge.toml_layer)}"',
+        ]
+        # `contributing-paths` only when >1 layer contributed (matches the
+        # `<Variable>` attribute convention from Story 4.2 fold-in 1).
+        if len(ge.contributing_source_paths) > 1:
+            csp = ";".join(sorted(ge.contributing_source_paths))
+            tag_parts.append(f' contributing-paths="{_xml_escape_attr(csp)}"')
+        tag_parts.append(">\n")
+        parts.append("".join(tag_parts))
+        for m in ge.matches:
+            parts.append(
+                f'<TomlGlobMatch path="{_xml_escape_attr(m.path)}" '
+                f'hash="{m.hash}" />\n'
+            )
+        parts.append("</TomlGlobExpansion>\n")
+
     parts.append("\n</Include>\n")
     return "".join(parts)
 
@@ -759,7 +800,7 @@ def _render_explain_json(
     Produces a JSON object with schema_version, fragments[], variables[], and
     toml_fields[]. All keys are sorted for twice-run determinism.
     """
-    _ = var_scope  # currently unused; signature preserved for symmetry with _render_explain
+    # Story 4.4: var_scope is now read for `glob_expansions[]` below.
 
     # --- fragments[] — DFS pre-order (dep_tree is already in this order) ---
     fragments: list[dict[str, Any]] = []
@@ -841,8 +882,27 @@ def _render_explain_json(
             "path": path,
         })
 
+    # Story 4.4: glob_expansions[] — additive top-level array. No
+    # schema_version bump (the v1 schema does not restrict additionalProperties
+    # at root, per Story 4.3 AC 4 → schemas/explain-v1.json). Sort by
+    # `toml_key` for twice-run determinism; matches[] is already sorted by
+    # path in `VariableScope.build()`.
+    glob_expansions_list: list[dict[str, Any]] = []  # pragma: allow-raw-io
+    for ge in var_scope._glob_expansions:  # pragma: allow-raw-io
+        glob_expansions_list.append({  # pragma: allow-raw-io
+            "toml_key": ge.toml_key,
+            "pattern": ge.pattern,
+            "resolved_pattern": ge.resolved_pattern,
+            "match_set_hash": ge.match_set_hash,
+            "toml_layer": ge.toml_layer,
+            "contributing_source_paths": list(ge.contributing_source_paths),
+            "matches": [{"path": m.path, "hash": m.hash} for m in ge.matches],
+        })
+    glob_expansions_list.sort(key=lambda e: e["toml_key"])  # pragma: allow-raw-io
+
     result = {
         "fragments": fragments,
+        "glob_expansions": glob_expansions_list,  # pragma: allow-raw-io
         "schema_version": 1,
         "toml_fields": toml_fields,
         "variables": variables,

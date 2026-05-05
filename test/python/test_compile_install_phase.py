@@ -1973,5 +1973,367 @@ class TestExplainSchemaFixture(unittest.TestCase):
                 self.assertIsInstance(var.get("value"), str)
 
 
+class TestGlobExpansion(unittest.TestCase):
+    """Story 4.4: <TomlGlobExpansion> tags + variable-source traceability."""
+
+    @staticmethod
+    def _minimal_lock(install: Path) -> None:
+        lock_content = (
+            json.dumps(
+                {"bmad_version": "1.0.0", "compiled_at": "1.0.0", "entries": [], "version": 1},
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        )
+        _write(install / "_config" / "bmad.lock", lock_content)
+
+    # ---------- Task 6.1–6.4: io.glob_expand unit tests ----------
+
+    def test_glob_expand_basic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write(tmp_path / "a.md", "alpha\n")
+            _write(tmp_path / "b.md", "beta\n")
+            results = bmad_io.glob_expand("*.md", tmp_path)
+            names = [r.name for r in results]
+            self.assertEqual(names, ["a.md", "b.md"])
+
+    def test_glob_expand_containment_dotdot(self) -> None:
+        # `../` in pattern — the resolved match would land outside root.
+        with tempfile.TemporaryDirectory() as outer:
+            outer_path = Path(outer)
+            _write(outer_path / "outside.md", "leak\n")
+            inner = outer_path / "inner"
+            inner.mkdir()
+            _write(inner / "ok.md", "ok\n")
+            with self.assertRaises(errors.OverrideOutsideRootError):
+                bmad_io.glob_expand("../outside.md", inner)
+
+    def test_glob_expand_empty_pattern(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = bmad_io.glob_expand("nope/*.md", Path(tmp))
+            self.assertEqual(results, [])
+
+    def test_glob_expand_filters_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "subdir.md").mkdir()  # directory whose name matches *.md
+            _write(tmp_path / "file.md", "content\n")
+            results = bmad_io.glob_expand("*.md", tmp_path)
+            names = [r.name for r in results]
+            self.assertEqual(names, ["file.md"])
+
+    # ---------- Task 6.5: <<include>> file: scheme rejection ----------
+
+    def test_include_rejects_file_scheme(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="file:docs/a.md">>\n',
+            )
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("'file:' scheme", stderr.replace('"', "'"))
+
+    # ---------- Task 6.6–6.8: VariableScope.build glob processing ----------
+
+    def test_variable_scope_build_intercepts_file_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write(tmp_path / "docs" / "a.md", "alpha\n")
+            _write(tmp_path / "docs" / "b.md", "beta\n")
+            from src.scripts.bmad_compile.resolver import VariableScope
+            vs = VariableScope.build(
+                toml_layers=[("defaults", {"workflow": {"persistent_facts": ["file:docs/*.md"]}})],
+                toml_layer_paths=[str(tmp_path / "customize.toml")],
+                scenario_root=str(tmp_path),
+            )
+            self.assertEqual(len(vs._glob_expansions), 1)
+            ge = vs._glob_expansions[0]
+            self.assertEqual(ge.toml_key, "self.workflow.persistent_facts")
+            self.assertEqual(len(ge.matches), 2)
+            self.assertEqual([m.path for m in ge.matches], ["docs/a.md", "docs/b.md"])
+            self.assertIsNotNone(ge.match_set_hash)
+
+    def test_variable_scope_build_non_file_list_still_raises(self) -> None:
+        from src.scripts.bmad_compile.resolver import VariableScope
+        with self.assertRaises(errors.UnknownDirectiveError):
+            VariableScope.build(
+                toml_layers=[("defaults", {"workflow": {"steps": ["a", "b"]}})],
+                toml_layer_paths=["/fake/customize.toml"],
+                scenario_root="/fake",
+            )
+
+    def test_variable_scope_build_mixed_list_still_raises(self) -> None:
+        from src.scripts.bmad_compile.resolver import VariableScope
+        with self.assertRaises(errors.UnknownDirectiveError):
+            VariableScope.build(
+                toml_layers=[("defaults", {"workflow": {"items": ["file:docs/a.md", "literal"]}})],
+                toml_layer_paths=["/fake/customize.toml"],
+                scenario_root="/fake",
+            )
+
+    # ---------- Task 6.9–6.11: --explain markdown + JSON ----------
+
+    def test_explain_markdown_contains_toml_glob_expansion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "customize.toml",
+                   'persistent_facts = ["file:docs/*.md"]\n')
+            _write(install / "docs" / "a.md", "alpha\n")
+            _write(install / "docs" / "b.md", "beta\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill", "--explain"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn("<TomlGlobExpansion", stdout)
+            # alphabetically-sorted match children
+            a_pos = stdout.find('<TomlGlobMatch path="docs/a.md"')
+            b_pos = stdout.find('<TomlGlobMatch path="docs/b.md"')
+            self.assertGreaterEqual(a_pos, 0)
+            self.assertGreaterEqual(b_pos, 0)
+            self.assertLess(a_pos, b_pos)
+
+    def test_explain_markdown_empty_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "customize.toml",
+                   'persistent_facts = ["file:nope/*.md"]\n')
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill", "--explain"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn("<TomlGlobExpansion", stdout)
+            self.assertNotIn("<TomlGlobMatch", stdout)
+
+    def test_explain_json_contains_glob_expansions(self) -> None:
+        # R1 P5: use a NESTED `[workflow]` table so this test exercises the
+        # recursive `_flatten_toml(... glob_sink=glob_sink)` forwarding —
+        # the latent-bug fix path for skills whose persistent_facts lives
+        # under `[workflow]`. An unscoped TOML key would NOT exercise it.
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "customize.toml",
+                   '[workflow]\npersistent_facts = ["file:docs/*.md"]\n')
+            _write(install / "docs" / "x.md", "x\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_compile_skill(install, ["core/my-skill", "--explain", "--json"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            data = json.loads(stdout)
+            self.assertIn("glob_expansions", data)
+            self.assertEqual(len(data["glob_expansions"]), 1)
+            entry = data["glob_expansions"][0]
+            self.assertEqual(entry["toml_key"], "self.workflow.persistent_facts")
+            self.assertEqual(entry["pattern"], "file:docs/*.md")
+            self.assertEqual(len(entry["matches"]), 1)
+            self.assertEqual(entry["matches"][0]["path"], "docs/x.md")
+
+    # ---------- Task 6.12: match_set_hash changes when file edited ----------
+
+    def test_match_set_hash_changes_on_file_edit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "customize.toml",
+                   'persistent_facts = ["file:docs/*.md"]\n')
+            _write(install / "docs" / "a.md", "v1\n")
+            self._minimal_lock(install)
+            code1, _, stderr1 = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code1, 0, f"stderr: {stderr1}")
+            lock_data1 = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry1 = next(e for e in lock_data1["entries"] if e["skill"] == "my-skill")
+            msh1 = entry1["glob_inputs"][0]["match_set_hash"]
+
+            # edit the file
+            _write(install / "docs" / "a.md", "v2\n")
+            code2, _, stderr2 = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code2, 0, f"stderr: {stderr2}")
+            lock_data2 = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry2 = next(e for e in lock_data2["entries"] if e["skill"] == "my-skill")
+            msh2 = entry2["glob_inputs"][0]["match_set_hash"]
+
+            self.assertNotEqual(msh1, msh2)
+
+    # ---------- Task 6.13: twice-run determinism ----------
+
+    def test_explain_json_twice_run_identical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "customize.toml",
+                   'persistent_facts = ["file:docs/*.md"]\n')
+            _write(install / "docs" / "a.md", "alpha\n")
+            _write(install / "docs" / "b.md", "beta\n")
+            self._minimal_lock(install)
+            _, out1, _ = _run_compile_skill(install, ["core/my-skill", "--explain", "--json"])
+            _, out2, _ = _run_compile_skill(install, ["core/my-skill", "--explain", "--json"])
+            self.assertEqual(out1, out2)
+
+    # ---------- Task 6.14: bmad-help baseline preserved ----------
+
+    def test_bmad_help_baseline_unchanged(self) -> None:
+        # The bmad-help SKILL.md SHA must not change due to Story 4.4 — the
+        # skill has no `file:` arrays in its customize.toml, so the only
+        # additive surface (`glob_expansions`) stays empty and innocuous.
+        sha_path = (
+            Path(__file__).resolve().parent.parent.parent
+            / "src" / "core-skills" / "bmad-help" / "SKILL.md"
+        )
+        actual = hashlib.sha256(sha_path.read_bytes()).hexdigest()
+        self.assertEqual(
+            actual,
+            "cd7096b2ff55b2b87e12d6b9c4c9ea13dfca78c49299a09327c97107f9531da8",
+        )
+
+    # ---------- Task 6.15: runtime-variable pattern deferred ----------
+
+    def test_runtime_variable_pattern_deferred(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            from src.scripts.bmad_compile.resolver import VariableScope
+            vs = VariableScope.build(
+                toml_layers=[("defaults", {"persistent_facts": ["file:{project-root}/docs/*.md"]})],
+                toml_layer_paths=[str(tmp_path / "customize.toml")],
+                scenario_root=str(tmp_path),
+            )
+            self.assertEqual(len(vs._glob_expansions), 1)
+            ge = vs._glob_expansions[0]
+            self.assertIsNone(ge.resolved_pattern)
+            self.assertEqual(ge.matches, ())
+            self.assertIsNone(ge.match_set_hash)
+
+    # ---------- Task 6.16: empty list still raises ----------
+
+    def test_empty_list_still_raises(self) -> None:
+        from src.scripts.bmad_compile.resolver import VariableScope
+        with self.assertRaises(errors.UnknownDirectiveError):
+            VariableScope.build(
+                toml_layers=[("defaults", {"workflow": {"steps": []}})],
+                toml_layer_paths=["/fake/customize.toml"],
+                scenario_root="/fake",
+            )
+
+    # ---------- R1 patches: case-insensitive file:, runtime-var regex, dedupe, multi-layer ----------
+
+    def test_include_rejects_file_scheme_uppercase(self) -> None:
+        """R1 P1: case-insensitive `file:` rejection — `FILE:` must reject too."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="FILE:docs/a.md">>\n',
+            )
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("'file:' scheme", stderr.replace('"', "'"))
+
+    def test_runtime_var_regex_requires_paired_braces(self) -> None:
+        """R1 P2: `\\{[^}]+\\}` regex, not bare `{`. A literal `{` in a
+        filename (e.g. `foo{bar.md`) must NOT trigger runtime-var deferral.
+        """
+        from src.scripts.bmad_compile.resolver import VariableScope
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            # File whose name contains a literal `{` — must still be expanded
+            _write(tmp_path / "docs" / "a.md", "alpha\n")
+            vs = VariableScope.build(
+                # Pattern with literal `{` but NO closing `}` → not a runtime var
+                toml_layers=[("defaults", {"persistent_facts": ["file:docs/a.md{xx"]})],
+                toml_layer_paths=[str(tmp_path / "customize.toml")],
+                scenario_root=str(tmp_path),
+            )
+            self.assertEqual(len(vs._glob_expansions), 1)
+            ge = vs._glob_expansions[0]
+            # Pattern is treated as a literal glob (no runtime var) — but this
+            # specific glob doesn't match anything (no file named `a.md{xx`).
+            # The point is that resolved_pattern is NOT None (i.e., expansion
+            # was attempted, not deferred).
+            self.assertIsNotNone(ge.resolved_pattern)
+
+    def test_match_set_hash_dedupes_duplicate_patterns(self) -> None:
+        """R1 P4: a merged pattern list with the same pattern twice must
+        produce the same `match_set_hash` as a single-pattern list with the
+        same effective match set.
+        """
+        from src.scripts.bmad_compile.resolver import VariableScope
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write(tmp_path / "docs" / "a.md", "alpha\n")
+            _write(tmp_path / "docs" / "b.md", "beta\n")
+            single = VariableScope.build(
+                toml_layers=[("defaults", {"persistent_facts": ["file:docs/*.md"]})],
+                toml_layer_paths=[str(tmp_path / "customize.toml")],
+                scenario_root=str(tmp_path),
+            )
+            duped = VariableScope.build(
+                toml_layers=[("defaults", {"persistent_facts": ["file:docs/*.md", "file:docs/*.md"]})],
+                toml_layer_paths=[str(tmp_path / "customize.toml")],
+                scenario_root=str(tmp_path),
+            )
+            self.assertEqual(
+                single._glob_expansions[0].match_set_hash,
+                duped._glob_expansions[0].match_set_hash,
+            )
+            # And duplicates are eliminated from the matches list itself.
+            self.assertEqual(len(duped._glob_expansions[0].matches), 2)
+
+    def test_glob_multi_layer_merged_provenance(self) -> None:
+        """R1 P6 (AC 3 coverage): two TOML layers each contribute a `file:`
+        pattern to the same key. Merged result has `toml_layer="merged"`,
+        `pattern` is comma-joined, `contributing_source_paths` lists both
+        layer paths (sorted, deduped).
+        """
+        from src.scripts.bmad_compile.resolver import VariableScope
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _write(tmp_path / "docs" / "a.md", "alpha\n")
+            _write(tmp_path / "extra" / "b.md", "beta\n")
+            vs = VariableScope.build(
+                toml_layers=[
+                    ("defaults", {"persistent_facts": ["file:docs/*.md"]}),
+                    ("user",     {"persistent_facts": ["file:extra/*.md"]}),
+                ],
+                toml_layer_paths=[
+                    str(tmp_path / "customize.toml"),
+                    str(tmp_path / "my-skill.user.toml"),
+                ],
+                scenario_root=str(tmp_path),
+            )
+            self.assertEqual(len(vs._glob_expansions), 1)
+            ge = vs._glob_expansions[0]
+            self.assertEqual(ge.toml_layer, "merged")
+            self.assertEqual(ge.pattern, "file:docs/*.md, file:extra/*.md")
+            self.assertEqual(len(ge.contributing_source_paths), 2)
+            # Both layer paths present
+            csp = list(ge.contributing_source_paths)
+            self.assertTrue(any("customize.toml" in p for p in csp))
+            self.assertTrue(any("my-skill.user.toml" in p for p in csp))
+            # Both files surfaced in matches
+            paths = [m.path for m in ge.matches]
+            self.assertIn("docs/a.md", paths)
+            self.assertIn("extra/b.md", paths)
+
+    # ---------- Task 6.17: scalar-only customize.toml → empty glob_inputs ----------
+
+    def test_compile_skill_no_file_arrays_emits_empty_glob_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "customize.toml",
+                   'agent_name = "Pat"\n')  # scalar only — no list values
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            lock_data = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry = next(e for e in lock_data["entries"] if e["skill"] == "my-skill")
+            self.assertIn("glob_inputs", entry)
+            self.assertEqual(entry["glob_inputs"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -141,10 +141,25 @@ def _build_skill_entry(
             var_entry["toml_layer"] = rv.toml_layer
         variables.append(var_entry)
 
+    # Story 4.4: glob_inputs[] — one entry per `file:`-prefixed TOML array
+    # key collected by VariableScope.build(). The `match_set_hash` is the
+    # cache-coherence sentinel: it changes when a glob match-set member is
+    # added, removed, or edited, so a downstream cache layer can skip an
+    # input-stable recompile in O(1) without re-walking every match.
+    glob_inputs: list[dict[str, Any]] = []  # pragma: allow-raw-io
+    for ge in var_scope._glob_expansions:  # pragma: allow-raw-io
+        glob_inputs.append({  # pragma: allow-raw-io
+            "toml_key": ge.toml_key,
+            "pattern": ge.pattern,
+            "resolved_pattern": ge.resolved_pattern,
+            "match_set_hash": ge.match_set_hash,
+            "matches": [{"path": m.path, "hash": m.hash} for m in ge.matches],
+        })
+
     return {
         "compiled_hash": compiled_hash,
         "fragments": fragments,
-        "glob_inputs": [],
+        "glob_inputs": glob_inputs,  # pragma: allow-raw-io
         "skill": skill_basename,
         "source_hash": source_hash,
         "variant": target_ide,
