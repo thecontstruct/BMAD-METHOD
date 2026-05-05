@@ -26,6 +26,7 @@ from __future__ import annotations
 import glob as _glob_module  # pragma: allow-raw-io
 import hashlib  # pragma: allow-raw-io
 import os  # pragma: allow-raw-io
+import sys as _sys  # pragma: allow-raw-io
 import tempfile  # pragma: allow-raw-io
 import unicodedata as _unicodedata  # pragma: allow-raw-io
 from pathlib import Path, PurePosixPath as PurePosixPath  # pragma: allow-raw-io
@@ -227,3 +228,97 @@ def ensure_within_root(path: PathLike, root: PathLike) -> PurePosixPath:
             hint="override paths must resolve within the skill root",
         ) from None
     return to_posix(p_abs)
+
+
+# ---------------------------------------------------------------------------
+# Advisory file-lock primitives (Story 5.5a)
+# ---------------------------------------------------------------------------
+
+class LockTimeoutError(OSError):  # pragma: allow-raw-io
+    """Raised by acquire_lock when the timeout elapses."""
+
+
+def acquire_lock(lock_path: PathLike, timeout_seconds: float = 300.0) -> int:  # pragma: allow-raw-io
+    """Acquire an exclusive advisory lock on lock_path.
+
+    Creates the lock file if absent. Returns an OS file descriptor that must be
+    passed to release_lock(). Raises LockTimeoutError if timeout_seconds elapses
+    before the lock is acquired. Raises OSError on non-retriable errors (EACCES
+    for a different reason, bad fd, disk error) after closing the fd.
+
+    POSIX: fcntl.flock(LOCK_EX|LOCK_NB) with poll-loop; only BlockingIOError
+      (errno EWOULDBLOCK) is retriable — all other OSErrors close fd and re-raise.
+    Windows: msvcrt.locking(LK_NBLCK, 1) with poll-loop; only PermissionError
+      (errno EACCES, the lock-contention errno) is retriable — all other OSErrors
+      close fd and re-raise.
+
+    Poll interval: 0.1s. File descriptor opened O_RDWR|O_CREAT mode 0o600.
+    """
+    import os as _os  # pragma: allow-raw-io
+    import time as _time  # pragma: allow-raw-io
+    path_str = str(_fs(lock_path))
+    fd = _os.open(path_str, _os.O_RDWR | _os.O_CREAT, 0o600)  # pragma: allow-raw-io
+    deadline = _time.monotonic() + timeout_seconds  # pragma: allow-raw-io
+    try:
+        if _sys.platform == "win32":  # pragma: allow-raw-io
+            import msvcrt as _msvcrt  # pragma: allow-raw-io
+            while True:  # pragma: allow-raw-io
+                try:
+                    _os.lseek(fd, 0, _os.SEEK_SET)  # pragma: allow-raw-io
+                    _msvcrt.locking(fd, _msvcrt.LK_NBLCK, 1)  # pragma: allow-raw-io
+                    return fd
+                except PermissionError:
+                    # PermissionError (errno EACCES=13) is the lock-contention error
+                    if _time.monotonic() >= deadline:  # pragma: allow-raw-io
+                        raise LockTimeoutError(
+                            f"Lock timeout after {timeout_seconds}s on {path_str!r}"
+                        )
+                    _time.sleep(0.1)  # pragma: allow-raw-io
+        else:
+            import fcntl as _fcntl  # pragma: allow-raw-io
+            while True:  # pragma: allow-raw-io
+                try:
+                    _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)  # type: ignore[attr-defined]  # pragma: allow-raw-io
+                    return fd
+                except BlockingIOError:
+                    # BlockingIOError (errno EWOULDBLOCK) means lock is held elsewhere
+                    if _time.monotonic() >= deadline:  # pragma: allow-raw-io
+                        raise LockTimeoutError(
+                            f"Lock timeout after {timeout_seconds}s on {path_str!r}"
+                        )
+                    _time.sleep(0.1)  # pragma: allow-raw-io
+    except BaseException:
+        # Close fd on any exception (timeout, non-retriable OSError, etc.)
+        # so we never leak a file descriptor. Guard the close so a secondary
+        # OSError does not replace the original exception being re-raised.
+        try:
+            _os.close(fd)  # pragma: allow-raw-io
+        except OSError:
+            pass
+        raise
+
+
+def release_lock(lock_fd: int) -> None:  # pragma: allow-raw-io
+    """Release and close a lock file descriptor returned by acquire_lock.
+
+    Swallows all OSErrors so a release failure in a finally block never masks
+    the original exception from the try body.
+    """
+    import os as _os  # pragma: allow-raw-io
+    if _sys.platform == "win32":  # pragma: allow-raw-io
+        import msvcrt as _msvcrt  # pragma: allow-raw-io
+        try:
+            _os.lseek(lock_fd, 0, _os.SEEK_SET)  # pragma: allow-raw-io
+            _msvcrt.locking(lock_fd, _msvcrt.LK_UNLCK, 1)  # pragma: allow-raw-io
+        except OSError:
+            pass
+    else:
+        import fcntl as _fcntl  # pragma: allow-raw-io
+        try:
+            _fcntl.flock(lock_fd, _fcntl.LOCK_UN)  # type: ignore[attr-defined]  # pragma: allow-raw-io
+        except OSError:
+            pass
+    try:
+        _os.close(lock_fd)  # pragma: allow-raw-io
+    except OSError:
+        pass

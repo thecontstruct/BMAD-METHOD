@@ -25,8 +25,12 @@ compiled_hash NOT verified (OQ-2): the guard's contract is "inputs unchanged
 → output is correct by construction." A manually edited SKILL.md is emitted
 as-is on the fast path; 'bmad compile <skill>' restores it.
 
-Concurrency: no file locking. Concurrent invocations for the same skill race
-on the slow path. This is Story 5.5a's surface — do NOT add locking here.
+Concurrency (Story 5.5a): advisory file-lock on <skill-dir>/.compiling.lock
+serializes concurrent slow-path invocations for the same skill. POSIX uses
+fcntl.flock; Windows uses msvcrt.locking. --lock-timeout-seconds (default 300s)
+controls the wait limit. After acquiring the lock, the guard re-reads the lockfile
+into fresh_entry and re-runs _needs_recompile: if a parallel compile completed while
+waiting, the guard emits the fresh SKILL.md without recompiling.
 """
 
 from __future__ import annotations
@@ -207,6 +211,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="target IDE for variant compilation (e.g. cursor, windsurf)",
     )
+    parser.add_argument(
+        "--lock-timeout-seconds",
+        type=float,
+        default=300.0,
+        help="advisory lock wait timeout in seconds (default: 300)",
+    )
     return parser.parse_args(argv)
 
 
@@ -232,45 +242,90 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(io.read_template(str(skill_md_path)))
         return 0
 
-    # Slow path: recompile via engine.
+    # Slow path: acquire advisory lock before recompile.
     try:
         skill_dir, install_dir = _reconstruct_paths(entry, scenario_root, args.skill)
     except RuntimeError as exc:
         sys.stderr.write(f"MISSING_FRAGMENT: {scenario_root}:?:?: {exc}\n")
         return 1
+
+    lock_path = str(skill_dir / ".compiling.lock")
+    lock_fd: int | None = None
     try:
-        engine.compile_skill(
-            skill_dir,
-            install_dir,
-            args.tools or None,
-            lockfile_root=install_dir,
-            # override_root MUST be explicit. Without it, engine._compile_core()
-            # derives candidate_override_root = scenario_root / "_bmad" / "custom"
-            # where scenario_root = skill_posix.parent.parent. For the guard's
-            # skill_dir (<project_root>/_bmad/<module>/<skill>), parent.parent is
-            # <project_root>/_bmad, so the engine probes
-            # <project_root>/_bmad/_bmad/custom (doubled _bmad) — a path that
-            # does not exist — causing override_root=None and silently disabling
-            # all user overrides on the slow path.
-            override_root=install_dir / "custom",
+        lock_fd = io.acquire_lock(lock_path, args.lock_timeout_seconds)
+    except io.LockTimeoutError:
+        sys.stderr.write(
+            f"Compile lock timeout for skill {args.skill!r} after "
+            f"{args.lock_timeout_seconds:.0f}s; another process may be compiling\n"
         )
-    except errors.CompilerError as exc:
-        sys.stderr.write(exc.format() + "\n")
+        return 1
+    except OSError as exc:
+        # Non-retriable lock error (e.g., EACCES permission denied on .compiling.lock,
+        # ENOSPC disk full). Exit cleanly rather than propagating a traceback.
+        sys.stderr.write(
+            f"MISSING_FRAGMENT: {lock_path}:?:?: "
+            f"Cannot acquire compile lock: {exc}\n"
+        )
         return 1
 
-    # Re-read freshly written SKILL.md from the canonical engine output path.
-    # Guard against the (unlikely) case where engine succeeded but SKILL.md is
-    # absent (e.g., module-inference mismatch between guard and engine).
-    fresh_skill_md = skill_dir / "SKILL.md"
     try:
-        sys.stdout.write(io.read_template(str(fresh_skill_md)))
-    except OSError as exc:
-        sys.stderr.write(
-            f"MISSING_FRAGMENT: {fresh_skill_md}:?:?: "
-            f"SKILL.md not found after compile: {exc}\n"
+        # Re-read lockfile after acquiring lock — a parallel compile may have
+        # updated it while we waited. Use fresh_entry (not `entry`) to avoid
+        # shadowing the outer variable that was used for _reconstruct_paths above.
+        fresh_entry = _find_lockfile_entry(lockfile_path, args.skill)
+        # skill_dir is already known from above; pass it directly to avoid a
+        # redundant _reconstruct_paths call.
+        fresh_skill_md_path = _reconstruct_skill_md_path(
+            fresh_entry, scenario_root, args.skill, skill_dir=skill_dir
         )
-        return 1
-    return 0
+        needs_recompile_now = (
+            fresh_entry is None
+            or fresh_skill_md_path is None
+            or not io.is_file(str(fresh_skill_md_path))
+            or _needs_recompile(fresh_entry, scenario_root)
+        )
+        if not needs_recompile_now:
+            # Parallel compile completed — emit without recompiling.
+            sys.stdout.write(io.read_template(str(fresh_skill_md_path)))
+            return 0
+
+        # Still needs compile (first holder, or previous holder was killed mid-compile).
+        try:
+            engine.compile_skill(
+                skill_dir,
+                install_dir,
+                args.tools or None,
+                lockfile_root=install_dir,
+                # override_root MUST be explicit. Without it, engine._compile_core()
+                # derives candidate_override_root = scenario_root / "_bmad" / "custom"
+                # where scenario_root = skill_posix.parent.parent. For the guard's
+                # skill_dir (<project_root>/_bmad/<module>/<skill>), parent.parent is
+                # <project_root>/_bmad, so the engine probes
+                # <project_root>/_bmad/_bmad/custom (doubled _bmad) — a path that
+                # does not exist — causing override_root=None and silently disabling
+                # all user overrides on the slow path.
+                override_root=install_dir / "custom",
+            )
+        except errors.CompilerError as exc:
+            sys.stderr.write(exc.format() + "\n")
+            return 1
+
+        # Re-read freshly written SKILL.md from the canonical engine output path.
+        # Guard against the (unlikely) case where engine succeeded but SKILL.md is
+        # absent (e.g., module-inference mismatch between guard and engine).
+        fresh_skill_md = skill_dir / "SKILL.md"
+        try:
+            sys.stdout.write(io.read_template(str(fresh_skill_md)))
+        except OSError as exc:
+            sys.stderr.write(
+                f"MISSING_FRAGMENT: {fresh_skill_md}:?:?: "
+                f"SKILL.md not found after compile: {exc}\n"
+            )
+            return 1
+        return 0
+    finally:
+        if lock_fd is not None:
+            io.release_lock(lock_fd)
 
 
 if __name__ == "__main__":

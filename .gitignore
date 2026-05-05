@@ -26,6 +26,9 @@ design-artifacts/
 __pycache__/
 .pytest_cache/
 
+# Lazy-compile advisory lock files (runtime-generated, not committed)
+**/.compiling.lock
+
 # System files
 .DS_Store
 Thumbs.db

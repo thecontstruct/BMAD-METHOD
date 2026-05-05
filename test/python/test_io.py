@@ -8,18 +8,26 @@ Tests verify:
   not normalized content)
 - list_dir_sorted: stable basename ordering, case-sensitive
 - ensure_within_root: raises on path escape
+- TestLockPrimitives: acquire_lock / release_lock cross-platform primitives
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
 from src.scripts.bmad_compile import io as bio
 from src.scripts.bmad_compile.errors import OverrideOutsideRootError
+
+# Path to the src/scripts/ directory (contains the bmad_compile package).
+# Used by subprocess helpers to insert into sys.path for dynamic imports.
+_IO_SRC_PATH = Path(__file__).resolve().parent.parent.parent / "src" / "scripts"
 
 
 class TestReadTemplate(unittest.TestCase):
@@ -196,6 +204,97 @@ class TestEnsureWithinRoot(unittest.TestCase):
             (Path(d) / "outside.md").write_text("x", encoding="utf-8")
             with self.assertRaises(OverrideOutsideRootError):
                 bio.ensure_within_root(escape, root)
+
+
+class TestLockPrimitives(unittest.TestCase):
+    """Advisory file-lock primitives: acquire_lock / release_lock (Story 5.5a)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.lock_path = os.path.join(self._tmp.name, "test.lock")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _hold_lock_subprocess(self, lock_path_str: str) -> subprocess.Popen[bytes]:
+        """Start a child process that acquires the lock and signals when ready.
+
+        Uses subprocess so that fcntl.flock per-process semantics produce
+        real contention (same-process flock re-grants on POSIX).
+        """
+        helper = textwrap.dedent(f"""
+            import sys, time
+            sys.path.insert(0, {str(_IO_SRC_PATH)!r})
+            from bmad_compile import io as bmad_io
+            fd = bmad_io.acquire_lock({lock_path_str!r}, 60)
+            sys.stdout.write("LOCKED\\n")
+            sys.stdout.flush()
+            time.sleep(60)
+        """)
+        p = subprocess.Popen(
+            [sys.executable, "-c", helper],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        line = p.stdout.readline()  # type: ignore[union-attr]
+        if not line:
+            p.wait()
+            err = p.stderr.read().decode(errors="replace")  # type: ignore[union-attr]
+            raise RuntimeError(f"Lock helper subprocess failed: {err!r}")
+        assert line.strip() == b"LOCKED"
+        return p
+
+    def test_acquire_and_release(self) -> None:
+        """Acquire, release, then re-acquire — proves lock is fully released."""
+        fd = bio.acquire_lock(self.lock_path, timeout_seconds=5)
+        self.assertIsInstance(fd, int)
+        bio.release_lock(fd)
+        # Should be acquirable again immediately after release.
+        fd2 = bio.acquire_lock(self.lock_path, timeout_seconds=5)
+        bio.release_lock(fd2)
+
+    def test_timeout_raises_lock_timeout_error(self) -> None:
+        """LockTimeoutError raised when a subprocess holds the lock."""
+        p = self._hold_lock_subprocess(self.lock_path)
+        try:
+            with self.assertRaises(bio.LockTimeoutError):
+                bio.acquire_lock(self.lock_path, timeout_seconds=0.5)
+        finally:
+            p.kill()
+            p.wait()
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX-only: fcntl.flock")
+    def test_posix_uses_fcntl(self) -> None:
+        """POSIX: lock held by subprocess blocks same-file flock from test process."""
+        import fcntl
+        p = self._hold_lock_subprocess(self.lock_path)
+        try:
+            fd2 = os.open(self.lock_path, os.O_RDWR)
+            try:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(fd2, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(fd2)
+        finally:
+            p.kill()
+            p.wait()
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only: msvcrt.locking")
+    def test_windows_uses_msvcrt(self) -> None:
+        """Windows: lock held by subprocess blocks same-file locking from test process."""
+        import msvcrt
+        p = self._hold_lock_subprocess(self.lock_path)
+        try:
+            # acquire_lock creates the file via O_CREAT; open after the helper runs.
+            fd2 = os.open(self.lock_path, os.O_RDWR)
+            try:
+                os.lseek(fd2, 0, os.SEEK_SET)
+                with self.assertRaises(PermissionError):
+                    msvcrt.locking(fd2, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+            finally:
+                os.close(fd2)
+        finally:
+            p.kill()
+            p.wait()
 
 
 if __name__ == "__main__":
