@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import tempfile
 import unittest
@@ -430,6 +431,516 @@ class TestVersionMismatch(unittest.TestCase):
             self.assertIn("upgrade", ctx.exception.hint or "")
         finally:
             lockfile_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Helpers — override-tier fixture construction (Story 5.3 lineage tests)
+# ---------------------------------------------------------------------------
+
+def _make_override_fixture(
+    tmp: Path,
+    scenario_root: "PurePosixPath",
+    base_content: str,
+    override_content: str,
+) -> "tuple[list, CompileCache, Path, Path]":
+    """Create override-tier dep_tree + cache for lineage tests.
+
+    Returns (dep_tree, cache, base_file_path, override_file_path).
+    Caller may mutate base_file_path.write_text(...) to simulate an upstream upgrade.
+    """
+    base_dir = tmp / "core" / "skill1" / "fragments"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    base_file = base_dir / "intro.template.md"
+    base_file.write_text(base_content, encoding="utf-8")
+
+    override_dir = tmp / "_bmad" / "custom" / "fragments" / "core" / "skill1"
+    override_dir.mkdir(parents=True, exist_ok=True)
+    override_file = override_dir / "intro.template.md"
+    override_file.write_text(override_content, encoding="utf-8")
+
+    base_path = io.to_posix(str(base_file))
+    override_path = io.to_posix(str(override_file))
+
+    cache = CompileCache()
+    cache.put((override_path, "user-module-fragment"), [], override_content)
+
+    root_rf = ResolvedFragment(
+        src="skill1/skill1.template.md",
+        resolved_path=scenario_root / "core" / "skill1" / "skill1.template.md",
+        resolved_from="base",
+        local_props=(),
+        merged_scope=(),
+        nodes=[],
+    )
+    override_rf = ResolvedFragment(
+        src="fragments/intro.template.md",
+        resolved_path=override_path,
+        resolved_from="user-module-fragment",
+        local_props=(),
+        merged_scope=(),
+        nodes=[],
+        base_path=base_path,
+    )
+
+    return [root_rf, override_rf], cache, base_file, override_file
+
+
+def _serialize_lockfile(data: dict) -> str:
+    return json.dumps(data, sort_keys=True, indent=2) + "\n"
+
+
+def _reconstruct(final_lockfile: dict, upgrades_back: int = 1) -> dict:
+    """Reconstruct lockfile state N upgrades back.
+
+    Only override-tier fragments carry lineage; base-tier fragments are skipped.
+    """
+    result = copy.deepcopy(final_lockfile)
+    for entry in result.get("entries", []):
+        for frag in entry.get("fragments", []):
+            if frag.get("resolved_from") not in ("user-module-fragment", "user-override"):
+                continue
+            lineage = frag.get("lineage", [])
+            if len(lineage) < upgrades_back:
+                raise ValueError(
+                    f"Not enough lineage entries: have {len(lineage)}, need {upgrades_back}"
+                )
+            target = lineage[-upgrades_back]
+            frag["base_hash"] = target["base_hash"]
+            frag["hash"] = target["override_hash"]
+            frag["lineage"] = lineage[:-upgrades_back]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# TestLineageInitialCompile (Task 3: AC 1)
+# ---------------------------------------------------------------------------
+
+class TestLineageInitialCompile(unittest.TestCase):
+
+    def test_initial_compile_lineage_empty(self) -> None:
+        """AC 1: override-tier fragment has lineage=[] on first compile."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, _, _ = _make_override_fixture(
+                t, root, "base content v1", "override content"
+            )
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            data = json.loads(io.read_template(lf))
+            frags = data["entries"][0]["fragments"]
+            override_frags = [
+                f for f in frags if f.get("resolved_from") == "user-module-fragment"
+            ]
+            self.assertEqual(len(override_frags), 1)
+            self.assertIn("lineage", override_frags[0])
+            self.assertEqual(override_frags[0]["lineage"], [])
+
+
+# ---------------------------------------------------------------------------
+# TestLineageFragmentUpgrade (Task 4: AC 2)
+# ---------------------------------------------------------------------------
+
+class TestLineageFragmentUpgrade(unittest.TestCase):
+
+    def test_upgrade_appends_lineage_entry(self) -> None:
+        """AC 2: upgrading upstream base appends one lineage entry with correct fields."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            override_content = "override content"
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base v1", override_content
+            )
+            base_hash_v1 = io.hash_text("base v1")
+            override_hash = io.hash_text(override_content)
+
+            # Initial compile.
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            # Simulate upstream upgrade: change base file content.
+            base_file.write_text("base v2", encoding="utf-8")
+
+            # Second compile with updated base.
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            data = json.loads(io.read_template(lf))
+            frag = next(
+                f for f in data["entries"][0]["fragments"]
+                if f.get("resolved_from") == "user-module-fragment"
+            )
+            self.assertEqual(len(frag["lineage"]), 1)
+            entry = frag["lineage"][0]
+            self.assertEqual(entry["base_hash"], base_hash_v1)
+            self.assertEqual(entry["bmad_version"], "1.0.0")
+            self.assertEqual(entry["override_hash"], override_hash)
+            self.assertEqual(frag["base_hash"], io.hash_text("base v2"))
+            self.assertEqual(frag["hash"], override_hash)
+
+    def test_upgrade_no_change_carries_lineage(self) -> None:
+        """AC 2: no-op recompile does not add duplicate lineage entries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base v1", "override"
+            )
+
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            base_file.write_text("base v2", encoding="utf-8")
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            # No-op recompile — base unchanged.
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            data = json.loads(io.read_template(lf))
+            frag = next(
+                f for f in data["entries"][0]["fragments"]
+                if f.get("resolved_from") == "user-module-fragment"
+            )
+            self.assertEqual(len(frag["lineage"]), 1)
+
+    def test_multiple_upgrades_append_not_replace(self) -> None:
+        """AC 2: three upgrades produce 3 lineage entries; oldest entry preserved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base v1", "override"
+            )
+            base_hash_v1 = io.hash_text("base v1")
+
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            for version in ("base v2", "base v3", "base v4"):
+                base_file.write_text(version, encoding="utf-8")
+                _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            data = json.loads(io.read_template(lf))
+            frag = next(
+                f for f in data["entries"][0]["fragments"]
+                if f.get("resolved_from") == "user-module-fragment"
+            )
+            self.assertEqual(len(frag["lineage"]), 3)
+            self.assertEqual(frag["lineage"][0]["base_hash"], base_hash_v1)
+
+    def test_pre_5_3_lockfile_initializes_lineage(self) -> None:
+        """Task 4.4: pre-5.3 lockfile (no lineage key) migrates on first 5.3 upgrade."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base v1", "override"
+            )
+            base_hash_v1 = io.hash_text("base v1")
+            override_hash = io.hash_text("override")
+
+            # Write a current-format lockfile, then manually strip lineage keys
+            # to simulate a pre-5.3 lockfile that has no lineage field.
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            data = json.loads(io.read_template(lf))
+            for e in data["entries"]:
+                for f in e.get("fragments", []):
+                    f.pop("lineage", None)
+            Path(lf).write_text(json.dumps(data), encoding="utf-8")
+
+            # Upgrade: base changes.
+            base_file.write_text("base v2", encoding="utf-8")
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            result = json.loads(io.read_template(lf))
+            frag = next(
+                f for f in result["entries"][0]["fragments"]
+                if f.get("resolved_from") == "user-module-fragment"
+            )
+            self.assertEqual(len(frag["lineage"]), 1)
+            self.assertEqual(frag["lineage"][0]["base_hash"], base_hash_v1)
+            self.assertEqual(frag["lineage"][0]["override_hash"], override_hash)
+
+
+# ---------------------------------------------------------------------------
+# TestLineageTomlVariables (Task 5: AC 3)
+# ---------------------------------------------------------------------------
+
+class TestLineageTomlVariables(unittest.TestCase):
+
+    def _make_toml_scope(self, defaults_val: str, user_val: str) -> VariableScope:
+        return VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": defaults_val}}),
+                ("user", {"agent": {"name": user_val}}),
+            ]
+        )
+
+    def test_toml_variable_lineage_initial_compile(self) -> None:
+        """AC 3: user-layer variable has base_value_hash + lineage=[] on first compile."""
+        scope = self._make_toml_scope("DefaultPM", "MyPM")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=scope)
+            data = json.loads(io.read_template(lf))
+            var = next(
+                v for v in data["entries"][0]["variables"]
+                if v["name"] == "self.agent.name"
+            )
+            self.assertIn("base_value_hash", var)
+            self.assertEqual(var["base_value_hash"], io.hash_text("DefaultPM"))
+            self.assertIn("lineage", var)
+            self.assertEqual(var["lineage"], [])
+
+    def test_toml_variable_lineage_appended(self) -> None:
+        """AC 3: upgrading defaults value appends one variable lineage entry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            scope_v1 = self._make_toml_scope("DefaultPM", "MyPM")
+            old_bvh = io.hash_text("DefaultPM")
+            old_override_hash = scope_v1._table["self.agent.name"].value_hash
+
+            _call_write(lf, root, var_scope=scope_v1)
+
+            scope_v2 = self._make_toml_scope("NewDefaultPM", "MyPM")
+            _call_write(lf, root, var_scope=scope_v2)
+
+            data = json.loads(io.read_template(lf))
+            var = next(
+                v for v in data["entries"][0]["variables"]
+                if v["name"] == "self.agent.name"
+            )
+            self.assertEqual(len(var["lineage"]), 1)
+            entry = var["lineage"][0]
+            self.assertEqual(entry["base_value_hash"], old_bvh)
+            self.assertEqual(entry["bmad_version"], "1.0.0")
+            self.assertEqual(entry["override_value_hash"], old_override_hash)
+
+    def test_toml_no_user_override_no_lineage(self) -> None:
+        """AC 3: defaults-only variable must NOT have a lineage key."""
+        scope = VariableScope.build(
+            toml_layers=[("defaults", {"agent": {"name": "DefaultPM"}})]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=scope)
+            data = json.loads(io.read_template(lf))
+            var = next(
+                v for v in data["entries"][0]["variables"]
+                if v["name"] == "self.agent.name"
+            )
+            self.assertNotIn("lineage", var)
+            self.assertNotIn("base_value_hash", var)
+
+    def test_toml_variable_lineage_resolver_base_value_hash(self) -> None:
+        """Task 0.3: ResolvedValue.base_value_hash populated by VariableScope.build()."""
+        scope = self._make_toml_scope("DefaultPM", "MyPM")
+        rv = scope._table["self.agent.name"]
+        self.assertEqual(rv.value, "MyPM")
+        self.assertEqual(rv.toml_layer, "user")
+        self.assertIsNotNone(rv.base_value_hash)
+        self.assertEqual(rv.base_value_hash, io.hash_text("DefaultPM"))
+
+        # Defaults-only variable: base_value_hash must be None.
+        scope_def = VariableScope.build(
+            toml_layers=[("defaults", {"agent": {"name": "DefaultPM"}})]
+        )
+        rv_def = scope_def._table["self.agent.name"]
+        self.assertEqual(rv_def.toml_layer, "defaults")
+        self.assertIsNone(rv_def.base_value_hash)
+
+
+# ---------------------------------------------------------------------------
+# TestLineageLargeAndDeterministic (Task 6: AC 4)
+# ---------------------------------------------------------------------------
+
+class TestLineageLargeAndDeterministic(unittest.TestCase):
+
+    def test_large_lineage_preserved(self) -> None:
+        """AC 4: 10 pre-existing lineage entries preserved on no-op recompile."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base current", "override"
+            )
+            base_hash_current = io.hash_text("base current")
+            override_hash = io.hash_text("override")
+
+            # Compile once to establish the correct lockfile path format.
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            data = json.loads(io.read_template(lf))
+            # Find the override fragment path as written by lockfile.
+            frag_path = next(
+                f["path"] for f in data["entries"][0]["fragments"]
+                if f.get("resolved_from") == "user-module-fragment"
+            )
+
+            # Seed 10 pre-existing lineage entries into the lockfile.
+            pre_lineage = [
+                {"base_hash": f"hash_v{i}", "bmad_version": "1.0.0", "override_hash": override_hash}
+                for i in range(10)
+            ]
+            for f in data["entries"][0]["fragments"]:
+                if f.get("resolved_from") == "user-module-fragment":
+                    f["lineage"] = pre_lineage
+            Path(lf).write_text(json.dumps(data), encoding="utf-8")
+
+            # No-op recompile (base unchanged).
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            result = json.loads(io.read_template(lf))
+            frag = next(
+                f for f in result["entries"][0]["fragments"]
+                if f.get("resolved_from") == "user-module-fragment"
+            )
+            self.assertEqual(len(frag["lineage"]), 10)
+            self.assertEqual(frag["lineage"][0]["base_hash"], "hash_v0")
+            self.assertEqual(frag["lineage"][9]["base_hash"], "hash_v9")
+
+    def test_lineage_deterministic_ordering(self) -> None:
+        """AC 4: chronological order — lineage[0] older base_hash than lineage[1]."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base v1", "override"
+            )
+            bh1 = io.hash_text("base v1")
+
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            base_file.write_text("base v2", encoding="utf-8")
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            bh2 = io.hash_text("base v2")
+
+            base_file.write_text("base v3", encoding="utf-8")
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+
+            data = json.loads(io.read_template(lf))
+            frag = next(
+                f for f in data["entries"][0]["fragments"]
+                if f.get("resolved_from") == "user-module-fragment"
+            )
+            self.assertEqual(len(frag["lineage"]), 2)
+            self.assertEqual(frag["lineage"][0]["base_hash"], bh1)
+            self.assertEqual(frag["lineage"][1]["base_hash"], bh2)
+
+
+# ---------------------------------------------------------------------------
+# TestLineageReconstruction (Task 7: AC 5)
+# ---------------------------------------------------------------------------
+
+class TestLineageReconstruction(unittest.TestCase):
+
+    def test_reconstruction_byte_identical(self) -> None:
+        """AC 5: reconstruct_state_before_upgrade produces byte-identical snapshots."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base v1", "override"
+            )
+
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            snapshot_0 = json.loads(io.read_template(lf))
+
+            base_file.write_text("base v2", encoding="utf-8")
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            snapshot_1 = json.loads(io.read_template(lf))
+
+            base_file.write_text("base v3", encoding="utf-8")
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            snapshot_2 = json.loads(io.read_template(lf))
+
+            self.assertEqual(
+                _serialize_lockfile(_reconstruct(snapshot_2, 1)),
+                _serialize_lockfile(snapshot_1),
+            )
+            self.assertEqual(
+                _serialize_lockfile(_reconstruct(snapshot_2, 2)),
+                _serialize_lockfile(snapshot_0),
+            )
+
+    def test_tampered_lineage_fails_reconstruction(self) -> None:
+        """AC 5: tampered override_hash in lineage yields different reconstruction output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            dep_tree, cache, base_file, _ = _make_override_fixture(
+                t, root, "base v1", "override"
+            )
+
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            snapshot_0 = json.loads(io.read_template(lf))
+
+            base_file.write_text("base v2", encoding="utf-8")
+            _call_write(lf, root, dep_tree=dep_tree, cache=cache)
+            snapshot_1 = json.loads(io.read_template(lf))
+
+            # Tamper: corrupt the override_hash in the single lineage entry.
+            for f in snapshot_1["entries"][0]["fragments"]:
+                if f.get("resolved_from") == "user-module-fragment":
+                    f["lineage"][0]["override_hash"] = "tampered_value"
+
+            reconstructed = _reconstruct(snapshot_1, 1)
+            self.assertNotEqual(
+                _serialize_lockfile(reconstructed),
+                _serialize_lockfile(snapshot_0),
+            )
+
+    def test_toml_variable_lineage_history(self) -> None:
+        """Task 7.3: after 2 defaults upgrades, variable lineage holds 2 entries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+
+            bvh_d1 = io.hash_text("DefaultPM")
+            bvh_d2 = io.hash_text("NewDefaultPM")
+            user_val_hash = io.hash_text("MyPM")
+
+            scope_v1 = VariableScope.build(
+                toml_layers=[
+                    ("defaults", {"agent": {"name": "DefaultPM"}}),
+                    ("user", {"agent": {"name": "MyPM"}}),
+                ]
+            )
+            scope_v2 = VariableScope.build(
+                toml_layers=[
+                    ("defaults", {"agent": {"name": "NewDefaultPM"}}),
+                    ("user", {"agent": {"name": "MyPM"}}),
+                ]
+            )
+            scope_v3 = VariableScope.build(
+                toml_layers=[
+                    ("defaults", {"agent": {"name": "FinalDefaultPM"}}),
+                    ("user", {"agent": {"name": "MyPM"}}),
+                ]
+            )
+
+            _call_write(lf, root, var_scope=scope_v1)
+            _call_write(lf, root, var_scope=scope_v2)
+            _call_write(lf, root, var_scope=scope_v3)
+
+            data = json.loads(io.read_template(lf))
+            var = next(
+                v for v in data["entries"][0]["variables"]
+                if v["name"] == "self.agent.name"
+            )
+            self.assertEqual(len(var["lineage"]), 2)
+            self.assertEqual(var["lineage"][0]["base_value_hash"], bvh_d1)
+            self.assertEqual(var["lineage"][0]["override_value_hash"], user_val_hash)
+            self.assertEqual(var["lineage"][1]["base_value_hash"], bvh_d2)
+            self.assertEqual(var["lineage"][1]["override_value_hash"], user_val_hash)
+            self.assertEqual(var["base_value_hash"], io.hash_text("FinalDefaultPM"))
 
 
 if __name__ == "__main__":

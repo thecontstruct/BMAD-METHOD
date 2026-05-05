@@ -124,6 +124,7 @@ def _build_skill_entry(
                 frag_entry["base_hash"] = io.hash_text(base_text)
             else:
                 frag_entry["base_hash"] = None
+            frag_entry["lineage"] = []  # Story 5.3: empty on fresh build; write_skill_entry() carries forward
         fragments.append(frag_entry)
 
     variables: list[dict[str, Any]] = []
@@ -139,6 +140,11 @@ def _build_skill_entry(
             var_entry["source_path"] = _normalize_path(rv.source_path, scenario_root)
         if rv.toml_layer is not None:
             var_entry["toml_layer"] = rv.toml_layer
+        if rv.source == "toml" and rv.toml_layer == "user" and rv.base_value_hash is not None:
+            # Story 5.3: record defaults-layer hash and initialize empty lineage.
+            # write_skill_entry() carries forward lineage entries on subsequent compiles.
+            var_entry["base_value_hash"] = rv.base_value_hash
+            var_entry["lineage"] = []
         variables.append(var_entry)
 
     # Story 4.4: glob_inputs[] — one entry per `file:`-prefixed TOML array
@@ -193,6 +199,25 @@ def write_skill_entry(
         except (json.JSONDecodeError, ValueError, TypeError):
             existing = {}
 
+    # Story 5.3: capture old bmad_version and build fragment/variable indices for
+    # lineage carry-forward BEFORE _build_skill_entry() runs (line ~224 will
+    # overwrite the top-level bmad_version with the current sentinel).
+    old_bmad_version: str = existing.get("bmad_version", _BMAD_VERSION)
+    old_frag_by_path: dict[str, dict[str, Any]] = {}
+    old_var_by_name: dict[str, dict[str, Any]] = {}
+    _ex_entries = existing.get("entries")
+    for _oe in (_ex_entries if isinstance(_ex_entries, list) else []):
+        if isinstance(_oe, dict) and _oe.get("skill") == skill_basename:
+            _of_list = _oe.get("fragments")
+            for _of in (_of_list if isinstance(_of_list, list) else []):
+                if isinstance(_of, dict) and "path" in _of:
+                    old_frag_by_path[_of["path"]] = _of
+            _ov_list = _oe.get("variables")
+            for _ov in (_ov_list if isinstance(_ov_list, list) else []):
+                if isinstance(_ov, dict) and "name" in _ov:
+                    old_var_by_name[_ov["name"]] = _ov
+            break
+
     new_entry = _build_skill_entry(
         scenario_root,
         skill_basename,
@@ -203,6 +228,47 @@ def write_skill_entry(
         target_ide=target_ide,
         cache=cache,
     )
+
+    # Story 5.3: carry forward lineage for override-tier fragments.
+    for _frag in new_entry["fragments"]:
+        if _frag.get("resolved_from") not in ("user-module-fragment", "user-override"):
+            continue
+        _old_frag = old_frag_by_path.get(_frag["path"])
+        if _old_frag is None:
+            continue  # first compile for this fragment — lineage: [] already set
+        _raw_lin = _old_frag.get("lineage")
+        _old_lin: list[dict[str, Any]] = _raw_lin if isinstance(_raw_lin, list) else []
+        if _old_frag.get("base_hash") != _frag.get("base_hash"):
+            # Upstream base changed — append lineage entry recording pre-upgrade state.
+            _frag["lineage"] = _old_lin + [{
+                "base_hash": _old_frag.get("base_hash"),
+                "bmad_version": old_bmad_version,
+                "override_hash": _old_frag.get("hash"),
+            }]
+        else:
+            # No base change — carry old lineage forward unchanged.
+            _frag["lineage"] = _old_lin
+
+    # Story 5.3: carry forward lineage for user-layer TOML variables.
+    for _var in new_entry["variables"]:
+        if "lineage" not in _var:
+            continue
+        _old_var = old_var_by_name.get(_var["name"])
+        if _old_var is None:
+            continue  # first compile for this variable — lineage: [] already set
+        _raw_var_lin = _old_var.get("lineage")
+        _old_var_lin: list[dict[str, Any]] = _raw_var_lin if isinstance(_raw_var_lin, list) else []
+        _old_bvh = _old_var.get("base_value_hash")
+        if _old_bvh != _var.get("base_value_hash"):
+            # Defaults layer changed — append lineage entry recording pre-upgrade state.
+            _var["lineage"] = _old_var_lin + [{
+                "base_value_hash": _old_bvh,
+                "bmad_version": old_bmad_version,
+                "override_value_hash": _old_var.get("value_hash"),
+            }]
+        else:
+            # No defaults change — carry old lineage forward unchanged.
+            _var["lineage"] = _old_var_lin
 
     raw_entries = existing.get("entries", [])
     # Defensive: a corrupted lockfile with entries=null/int/str dict-parses

@@ -94,6 +94,7 @@ class ResolvedValue:
     toml_layer: str | None = None         # "defaults" | "team" | "user"
     contributing_paths: list[str] | None = None
     value_hash: str | None = None         # SHA-256 hex of value.encode()
+    base_value_hash: str | None = None    # SHA-256 hex of defaults-layer value when a higher-priority layer wins; None otherwise
 
 
 @dataclass(frozen=True)
@@ -353,6 +354,22 @@ def _flatten_toml(
             )
 
 
+def _flatten_toml_defaults(d: dict[str, Any], prefix: str, out: dict[str, str]) -> None:
+    """Flatten a TOML dict (defaults layer only) into self.<dotted> → str_val pairs.
+
+    Mirrors the scalar-extraction logic of _flatten_toml: same bool-lowercasing,
+    same self.<dotted> key prefix. Lists are skipped — glob-expanded arrays have
+    no scalar value to hash against. Called once per VariableScope.build() call.
+    """
+    for k, v in d.items():
+        dotted = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            _flatten_toml_defaults(v, dotted, out)
+        elif not isinstance(v, list):
+            str_val = str(v).lower() if isinstance(v, bool) else str(v)
+            out[f"self.{dotted}"] = str_val
+
+
 def _build_priority_map(
     toml_layers: list[tuple[str, dict[str, Any]]],
 ) -> tuple[dict[str, str], dict[str, str]]:
@@ -517,6 +534,17 @@ class VariableScope:
                 list_priority_map=list_priority_map or None,
                 glob_sink=_glob_sink,  # pragma: allow-raw-io
             )
+
+            # Story 5.3: populate base_value_hash for variables overridden above
+            # the defaults layer. Flatten the defaults layer (index 0, lowest
+            # priority) to get the canonical defaults-only scalar values.
+            defaults_flat: dict[str, str] = {}
+            _flatten_toml_defaults(toml_layers[0][1], "", defaults_flat)
+            for _bvh_key, _bvh_rv in list(table.items()):
+                if _bvh_rv.source == "toml" and _bvh_rv.toml_layer not in (None, "defaults"):
+                    _def_val = defaults_flat.get(_bvh_key)
+                    if _def_val is not None:
+                        table[_bvh_key] = replace(_bvh_rv, base_value_hash=io.hash_text(_def_val))
 
             # Story 4.2 fold-in 1: populate contributing_paths for any
             # self.* scalar key that appears in MORE THAN ONE TOML layer.
