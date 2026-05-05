@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "bmad-upgrade-dry-run-v1",
+  "title": "bmad upgrade --dry-run --json schema v1",
+  "description": "Frozen v1 contract for `bmad upgrade --dry-run --json` output. Epic 6 Story 6.1 mock contracts depend on this file. Before changing any required field name or type, bump schema_version in the output AND update Epic 6 mock fixtures in the same PR. Additive new fields (additionalProperties not restricted at root) are allowed without a version bump.",
+  "type": "object",
+  "required": ["schema_version", "drift", "summary"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "drift": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "skill",
+          "prose_fragment_changes",
+          "toml_default_changes",
+          "orphaned_overrides",
+          "new_defaults",
+          "glob_changes",
+          "variable_provenance_shifts"
+        ],
+        "properties": {
+          "skill": {"type": "string"},
+          "prose_fragment_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "old_hash", "new_hash", "tier"],
+              "properties": {
+                "path":               {"type": "string"},
+                "old_hash":           {"type": "string"},
+                "new_hash":           {"type": ["string", "null"]},
+                "user_override_hash": {"type": ["string", "null"]},
+                "tier":               {"type": "string"}
+              }
+            }
+          },
+          "toml_default_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["key", "old_hash", "new_value"],
+              "properties": {
+                "key":                 {"type": "string"},
+                "old_hash":            {"type": "string"},
+                "new_value":           {"type": "string"},
+                "user_override_value": {"type": ["string", "null"]}
+              }
+            }
+          },
+          "orphaned_overrides": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "override_hash", "reason"],
+              "properties": {
+                "path":          {"type": "string"},
+                "override_hash": {"type": "string"},
+                "reason":        {"type": "string"}
+              }
+            }
+          },
+          "new_defaults": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["key", "new_value", "source"],
+              "properties": {
+                "key":       {"type": "string"},
+                "new_value": {"type": "string"},
+                "source":    {"type": "string"}
+              }
+            }
+          },
+          "glob_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "toml_key", "pattern",
+                "old_match_set_hash", "new_match_set_hash",
+                "added_matches", "removed_matches"
+              ],
+              "properties": {
+                "toml_key":           {"type": "string"},
+                "pattern":            {"type": "string"},
+                "old_match_set_hash": {"type": ["string", "null"]},
+                "new_match_set_hash": {"type": ["string", "null"]},
+                "added_matches":      {"type": "array", "items": {"type": "string"}},
+                "removed_matches":    {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          },
+          "variable_provenance_shifts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "old_source", "new_source"],
+              "properties": {
+                "name":           {"type": "string"},
+                "old_source":     {"type": "string"},
+                "new_source":     {"type": "string"},
+                "old_toml_layer": {"type": ["string", "null"]},
+                "new_toml_layer": {"type": ["string", "null"]}
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "total_skills_with_drift",
+        "prose_fragment_changes",
+        "toml_default_changes",
+        "orphaned_overrides",
+        "new_defaults",
+        "glob_changes",
+        "variable_provenance_shifts"
+      ],
+      "properties": {
+        "total_skills_with_drift":  {"type": "integer"},
+        "prose_fragment_changes":   {"type": "integer"},
+        "toml_default_changes":     {"type": "integer"},
+        "orphaned_overrides":       {"type": "integer"},
+        "new_defaults":             {"type": "integer"},
+        "glob_changes":             {"type": "integer"},
+        "variable_provenance_shifts": {"type": "integer"}
+      }
+    }
+  }
+}
