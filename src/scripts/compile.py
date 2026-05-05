@@ -228,19 +228,32 @@ def _run_explain_mode(
     install_path: Path,
     target_ide: str | None,
     install_flags: dict[str, str],
+    *,
+    mode: str = "markdown",
 ) -> int:
-    """Story 4.2: dry-run inspect mode. Compiles in memory only, writes
-    nothing, and emits a Markdown+XML provenance view of the resolved
-    skill to stdout.
+    """Story 4.2/4.3: dry-run inspect mode. Compiles in memory only, writes
+    nothing. `mode` selects the output renderer:
+      "markdown" — Markdown+XML provenance view (Story 4.2)
+      "tree"     — fragment dependency tree only (Story 4.3)
+      "json"     — structured JSON output (Story 4.3)
     """
-    flat_nodes, dep_tree, var_scope, cache, scenario_root = engine.explain_skill(
+    flat_nodes, dep_tree, var_scope, cache, scenario_root, toml_layers_data = engine.explain_skill(
         skill_path, install_path,
         target_ide=target_ide,
         lockfile_root=install_path,
         override_root=install_path / "custom",
         install_flags=install_flags or None,
     )
-    output = engine._render_explain(flat_nodes, dep_tree, var_scope, cache, scenario_root)
+    # This dispatch REPLACES the prior single call to engine._render_explain.
+    # Do NOT add a second sys.stdout.write call — each branch below writes once.
+    if mode == "tree":
+        output = engine._render_explain_tree(flat_nodes, dep_tree, scenario_root)
+    elif mode == "json":
+        output = engine._render_explain_json(
+            flat_nodes, dep_tree, var_scope, cache, scenario_root, toml_layers_data
+        )
+    else:  # "markdown" — Story 4.2 path
+        output = engine._render_explain(flat_nodes, dep_tree, var_scope, cache, scenario_root)
     sys.stdout.write(output)
     return 0
 
@@ -333,6 +346,14 @@ def main(argv: list[str] | None = None) -> int:
         "--explain", action="store_true",
         help="Emit Markdown-with-inline-XML provenance view; no file writes.",
     )
+    ap.add_argument(
+        "--tree", action="store_true",
+        help="With --explain: emit fragment dependency tree only (no content).",
+    )
+    ap.add_argument(
+        "--json", action="store_true",
+        help="With --explain: emit structured JSON provenance output.",
+    )
     args = ap.parse_args(argv)
     # Normalize empty-string positional to None (argparse can produce '' for nargs="?")
     args.skill_canonical = args.skill_canonical or None
@@ -365,6 +386,21 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.explain and args.diff:
         sys.stderr.write("error: --explain and --diff are mutually exclusive\n")
+        return 1
+    # Story 4.3: --tree and --json require --explain; they are mutually exclusive;
+    # they cannot combine with --diff (belt-and-suspenders — --diff and --explain
+    # are already mutually exclusive, so this fires only when --explain is absent).
+    if args.tree and not args.explain:
+        sys.stderr.write("error: --tree requires --explain\n")
+        return 1
+    if args.json and not args.explain:
+        sys.stderr.write("error: --json requires --explain\n")
+        return 1
+    if args.tree and args.json:
+        sys.stderr.write("error: --tree and --json are mutually exclusive\n")
+        return 1
+    if (args.tree or args.json) and args.diff:
+        sys.stderr.write("error: --tree cannot be combined with --diff\n")
         return 1
 
     install_flags: dict[str, str] = {}
@@ -407,8 +443,9 @@ def main(argv: list[str] | None = None) -> int:
                 "receive fragment-level upgrades from the base module\n"
             )
         if args.explain:
+            _explain_mode = "tree" if args.tree else "json" if args.json else "markdown"
             try:
-                return _run_explain_mode(skill_path, install_path, target_ide, install_flags)
+                return _run_explain_mode(skill_path, install_path, target_ide, install_flags, mode=_explain_mode)
             except CompilerError as e:
                 sys.stderr.write(e.format() + "\n")
                 return 2 if isinstance(e, LockfileVersionMismatchError) else 1

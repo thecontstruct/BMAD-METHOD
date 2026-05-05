@@ -1455,5 +1455,523 @@ class TestExplainMode(unittest.TestCase):
         self.assertIn("equal length", str(ctx.exception))
 
 
+def _run_explain_tree(install_dir: Path, args: list[str]) -> tuple[int, str, str]:
+    """Story 4.3: invoke compile.py with --explain --tree prepended to args."""
+    return _run_compile_skill(install_dir, ["--explain", "--tree"] + args)
+
+
+def _run_explain_json(install_dir: Path, args: list[str]) -> tuple[int, str, str]:
+    """Story 4.3: invoke compile.py with --explain --json prepended to args."""
+    return _run_compile_skill(install_dir, ["--explain", "--json"] + args)
+
+
+class TestExplainTreeMode(unittest.TestCase):
+    """Story 4.3 AC 1: --explain --tree fragment dependency tree output."""
+
+    def _minimal_lock(self, install: Path) -> None:
+        lock_content = (
+            json.dumps(
+                {"bmad_version": "1.0.0", "compiled_at": "1.0.0", "entries": [], "version": 1},
+                sort_keys=True, indent=2,
+            ) + "\n"
+        )
+        _write(install / "_config" / "bmad.lock", lock_content)
+
+    def test_tree_root_at_depth_zero(self) -> None:
+        """Root line has no leading indent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain_tree(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            first_line = stdout.splitlines()[0]
+            self.assertFalse(first_line.startswith(" "), f"Root must have no indent: {first_line!r}")
+            self.assertIn("[base]", first_line)
+            self.assertIn("my-skill.template.md", first_line)
+
+    def test_tree_nested_indents_by_depth(self) -> None:
+        """Each level adds exactly two spaces of indent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/a.template.md">>',
+            )
+            _write(
+                install / "core" / "my-skill" / "fragments" / "a.template.md",
+                '<<include path="fragments/b.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "b.template.md", "leaf\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain_tree(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            lines = stdout.splitlines()
+            # root at depth 0 — no indent
+            self.assertFalse(lines[0].startswith(" "))
+            # a.template.md at depth 1 — two spaces
+            a_line = next(l for l in lines if "a.template.md" in l)
+            self.assertTrue(a_line.startswith("  "), f"depth-1 must start with 2 spaces: {a_line!r}")
+            self.assertFalse(a_line.startswith("    "), f"depth-1 must not have 4 spaces: {a_line!r}")
+            # b.template.md at depth 2 — four spaces
+            b_line = next(l for l in lines if "b.template.md" in l)
+            self.assertTrue(b_line.startswith("    "), f"depth-2 must start with 4 spaces: {b_line!r}")
+
+    def test_tree_shows_resolved_from_tier(self) -> None:
+        """Override fragment appears with [user-override] in the tree."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "base\n")
+            # user-override path: custom/fragments/<fragment_filename>
+            _write(install / "custom" / "fragments" / "body.template.md", "override\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain_tree(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            self.assertIn("[user-override]", stdout)
+
+    def test_tree_suppresses_content_bodies(self) -> None:
+        """Template body text must not appear in tree output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello World secret\n")
+            self._minimal_lock(install)
+            code, stdout, _ = _run_explain_tree(install, ["core/my-skill"])
+            self.assertEqual(code, 0)
+            self.assertNotIn("Hello World secret", stdout)
+
+    def test_tree_no_xml_tags(self) -> None:
+        """No <Include or <Variable tags appear in tree output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "body\n")
+            self._minimal_lock(install)
+            code, stdout, _ = _run_explain_tree(install, ["core/my-skill"])
+            self.assertEqual(code, 0)
+            self.assertNotIn("<Include", stdout)
+            self.assertNotIn("<Variable", stdout)
+
+    def test_tree_no_writes_to_skill_md(self) -> None:
+        """Pre-existing SKILL.md SHA unchanged after --explain --tree."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "OLD\n")
+            self._minimal_lock(install)
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            sha_before = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            _run_explain_tree(install, ["core/my-skill"])
+            sha_after = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_tree_no_writes_to_lockfile(self) -> None:
+        """Lockfile SHA unchanged after --explain --tree."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            lock = install / "_config" / "bmad.lock"
+            sha_before = hashlib.sha256(lock.read_bytes()).hexdigest()
+            _run_explain_tree(install, ["core/my-skill"])
+            sha_after = hashlib.sha256(lock.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_tree_determinism_twice_run(self) -> None:
+        """Two runs of --explain --tree produce byte-identical stdout."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "body\n")
+            self._minimal_lock(install)
+            _, out1, _ = _run_explain_tree(install, ["core/my-skill"])
+            _, out2, _ = _run_explain_tree(install, ["core/my-skill"])
+            self.assertEqual(out1, out2)
+
+    def test_tree_requires_explain_flag(self) -> None:
+        """--tree alone (no --explain) exits 1 with correct error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(install, ["--tree", "core/my-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("--tree requires --explain", stderr)
+
+    def test_tree_and_json_mutually_exclusive(self) -> None:
+        """--explain --tree --json exits 1 with mutually exclusive error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(
+                install, ["--explain", "--tree", "--json", "core/my-skill"]
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("mutually exclusive", stderr)
+
+    def test_tree_cannot_combine_with_diff(self) -> None:
+        """--tree --diff (no --explain) exits 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(install, ["--tree", "--diff", "core/my-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("--tree", stderr)
+
+    def test_tree_same_fragment_at_two_depths(self) -> None:
+        """Same fragment included twice at different depths produces two tree lines."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            # Root includes shared.template.md directly AND via a.template.md
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/shared.template.md">>\n'
+                '<<include path="fragments/a.template.md">>',
+            )
+            _write(
+                install / "core" / "my-skill" / "fragments" / "a.template.md",
+                '<<include path="fragments/shared.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "shared.template.md", "shared\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain_tree(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            shared_lines = [l for l in stdout.splitlines() if "shared.template.md" in l]
+            self.assertEqual(len(shared_lines), 2, f"Expected 2 lines for shared fragment, got: {shared_lines}")
+
+
+class TestExplainJsonMode(unittest.TestCase):
+    """Story 4.3 AC 2/3/4/5: --explain --json structured JSON output."""
+
+    def _minimal_lock(self, install: Path) -> None:
+        lock_content = (
+            json.dumps(
+                {"bmad_version": "1.0.0", "compiled_at": "1.0.0", "entries": [], "version": 1},
+                sort_keys=True, indent=2,
+            ) + "\n"
+        )
+        _write(install / "_config" / "bmad.lock", lock_content)
+
+    def test_json_valid_json(self) -> None:
+        """Output must be parseable with json.loads()."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, stdout, stderr = _run_explain_json(install, ["core/my-skill"])
+            self.assertEqual(code, 0, f"stderr: {stderr}")
+            data = json.loads(stdout)  # must not raise
+            self.assertIsInstance(data, dict)
+
+    def test_json_schema_version_is_integer_one(self) -> None:
+        """schema_version must be the integer 1, not the string '1'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            self.assertEqual(data["schema_version"], 1)
+            self.assertIsInstance(data["schema_version"], int)
+
+    def test_json_fragments_array_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            self.assertIsInstance(data["fragments"], list)
+
+    def test_json_variables_array_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            self.assertIsInstance(data["variables"], list)
+
+    def test_json_toml_fields_array_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            self.assertIsInstance(data["toml_fields"], list)
+
+    def test_json_fragment_has_required_fields(self) -> None:
+        """Every fragment entry must have src, resolved_from, and hash (all strings)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "body\n")
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            for frag in data["fragments"]:
+                self.assertIn("src", frag)
+                self.assertIn("resolved_from", frag)
+                self.assertIn("hash", frag)
+                self.assertIsInstance(frag["src"], str)
+                self.assertIsInstance(frag["resolved_from"], str)
+                self.assertIsInstance(frag["hash"], str)
+
+    def test_json_variable_has_required_fields(self) -> None:
+        """Variable entries must have name, source, resolved_at, value."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "{{self.tag}}\n")
+            _write(install / "core" / "my-skill" / "customize.toml", 'tag = "hello"\n')
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            self.assertTrue(len(data["variables"]) > 0)
+            for var in data["variables"]:
+                self.assertIn("name", var)
+                self.assertIn("source", var)
+                self.assertIn("resolved_at", var)
+                self.assertIn("value", var)
+
+    def test_json_contributing_paths_is_array_not_string(self) -> None:
+        """contributing_paths must be a JSON array, not a semicolon-joined string."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "{{self.tag}}\n")
+            _write(install / "core" / "my-skill" / "customize.toml", 'tag = "default"\n')
+            # team override for same key — produces multi-layer contributing_paths
+            _write(install / "custom" / "my-skill.toml", 'tag = "team"\n')
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            for var in data["variables"]:
+                if "contributing_paths" in var:
+                    self.assertIsInstance(
+                        var["contributing_paths"], list,
+                        f"contributing_paths must be list, got {type(var['contributing_paths'])}: {var['contributing_paths']!r}",
+                    )
+
+    def test_json_toml_fields_populated(self) -> None:
+        """Skill with customize.toml must have toml_fields entries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "{{self.tag}}\n")
+            _write(install / "core" / "my-skill" / "customize.toml", 'tag = "default"\n')
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            paths = [f["path"] for f in data["toml_fields"]]
+            self.assertIn("tag", paths)
+            tag_entry = next(f for f in data["toml_fields"] if f["path"] == "tag")
+            self.assertEqual(tag_entry["default_value"], "default")
+
+    def test_json_toml_fields_sorted_alphabetically(self) -> None:
+        """toml_fields[] entries must be sorted alphabetically by path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "{{self.z}}\n{{self.a}}\n")
+            _write(install / "core" / "my-skill" / "customize.toml", 'z = "last"\na = "first"\n')
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            paths = [f["path"] for f in data["toml_fields"]]
+            self.assertEqual(paths, sorted(paths))
+
+    def test_json_no_writes_to_skill_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "SKILL.md", "OLD\n")
+            self._minimal_lock(install)
+            skill_md = install / "core" / "my-skill" / "SKILL.md"
+            sha_before = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            _run_explain_json(install, ["core/my-skill"])
+            sha_after = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_json_no_writes_to_lockfile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            lock = install / "_config" / "bmad.lock"
+            sha_before = hashlib.sha256(lock.read_bytes()).hexdigest()
+            _run_explain_json(install, ["core/my-skill"])
+            sha_after = hashlib.sha256(lock.read_bytes()).hexdigest()
+            self.assertEqual(sha_before, sha_after)
+
+    def test_json_determinism_twice_run(self) -> None:
+        """Two runs of --explain --json produce byte-identical stdout."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "{{self.tag}}\n")
+            _write(install / "core" / "my-skill" / "customize.toml", 'tag = "v"\n')
+            self._minimal_lock(install)
+            _, out1, _ = _run_explain_json(install, ["core/my-skill"])
+            _, out2, _ = _run_explain_json(install, ["core/my-skill"])
+            self.assertEqual(out1, out2)
+
+    def test_json_jq_filter_by_resolved_from(self) -> None:
+        """Python-equivalent jq filter on fragments by resolved_from yields correct subset."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(
+                install / "core" / "my-skill" / "my-skill.template.md",
+                '<<include path="fragments/body.template.md">>',
+            )
+            _write(install / "core" / "my-skill" / "fragments" / "body.template.md", "base\n")
+            # user-override path: custom/fragments/<fragment_filename>
+            _write(install / "custom" / "fragments" / "body.template.md", "override\n")
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            overrides = [f for f in data["fragments"] if f["resolved_from"] == "user-override"]
+            self.assertTrue(len(overrides) > 0, "Expected at least one user-override fragment")
+            for f in overrides:
+                self.assertEqual(f["resolved_from"], "user-override")
+
+    def test_json_requires_explain_flag(self) -> None:
+        """--json alone (no --explain) exits 1 with correct error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(install, ["--json", "core/my-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("--json requires --explain", stderr)
+
+    def test_json_cannot_combine_with_diff(self) -> None:
+        """--json --diff (no --explain) exits 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            self._minimal_lock(install)
+            code, _, stderr = _run_compile_skill(install, ["--json", "--diff", "core/my-skill"])
+            self.assertEqual(code, 1)
+            self.assertIn("--json", stderr)
+
+    def test_json_additive_field_tolerance(self) -> None:
+        """A v1 consumer must not crash when presented with extra 'future' fields (AC 4)."""
+        future_data = {
+            "schema_version": 1,
+            "fragments": [{"src": "a.md", "resolved_from": "base", "hash": "abc"}],
+            "variables": [],
+            "toml_fields": [],
+            "future_field": "v2-addition",  # unknown to v1 consumer
+        }
+        serialized = json.dumps(future_data)
+        parsed = json.loads(serialized)
+
+        def v1_consumer(data: dict) -> None:  # type: ignore[type-arg]
+            _ = data["schema_version"]
+            _ = data["fragments"]
+            _ = data["variables"]
+
+        v1_consumer(parsed)  # must not raise
+        self.assertEqual(parsed.get("future_field"), "v2-addition")
+
+    def test_json_toml_bool_value_serialized_correctly(self) -> None:
+        """TOML boolean true must appear as JSON true (not string 'true')."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(install / "core" / "my-skill" / "customize.toml", "flag = true\n")
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            flag_entry = next(f for f in data["toml_fields"] if f["path"] == "flag")
+            self.assertIs(flag_entry["default_value"], True)
+            self.assertIsInstance(flag_entry["default_value"], bool)
+
+    def test_json_toml_nested_table_flattened_to_dotted_key(self) -> None:
+        """Nested TOML [section]\\nkey = 'v' must appear as 'section.key' path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello\n")
+            _write(
+                install / "core" / "my-skill" / "customize.toml",
+                "[workflow]\non_complete = \"done\"\n",
+            )
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            paths = [f["path"] for f in data["toml_fields"]]
+            self.assertIn("workflow.on_complete", paths)
+            self.assertNotIn("workflow", paths)
+
+
+class TestExplainSchemaFixture(unittest.TestCase):
+    """Story 4.3 AC 6: schema fixture is a CI contract."""
+
+    _schema_path = (
+        Path(__file__).resolve().parent.parent.parent
+        / "src" / "scripts" / "bmad_compile" / "schemas" / "explain-v1.json"
+    )
+
+    def _minimal_lock(self, install: Path) -> None:
+        lock_content = (
+            json.dumps(
+                {"bmad_version": "1.0.0", "compiled_at": "1.0.0", "entries": [], "version": 1},
+                sort_keys=True, indent=2,
+            ) + "\n"
+        )
+        _write(install / "_config" / "bmad.lock", lock_content)
+
+    def test_schema_fixture_exists_and_is_valid_json(self) -> None:
+        """explain-v1.json must exist and be parseable JSON."""
+        self.assertTrue(self._schema_path.exists(), f"Schema fixture not found at {self._schema_path}")
+        schema = json.loads(self._schema_path.read_text(encoding="utf-8"))  # must not raise
+        self.assertIsInstance(schema, dict)
+        self.assertIn("required", schema)
+        required = schema["required"]
+        self.assertIn("schema_version", required)
+        self.assertIn("fragments", required)
+        self.assertIn("variables", required)
+        self.assertIn("toml_fields", required)
+
+    def test_json_output_passes_structural_schema_check(self) -> None:
+        """--explain --json output must conform to the v1 structural contract."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp)
+            _write(install / "core" / "my-skill" / "my-skill.template.md", "{{self.tag}}\n")
+            _write(install / "core" / "my-skill" / "customize.toml", 'tag = "v"\n')
+            self._minimal_lock(install)
+            _, stdout, _ = _run_explain_json(install, ["core/my-skill"])
+            data = json.loads(stdout)
+            # schema_version is integer 1
+            self.assertIsInstance(data["schema_version"], int)
+            self.assertEqual(data["schema_version"], 1)
+            # top-level arrays
+            self.assertIsInstance(data["fragments"], list)
+            self.assertIsInstance(data["variables"], list)
+            self.assertIsInstance(data["toml_fields"], list)
+            # fragment items have required fields
+            for frag in data["fragments"]:
+                self.assertIsInstance(frag.get("src"), str)
+                self.assertIsInstance(frag.get("resolved_from"), str)
+                self.assertIsInstance(frag.get("hash"), str)
+            # variable items have required fields
+            for var in data["variables"]:
+                self.assertIsInstance(var.get("name"), str)
+                self.assertIsInstance(var.get("source"), str)
+                self.assertEqual(var.get("resolved_at"), "compile-time")
+                self.assertIsInstance(var.get("value"), str)
+
+
 if __name__ == "__main__":
     unittest.main()

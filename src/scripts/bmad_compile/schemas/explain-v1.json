@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "bmad-compile-explain-v1",
+  "title": "bmad compile --explain --json schema v1",
+  "description": "Frozen v1 contract for `bmad compile --explain --json` output. Epic 6 Story 6.1 mock contracts depend on this file. Before changing any required field name or type, bump schema_version in the output AND update Epic 6 mock fixtures in the same PR. Additive new fields (additionalProperties not restricted at root) are allowed without a version bump.",
+  "type": "object",
+  "required": ["schema_version", "fragments", "variables", "toml_fields"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "fragments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["src", "resolved_from", "hash"],
+        "properties": {
+          "src":           {"type": "string"},
+          "resolved_from": {"type": "string"},
+          "hash":          {"type": "string"},
+          "base_hash":     {"type": "string"},
+          "override_hash": {"type": "string"},
+          "override_path": {"type": "string"},
+          "variant":       {"type": "string"}
+        }
+      }
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "source", "resolved_at", "value"],
+        "properties": {
+          "name":               {"type": "string"},
+          "source":             {"type": "string"},
+          "resolved_at":        {"type": "string", "const": "compile-time"},
+          "value":              {"type": "string"},
+          "contributing_paths": {"type": "array", "items": {"type": "string"}},
+          "source_path":        {"type": "string"},
+          "toml_layer":         {"type": "string"}
+        }
+      }
+    },
+    "toml_fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "default_value", "current_value", "layers"],
+        "properties": {
+          "path":          {"type": "string"},
+          "default_value": {},
+          "current_value": {},
+          "layers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["value", "hash"],
+              "properties": {
+                "value": {},
+                "hash":  {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -24,6 +24,7 @@ This module routes every filesystem/hash/time concern through `io`.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from . import errors, io, lockfile, parser, resolver, toml_merge, variants
@@ -106,6 +107,8 @@ def _compile_core(
     str,                                 # lockfile_path
     io.PurePosixPath,                    # output_path (computed pre-render for explain)
     str | None,                          # target_ide (passed through unchanged from caller)
+    list[tuple[str, dict[str, Any]]],   # _toml_layers (NEW [10]) — [(layer_name, raw_dict)]
+    list[str],                           # _toml_layer_paths (NEW [11]) — parallel paths list
 ]:
     """Story 4.2: shared compile core for compile_skill + explain_skill.
 
@@ -400,6 +403,8 @@ def _compile_core(
         _lockfile_path,
         output_path,
         target_ide,
+        _toml_layers,       # NEW [10] — list[tuple[str, dict[str, Any]]]
+        _toml_layer_paths,  # NEW [11] — list[str]
     )
 
 
@@ -442,6 +447,8 @@ def compile_skill(
         lockfile_path,
         output_path,
         tid,
+        _,  # toml_layers — unused in compile mode
+        _,  # toml_layer_paths — unused in compile mode
     ) = _compile_core(
         skill_dir, install_dir, target_ide,
         lockfile_root=lockfile_root,
@@ -478,14 +485,14 @@ def explain_skill(
     resolver.VariableScope,
     resolver.CompileCache,
     io.PurePosixPath,
+    list[tuple[str, str, dict[str, Any]]],  # toml_layers_data: [(layer_name, layer_path, raw_dict)]
 ]:
-    """Story 4.2: like `compile_skill` but never writes to disk.
+    """Story 4.2/4.3: like `compile_skill` but never writes to disk.
 
     Returns the explain-mode flat node stream (carries `FragmentBoundary`
     and `ExplainVar` sentinels), the dep tree, the variable scope, the
-    fragment cache (with the root template seeded), and the scenario root.
-    Caller (`_render_explain`) walks `flat_nodes` to synthesize the
-    Markdown+XML provenance view.
+    fragment cache (with the root template seeded), the scenario root, and
+    the TOML layer data (Story 4.3) for `--explain --json` toml_fields[].
     """
     (
         flat_nodes,
@@ -498,6 +505,8 @@ def explain_skill(
         _lockfile_path,
         _output_path,
         _tid,
+        _toml_layers,
+        _toml_layer_paths,
     ) = _compile_core(
         skill_dir, install_dir, target_ide,
         lockfile_root=lockfile_root,
@@ -505,7 +514,15 @@ def explain_skill(
         install_flags=install_flags,
         explain_mode=True,
     )
-    return flat_nodes, dep_tree, var_scope, cache, scenario_root
+    # Zip the parallel lists into 3-tuples: (layer_name, layer_path, raw_dict).
+    # _toml_layers entries are 2-tuples (name, dict); _toml_layer_paths is a
+    # parallel list of file paths. Zip produces ((name, d), path) pairs which
+    # we repack as (name, path, d) for the caller.
+    toml_layers_data: list[tuple[str, str, dict[str, Any]]] = [
+        (name, path, d)
+        for (name, d), path in zip(_toml_layers, _toml_layer_paths)
+    ]
+    return flat_nodes, dep_tree, var_scope, cache, scenario_root, toml_layers_data
 
 
 # Story 4.2 R2 P1: precompiled regex matching XML 1.0-illegal control
@@ -681,3 +698,153 @@ def _render_explain(
         # are silently dropped; this matches `_render`'s defensive posture.
     parts.append("\n</Include>\n")
     return "".join(parts)
+
+
+def _render_explain_tree(
+    flat: list[Any],
+    dep_tree: list[resolver.ResolvedFragment],
+    scenario_root: io.PurePosixPath,  # reserved for path normalisation if needed in future
+) -> str:
+    """Story 4.3: walk explain-mode flat node stream and emit fragment tree.
+
+    Root fragment at depth 0. FragmentBoundary start/end sentinels drive
+    depth tracking. No content (Text, VarRuntime, ExplainVar) is emitted.
+    Format per line: '{indent}{src}  [{resolved_from}]'
+    """
+    _ = scenario_root  # unused in v1; reserved for path normalisation
+    parts: list[str] = []
+    root = dep_tree[0]
+    parts.append(f"{root.src}  [{root.resolved_from}]\n")
+    depth = 0
+    for node in flat:
+        if isinstance(node, resolver.FragmentBoundary):
+            if node.is_start:
+                depth += 1
+                parts.append(
+                    f"{'  ' * depth}{node.fragment.src}  [{node.fragment.resolved_from}]\n"
+                )
+            else:
+                depth -= 1
+        # Text, VarRuntime, ExplainVar: silently skip
+    return "".join(parts)
+
+
+def _flatten_toml_for_json(d: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Flatten a TOML dict to dotted-key → raw-value mapping.
+
+    Unlike resolver._flatten_toml, this function does NOT raise on list
+    values — it records them as-is. Used exclusively by _render_explain_json
+    to enumerate all toml_fields[] entries including array-type fields.
+    """
+    result: dict[str, Any] = {}
+    for k, v in d.items():
+        full_key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            result.update(_flatten_toml_for_json(v, full_key))
+        else:
+            result[full_key] = v  # scalar or list — recorded as-is
+    return result
+
+
+def _render_explain_json(
+    flat: list[Any],
+    dep_tree: list[resolver.ResolvedFragment],
+    var_scope: resolver.VariableScope,
+    cache: resolver.CompileCache,
+    scenario_root: io.PurePosixPath,
+    toml_layers_data: list[tuple[str, str, dict[str, Any]]],
+) -> str:
+    """Story 4.3: walk explain-mode data and emit structured JSON output.
+
+    Produces a JSON object with schema_version, fragments[], variables[], and
+    toml_fields[]. All keys are sorted for twice-run determinism.
+    """
+    _ = var_scope  # currently unused; signature preserved for symmetry with _render_explain
+
+    # --- fragments[] — DFS pre-order (dep_tree is already in this order) ---
+    fragments: list[dict[str, Any]] = []
+    for frag in dep_tree:
+        src_text = cache.get_source((frag.resolved_path, frag.resolved_from))
+        h = io.hash_text(src_text)
+        entry: dict[str, Any] = {
+            "src": frag.src,
+            "resolved_from": frag.resolved_from,
+            "hash": h,
+        }
+        if frag.resolved_from in ("user-module-fragment", "user-override", "user-full-skill"):
+            if frag.base_path is not None and io.is_file(str(frag.base_path)):
+                base_src = io.read_template(str(frag.base_path))
+                entry["base_hash"] = io.hash_text(base_src)
+            entry["override_hash"] = h
+            entry["override_path"] = lockfile._normalize_path(
+                str(frag.resolved_path), scenario_root
+            )
+        if frag.resolved_from == "variant":
+            m = variants._IDE_SUFFIX_RE.match(frag.resolved_path.name)
+            if m:
+                entry["variant"] = m.group("ide")
+        fragments.append(entry)
+
+    # --- variables[] — document order (ExplainVar nodes in flat) ---
+    variables: list[dict[str, Any]] = []
+    for node in flat:
+        if isinstance(node, resolver.ExplainVar):
+            rv = node.rv
+            var_entry: dict[str, Any] = {
+                "name": node.name,
+                "source": rv.source,
+                "resolved_at": "compile-time",
+                "value": node.value,
+            }
+            if rv.contributing_paths is not None:
+                var_entry["contributing_paths"] = sorted(
+                    lockfile._normalize_path(p, scenario_root)
+                    for p in rv.contributing_paths
+                )
+            if rv.source_path is not None:
+                var_entry["source_path"] = lockfile._normalize_path(
+                    rv.source_path, scenario_root
+                )
+            if rv.toml_layer is not None:
+                var_entry["toml_layer"] = rv.toml_layer
+            variables.append(var_entry)
+
+    # --- toml_fields[] — all dotted paths across all TOML layers ---
+    toml_fields: list[dict[str, Any]] = []
+    if toml_layers_data:
+        merged_all = toml_merge.merge_layers(*[d for _, _, d in toml_layers_data])
+    else:
+        merged_all = {}
+    merged_flat = _flatten_toml_for_json(merged_all)
+    layer_flats: dict[str, dict[str, Any]] = {
+        name: _flatten_toml_for_json(d) for name, _, d in toml_layers_data
+    }
+    all_paths: set[str] = set(merged_flat)
+    for lf in layer_flats.values():
+        all_paths.update(lf.keys())
+    for path in sorted(all_paths):
+        current_value = merged_flat.get(path)
+        default_value: Any = None
+        layers_dict: dict[str, Any] = {}
+        for layer_name, _layer_path, _ in toml_layers_data:
+            lf = layer_flats.get(layer_name, {})
+            if path in lf:
+                v = lf[path]
+                if layer_name == "defaults":
+                    default_value = v
+                hash_v = io.hash_text(json.dumps(v, sort_keys=True))
+                layers_dict[layer_name] = {"hash": hash_v, "value": v}
+        toml_fields.append({
+            "current_value": current_value,
+            "default_value": default_value,
+            "layers": layers_dict,
+            "path": path,
+        })
+
+    result = {
+        "fragments": fragments,
+        "schema_version": 1,
+        "toml_fields": toml_fields,
+        "variables": variables,
+    }
+    return json.dumps(result, sort_keys=True, indent=2) + "\n"
