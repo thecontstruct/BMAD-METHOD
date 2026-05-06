@@ -88,3 +88,10 @@ _bmad/custom/*.user.toml
 website/.astro/
 website/dist/
 build/
+
+# Story 5.5b advisory-lock artifacts. AC-2's `io.acquire_lock` creates
+# `.bmad.lock.lock` files siblings of `bmad.lock` to serialize the
+# lockfile RMW window. fcntl/msvcrt lock semantics don't unlink on
+# release; test fixtures accumulate these files. Underlying test-cleanup
+# hygiene is tracked as a deferred-work entry (Story 6.x test-polish).
+**/.bmad.lock.lock
