@@ -96,6 +96,7 @@ def _compile_core(
     override_root: io.PathLike | None,
     install_flags: dict[str, str] | None,
     explain_mode: bool = False,
+    toml_warning_sink: list[dict[str, Any]] | None = None,
 ) -> tuple[
     list[Any],                          # flat_nodes (post-resolve, possibly with explain sentinels)
     list[resolver.ResolvedFragment],    # dep_tree
@@ -352,6 +353,11 @@ def _compile_core(
         # `_glob_expansions` records get created with `matches=()` and
         # `match_set_hash=None` — no filesystem access.
         scenario_root=str(scenario_root),
+        # Story 5.5b AC-1: thread the per-skill warning sink to
+        # `_flatten_toml`. When `toml_warning_sink` is None here, the resolver
+        # allocates an internal list — warnings remain accessible via
+        # `var_scope._toml_warnings` for any post-build consumer.
+        toml_warning_sink=toml_warning_sink,
     )
 
     context = resolver.ResolveContext(
@@ -421,6 +427,7 @@ def compile_skill(
     lockfile_root: io.PathLike | None = None,
     override_root: io.PathLike | None = None,
     install_flags: dict[str, str] | None = None,
+    toml_warning_sink: list[dict[str, Any]] | None = None,
 ) -> None:
     """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
 
@@ -440,6 +447,13 @@ def compile_skill(
     Story 4.2: body extracted into `_compile_core`; this wrapper renders the
     output, writes SKILL.md, and writes the lockfile entry. `_render` is the
     only renderer for normal compiles; explain-mode never enters this path.
+
+    Story 5.5b AC-1: `toml_warning_sink` is a per-skill list that
+    `_flatten_toml` appends `TOML_EMPTY_ARRAY_SKIPPED` warning dicts to.
+    `compile.py` reads it after the call and emits warnings via NDJSON
+    (install/batch) or stderr (per-skill). When None (default), the resolver
+    still allocates an internal sink — warnings stay reachable via
+    `var_scope._toml_warnings` but the engine has no path to surface them.
     """
     (
         flat_nodes,
@@ -460,6 +474,7 @@ def compile_skill(
         override_root=override_root,
         install_flags=install_flags,
         explain_mode=False,
+        toml_warning_sink=toml_warning_sink,
     )
     rendered = _render(flat_nodes)
     io.write_text(str(output_path), rendered)

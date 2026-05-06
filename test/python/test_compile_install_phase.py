@@ -2206,16 +2206,27 @@ class TestGlobExpansion(unittest.TestCase):
             self.assertEqual(ge.matches, ())
             self.assertIsNone(ge.match_set_hash)
 
-    # ---------- Task 6.16: empty list still raises ----------
+    # ---------- Task 6.16: empty list emits warning + skips (Story 5.5b AC-1) ----------
 
-    def test_empty_list_still_raises(self) -> None:
+    def test_empty_list_emits_warning_and_skips(self) -> None:
+        # Note: Story 4.4 AC 8 narrowed by Story 5.5b AC-1 — empty lists
+        # now emit TOML_EMPTY_ARRAY_SKIPPED warning instead of raising
+        # UnknownDirectiveError. See 5.5b spec AC-1.
         from src.scripts.bmad_compile.resolver import VariableScope
-        with self.assertRaises(errors.UnknownDirectiveError):
-            VariableScope.build(
-                toml_layers=[("defaults", {"workflow": {"steps": []}})],
-                toml_layer_paths=["/fake/customize.toml"],
-                scenario_root="/fake",
-            )
+        vs = VariableScope.build(
+            toml_layers=[("defaults", {"workflow": {"steps": []}})],
+            toml_layer_paths=["/fake/customize.toml"],
+            scenario_root="/fake",
+        )
+        # (a) build() does not raise
+        # (b) exactly one TOML_EMPTY_ARRAY_SKIPPED warning collected
+        self.assertEqual(len(vs._toml_warnings), 1)
+        w = vs._toml_warnings[0]
+        self.assertEqual(w["code"], "TOML_EMPTY_ARRAY_SKIPPED")
+        self.assertEqual(w["key"], "workflow.steps")
+        self.assertEqual(w["path"], "/fake/customize.toml")
+        # (c) no self.workflow.steps key in the resolved scope
+        self.assertNotIn("self.workflow.steps", vs._table)
 
     # ---------- R1 patches: case-insensitive file:, runtime-var regex, dedupe, multi-layer ----------
 

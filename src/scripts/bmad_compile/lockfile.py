@@ -46,6 +46,7 @@ Path manipulation via PurePosixPath re-exported from io.
 from __future__ import annotations
 
 import json
+import sys  # pragma: allow-raw-io  (stderr write for AC-5 defensive warning)
 from typing import Any
 
 from . import errors, io, resolver
@@ -60,6 +61,13 @@ def read_lockfile_version(path: str) -> int | None:
 
     Returns ``0`` for malformed/unreadable content (treated as no-version,
     allowing overwrite). Any non-dict top level (list, scalar) also returns 0.
+
+    Story 5.5b AC-3: type-strict on the `version` field. Pre-5.5b accepted
+    `version: 1.9` via `int()` truncation \u2014 silent data corruption. Post-5.5b
+    rejects floats, bools, strings, lists, dicts, and negative integers with
+    `LockfileVersionMismatchError`. Migration: re-run `bmad install` to
+    regenerate the lockfile. Missing `version` field still returns 0
+    (graceful path preserved for fresh installs).
     """
     if not io.is_file(path):
         return None
@@ -70,11 +78,87 @@ def read_lockfile_version(path: str) -> int | None:
         content = content[1:]
     try:
         data = json.loads(content)
-        if not isinstance(data, dict):
-            return 0
-        return int(data.get("version", 0))
-    except (json.JSONDecodeError, ValueError, TypeError):
+    except (json.JSONDecodeError, ValueError):
         return 0
+    if not isinstance(data, dict):
+        return 0
+    if "version" not in data:
+        return 0
+    v: Any = data["version"]
+    # bool is a subclass of int \u2014 check first to reject `True`/`False` as
+    # non-integer (per AC-3 strictness). Same pattern as toml_merge AC-10.
+    if isinstance(v, bool):
+        raise errors.LockfileVersionMismatchError(
+            f"version must be a non-negative integer; got bool: {v}",
+            file=path,
+            hint=(
+                "lockfile `version` field must be a non-negative integer; "
+                "bool is rejected to prevent silent True\u21921 / False\u21920 coercion. "
+                "Re-run 'bmad install' to regenerate cleanly."
+            ),
+        )
+    if not isinstance(v, int):
+        raise errors.LockfileVersionMismatchError(
+            f"version must be a non-negative integer; "
+            f"got {type(v).__name__}: {v!r}",
+            file=path,
+            hint=(
+                "lockfile `version` field must be a non-negative integer; "
+                "non-integer numerics (e.g. 1.9), strings, lists, and dicts "
+                "are rejected. Re-run 'bmad install' to regenerate cleanly."
+            ),
+        )
+    if v < 0:
+        raise errors.LockfileVersionMismatchError(
+            "negative version is not valid",
+            file=path,
+            hint=(
+                "lockfile `version` field must be a non-negative integer. "
+                "Re-run 'bmad install' to regenerate cleanly."
+            ),
+        )
+    return v
+
+
+def _lockfile_lock_path(install_dir_or_lockfile_path: PurePosixPath) -> str:
+    """Story 5.5b AC-2: sibling-of-lockfile path for the advisory lock.
+
+    Accepts either an install_dir (canonical form: lock file lands at
+    ``<install_dir>/_config/.bmad.lock.lock``) OR an already-resolved
+    lockfile path (test-fixture form: lock file lands as a sibling at
+    ``<dir>/.bmad.lock.lock``). Detection: if the path's basename is
+    ``bmad.lock``, treat it as a lockfile path and use its parent as the
+    sibling directory; otherwise treat the input as an install_dir.
+
+    R1 P2 (defensive): if the path's basename is already
+    ``.bmad.lock.lock`` (the lock file itself), raise ValueError —
+    callers should never pass the lock file path as input. Without this
+    guard, the function would treat ``<x>/.bmad.lock.lock`` as an
+    install_dir and produce
+    ``<x>/.bmad.lock.lock/_config/.bmad.lock.lock`` — a path that lives
+    inside the lock file, recursing onto a non-existent subdirectory.
+    Two processes — one passing the install_dir, the other passing the
+    lock file path itself — would mutex at different paths and the
+    serialization would silently fail.
+
+    Same directory as ``bmad.lock`` so cross-filesystem ``os.replace``
+    constraints don't apply. Hidden via leading dot. The ``.lock``
+    suffix is the lock-on-lock convention (the file being locked is
+    ``bmad.lock``).
+    """
+    posix = io.to_posix(install_dir_or_lockfile_path)
+    if posix.name == ".bmad.lock.lock":
+        # R1 P2: caller passed the lock file itself — programmer error.
+        raise ValueError(
+            f"_lockfile_lock_path: input is the lock file itself "
+            f"({posix}); pass the install_dir or the lockfile (bmad.lock) "
+            "path instead"
+        )
+    if posix.name == "bmad.lock":
+        # Lockfile path was passed directly — sibling lock in same dir.
+        return str(posix.parent / ".bmad.lock.lock")
+    # Install-dir form — canonical _config/.bmad.lock.lock subpath.
+    return str(posix / "_config" / ".bmad.lock.lock")
 
 
 def _normalize_path(absolute_path: str, scenario_root: PurePosixPath) -> str:
@@ -101,10 +185,22 @@ def _build_skill_entry(
     compiled_hash = io.hash_text(compiled_text)
 
     fragments: list[dict[str, Any]] = []
-    for entry in dep_tree[1:]:
+    for _i, entry in enumerate(dep_tree[1:], start=1):
         if entry is None:
             continue
-        frag: resolver.ResolvedFragment = entry
+        # Story 5.5b AC-5: defensive guard. The resolver's contract guarantees
+        # `dep_tree[i]: ResolvedFragment | None`, but a future regression
+        # where a caller manually constructs a malformed dep_tree would
+        # otherwise crash on the `frag.resolved_path` attribute access.
+        # Skip + warn to stderr; matches the "kind:warning" defensive
+        # posture used elsewhere in compile.py.
+        if not isinstance(entry, resolver.ResolvedFragment):
+            sys.stderr.write(  # pragma: allow-raw-io
+                f"warning: non-ResolvedFragment in dep_tree at index {_i} "
+                f"(got {type(entry).__name__}); skipping\n"
+            )
+            continue
+        frag = entry
         frag_source = cache.get_source((frag.resolved_path, frag.resolved_from))
         frag_hash = io.hash_text(frag_source)
         frag_path = _normalize_path(str(frag.resolved_path), scenario_root)
@@ -131,6 +227,16 @@ def _build_skill_entry(
     for name, rv in sorted(var_scope._table.items()):
         if rv.source == "local-scope":
             continue
+        # Story 5.5b AC-5: ResolvedValue.value_hash is contractually set in
+        # practice (resolver always populates it). A None value here indicates
+        # a resolver bug and would otherwise serialize as `"value_hash": null`
+        # in the lockfile JSON — surfacing only at downstream cache-coherence
+        # check time. Fail fast with the offending variable named.
+        if rv.value_hash is None:
+            raise RuntimeError(
+                f"internal: ResolvedValue.value_hash is None for variable "
+                f"{name!r}"
+            )
         var_entry: dict[str, Any] = {
             "name": name,
             "source": rv.source,
@@ -184,8 +290,70 @@ def write_skill_entry(
     var_scope: resolver.VariableScope,
     target_ide: str | None,
     cache: resolver.CompileCache,
+    lock_timeout_seconds: float = 300.0,
 ) -> None:
-    """Write (or update) the skill entry in the lockfile at ``lockfile_path``."""
+    """Write (or update) the skill entry in the lockfile at ``lockfile_path``.
+
+    Story 5.5b AC-2: serializes concurrent invocations via Story 5.5a's
+    advisory lock primitives. The lock file is a sibling of
+    ``lockfile_path`` (``<dir>/.bmad.lock.lock``); the RMW window
+    (read → mutate ``entries[]`` → ``io.write_text``) holds the lock so
+    two processes targeting the same lockfile cannot lose-write.
+    ``lock_timeout_seconds`` defaults to 300s (matching
+    ``lazy_compile.py``'s ``--lock-timeout-seconds`` default). On timeout,
+    ``LockTimeoutError`` propagates without modifying the lockfile.
+    """
+    # Derive the lock-file path from the lockfile_path itself (sibling
+    # in the same directory). _lockfile_lock_path detects the basename
+    # form and chooses the right placement.
+    _lockfile_posix = io.to_posix(lockfile_path)
+    _lock_path = _lockfile_lock_path(_lockfile_posix)
+    # Ensure the lockfile's parent dir exists so the lock fd can be
+    # created. The lockfile itself may not exist yet (first compile),
+    # but its directory must.
+    _lock_dir = _lockfile_posix.parent
+    if not io.is_dir(str(_lock_dir)):
+        from pathlib import Path as _Path  # pragma: allow-raw-io
+        _Path(str(_lock_dir)).mkdir(parents=True, exist_ok=True)  # pragma: allow-raw-io
+
+    _lock_fd = io.acquire_lock(_lock_path, timeout_seconds=lock_timeout_seconds)
+    try:
+        _do_write_skill_entry(
+            lockfile_path,
+            scenario_root,
+            skill_basename,
+            source_text=source_text,
+            compiled_text=compiled_text,
+            dep_tree=dep_tree,
+            var_scope=var_scope,
+            target_ide=target_ide,
+            cache=cache,
+        )
+    finally:
+        # io.release_lock is documented no-throw (swallows OSError per
+        # Story 5.5a), but defensive try/except OSError ensures an
+        # exception inside the RMW body is not masked by a release-side
+        # fault. AC-2: "if release_lock ever raises, wrap ... so the
+        # in-flight write-window exception is not masked".
+        try:
+            io.release_lock(_lock_fd)
+        except OSError:
+            pass
+
+
+def _do_write_skill_entry(
+    lockfile_path: str,
+    scenario_root: PurePosixPath,
+    skill_basename: str,
+    *,
+    source_text: str,
+    compiled_text: str,
+    dep_tree: list[Any],
+    var_scope: resolver.VariableScope,
+    target_ide: str | None,
+    cache: resolver.CompileCache,
+) -> None:
+    """Internal: the original RMW body, now called inside the AC-2 lock."""
     existing: dict[str, Any] = {}
     if io.is_file(lockfile_path):
         try:
@@ -274,7 +442,13 @@ def write_skill_entry(
     # Defensive: a corrupted lockfile with entries=null/int/str dict-parses
     # successfully but would TypeError on list(...) (None) or silently
     # explode a string into a per-character list. Treat as fresh.
-    entries: list[Any] = list(raw_entries) if isinstance(raw_entries, list) else []
+    raw_list: list[Any] = list(raw_entries) if isinstance(raw_entries, list) else []
+    # Story 5.5b AC-4: silently drop non-dict items on write. The existing
+    # `isinstance(entry, dict)` check below is preserved for skill matching,
+    # but the post-write `entries[]` array is rebuilt from filtered entries
+    # only — non-dict corruption (null, int, str, list at the entry level)
+    # is opportunistically removed.
+    entries: list[Any] = [e for e in raw_list if isinstance(e, dict)]
     updated = False
     for i, entry in enumerate(entries):
         if isinstance(entry, dict) and entry.get("skill") == skill_basename:

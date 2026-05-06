@@ -115,6 +115,17 @@ def _compile_one_skill(
             ),
         })
 
+    # Story 5.5b AC-1: per-skill `TOML_EMPTY_ARRAY_SKIPPED` warning
+    # collector. The engine appends one entry per empty TOML array
+    # encountered during VariableScope.build(). NDJSON warning events
+    # MUST be emitted BEFORE the per-skill kind:"skill"/"error" event so
+    # consumers can correlate the warning with the skill it came from.
+    # R1 P1: collect warnings BEFORE the engine call resolves outcome,
+    # then emit via the deterministic order below regardless of which
+    # exception path the engine took. Warnings precede the outcome
+    # event in the events[] list.
+    toml_warnings: list[dict[str, Any]] = []
+    outcome_event: dict[str, Any] | None = None
     try:
         engine.compile_skill(
             dirpath,
@@ -122,9 +133,10 @@ def _compile_one_skill(
             target_ide=None,
             lockfile_root=install_dir,
             override_root=install_dir / "custom",
+            toml_warning_sink=toml_warnings,
         )
         skill_md = install_dir / module / dir_name / "SKILL.md"
-        skill_event: dict[str, Any] = {
+        outcome_event = {
             "schema_version": 1,
             "kind": "skill",
             "skill": skill_id,
@@ -134,10 +146,9 @@ def _compile_one_skill(
         }
         if hash_skip:
             # --batch mode adds the per-skill `compiled` boolean (AC-3).
-            skill_event["compiled"] = True
-        events.append(skill_event)
+            outcome_event["compiled"] = True
     except CompilerError as exc:
-        events.append({
+        outcome_event = {
             "schema_version": 1,
             "kind": "error",
             "skill": skill_id,
@@ -148,9 +159,9 @@ def _compile_one_skill(
             "col": exc.col,
             "message": exc.desc,
             "hint": exc.hint,
-        })
+        }
     except Exception as exc:  # noqa: BLE001
-        events.append({
+        outcome_event = {
             "schema_version": 1,
             "kind": "error",
             "skill": skill_id,
@@ -161,7 +172,22 @@ def _compile_one_skill(
             "col": None,
             "message": f"{type(exc).__name__}: {exc}",
             "hint": None,
+        }
+    # R1 P1: warnings emit BEFORE the outcome event, regardless of whether
+    # the engine succeeded or raised. Without this ordering, warnings
+    # collected in `_flatten_toml` before a downstream resolver/render
+    # error would be silently dropped.
+    for w in toml_warnings:
+        events.append({
+            "schema_version": 1,
+            "kind": "warning",
+            "code": w.get("code", "TOML_EMPTY_ARRAY_SKIPPED"),
+            "skill": skill_id,
+            "key": w.get("key"),
+            "path": w.get("path"),
         })
+    if outcome_event is not None:
+        events.append(outcome_event)
     return events
 
 
@@ -779,26 +805,48 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write(f"internal error: {e}\n")
                 return 1
         # Normal compile via positional
+        # Story 5.5b AC-1 + R1 P1: per-skill stderr warning emission. The
+        # warning sink is populated by `_flatten_toml` during the build,
+        # which runs BEFORE the resolver/render phases that may raise.
+        # Emit via try/finally so diagnostics are preserved even when the
+        # subsequent compile fails — without this, R1 flagged that the
+        # warnings would be silently dropped on any CompilerError /
+        # RuntimeError / OSError exit path.
+        toml_warnings_pos: list[dict[str, Any]] = []
         try:
-            engine.compile_skill(
-                skill_path, install_path, target_ide=target_ide,
-                lockfile_root=install_path,
-                override_root=install_path / "custom",
-                install_flags=install_flags or None,
-            )
-        except CompilerError as e:
-            sys.stderr.write(e.format() + "\n")
-            return 2 if isinstance(e, LockfileVersionMismatchError) else 1
-        except FileNotFoundError as e:
-            sys.stderr.write(f"file not found: {e}\n")
-            return 1
-        except (UnicodeDecodeError, PermissionError, IsADirectoryError, OSError) as e:
-            sys.stderr.write(f"read error: {type(e).__name__}: {e}\n")
-            return 1
-        except RuntimeError as e:
-            sys.stderr.write(f"internal error: {e}\n")
-            return 1
-        return 0
+            try:
+                engine.compile_skill(
+                    skill_path, install_path, target_ide=target_ide,
+                    lockfile_root=install_path,
+                    override_root=install_path / "custom",
+                    install_flags=install_flags or None,
+                    toml_warning_sink=toml_warnings_pos,
+                )
+            except CompilerError as e:
+                sys.stderr.write(e.format() + "\n")
+                return 2 if isinstance(e, LockfileVersionMismatchError) else 1
+            except FileNotFoundError as e:
+                sys.stderr.write(f"file not found: {e}\n")
+                return 1
+            except (UnicodeDecodeError, PermissionError, IsADirectoryError, OSError) as e:
+                sys.stderr.write(f"read error: {type(e).__name__}: {e}\n")
+                return 1
+            except (RuntimeError, ValueError) as e:
+                # Story 5.5b R2 P1: catch ValueError too. R1 P2 added a
+                # defensive `raise ValueError(...)` in `_lockfile_lock_path`
+                # for the lock-file-as-input programmer-error case; without
+                # this clause, the exception would escape main() as a raw
+                # traceback rather than cleanly exit 1.
+                sys.stderr.write(f"internal error: {e}\n")
+                return 1
+            return 0
+        finally:
+            for w in toml_warnings_pos:
+                sys.stderr.write(
+                    f"warning: {w.get('code', 'TOML_EMPTY_ARRAY_SKIPPED')}: "
+                    f"empty array '{w.get('key')}' in {w.get('path')} "
+                    "was skipped during compile (no scalar produced)\n"
+                )
 
     # Per-skill mode (unchanged)
     if not args.skill:
@@ -842,24 +890,39 @@ def main(argv: list[str] | None = None) -> int:
             "receive fragment-level upgrades from the base module\n"
         )
 
+    # Story 5.5b AC-1 + R1 P1: per-skill stderr warning emission for
+    # --skill mode. Emit via try/finally so warnings collected before a
+    # mid-build exception are still surfaced to the user.
+    toml_warnings_skill: list[dict[str, Any]] = []
     try:
-        engine.compile_skill(
-            skill_path, install_path, target_ide=target_ide,
-            install_flags=install_flags or None,
-        )
-    except CompilerError as e:
-        sys.stderr.write(e.format() + "\n")
-        return 2 if isinstance(e, LockfileVersionMismatchError) else 1
-    except FileNotFoundError as e:
-        sys.stderr.write(f"file not found: {e}\n")
-        return 1
-    except (UnicodeDecodeError, PermissionError, IsADirectoryError, OSError) as e:
-        sys.stderr.write(f"read error: {type(e).__name__}: {e}\n")
-        return 1
-    except RuntimeError as e:
-        sys.stderr.write(f"internal error: {e}\n")
-        return 1
-    return 0
+        try:
+            engine.compile_skill(
+                skill_path, install_path, target_ide=target_ide,
+                install_flags=install_flags or None,
+                toml_warning_sink=toml_warnings_skill,
+            )
+        except CompilerError as e:
+            sys.stderr.write(e.format() + "\n")
+            return 2 if isinstance(e, LockfileVersionMismatchError) else 1
+        except FileNotFoundError as e:
+            sys.stderr.write(f"file not found: {e}\n")
+            return 1
+        except (UnicodeDecodeError, PermissionError, IsADirectoryError, OSError) as e:
+            sys.stderr.write(f"read error: {type(e).__name__}: {e}\n")
+            return 1
+        except (RuntimeError, ValueError) as e:
+            # Story 5.5b R2 P1: see positional path for rationale (R1 P2
+            # `_lockfile_lock_path` defensive raise).
+            sys.stderr.write(f"internal error: {e}\n")
+            return 1
+        return 0
+    finally:
+        for w in toml_warnings_skill:
+            sys.stderr.write(
+                f"warning: {w.get('code', 'TOML_EMPTY_ARRAY_SKIPPED')}: "
+                f"empty array '{w.get('key')}' in {w.get('path')} "
+                "was skipped during compile (no scalar produced)\n"
+            )
 
 
 if __name__ == "__main__":

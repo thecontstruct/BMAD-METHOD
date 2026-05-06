@@ -11,18 +11,12 @@
 
 # Steps to run before the standard activation (config load, greet).
 # Overrides append. Use for pre-flight loads, compliance checks, etc.
-#
-# NOTE (Story 5.6 A1 workaround, 2026-05-05): the `activation_steps_prepend = []`
-# and `activation_steps_append = []` keys are intentionally OMITTED from this
-# customize.toml until Story 5.5b lands `_flatten_toml` empty-array handling.
-# The current engine (`resolver.py:_flatten_toml`) raises UNKNOWN_DIRECTIVE on
-# empty `[workflow]` arrays without a `file:` prefix, which would crash
-# `lazy_compile.py` invocations of this shim. The runtime template still
-# references `{workflow.activation_steps_prepend}` / `{workflow.activation_steps_append}`
-# as VarRuntime tokens — the LLM at activation-time treats "no key" as "no
-# steps to run", which is identical to "empty array" semantics. Restore both
-# keys with empty-array defaults once the engine fix ships per Story 5.5b
-# (deferred-work.md `[engine, Story 5.5b — empty-array workflow keys]`).
+
+activation_steps_prepend = []
+
+# Steps to run after the standard activation. Overrides append.
+
+activation_steps_append = []
 
 # Persistent facts the workflow keeps in mind for the whole run
 # (standards, compliance constraints, stylistic guardrails).

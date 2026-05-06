@@ -48,12 +48,32 @@ Pathlib boundary: imports `PurePosixPath` via the `io.py` re-export.
 
 from __future__ import annotations
 
+import os.path  # pragma: allow-raw-io  (AC-12 lexical canonicalization only)
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Union
 
 from . import errors, io, parser, toml_merge, variants
 from .io import PurePosixPath
+
+
+def _canonicalize_for_cycle(path: PurePosixPath) -> str:
+    """Story 5.5b AC-12: lexical-only canonicalization for cycle detection.
+
+    Returns ``os.path.normcase(os.path.abspath(str(path)))``. This is a
+    PURE lexical operation — no filesystem access — chosen for determinism
+    (matches the Story 1.2 R5 ``commonpath`` pattern used by
+    ``ensure_within_root``). ``os.path.normcase`` is identity on
+    Linux/POSIX (no native case folding) and lower-cases on Windows. On
+    macOS the case-insensitivity is a filesystem-level concern that
+    ``os.path.normcase`` does not handle directly — we accept the
+    Linux/macOS gap as a deferred concern (see deferred-work). The
+    primary defect this closes is Windows case-variant cycle escape:
+    ``Fragments/a.template.md`` followed by ``fragments/A.template.md``
+    on the same filesystem produced different ``PurePosixPath`` strings
+    and the cycle slipped past detection.
+    """
+    return os.path.normcase(os.path.abspath(str(path)))  # pragma: allow-raw-io
 
 # Story 4.4 R1 P2: a "runtime variable reference" inside a `file:` glob
 # pattern is a `{name}` placeholder — a paired pair of braces with content
@@ -276,6 +296,7 @@ def _flatten_toml(
     layer_paths: dict[str, str] | None = None,  # layer_name → absolute_path
     list_priority_map: dict[str, str] | None = None,  # Story 4.2: array-error file attribution
     glob_sink: list[tuple[str, list[Any], str, str | None]] | None = None,  # Story 4.4  # pragma: allow-raw-io
+    warning_sink: list[dict[str, Any]] | None = None,  # Story 5.5b AC-1
 ) -> None:
     """Recursively flatten a merged TOML dict into `self.<dotted.path>` entries.
 
@@ -283,11 +304,15 @@ def _flatten_toml(
     array values (`persistent_facts = ["file:docs/*.md"]`). When supplied
     and the list is non-empty AND every item is a `file:`-prefixed string,
     append `(full_key, list(v), winning_layer, layer_path)` to `glob_sink`  # pragma: allow-raw-io
-    and continue. When `glob_sink` is `None` OR the list is empty OR any  # pragma: allow-raw-io
-    item lacks the `file:` prefix, the historical
-    `UnknownDirectiveError("...resolves to a TOML array...")` raise still
-    fires — preserving AC 8 (mixed lists, empty lists, non-`file:` lists
-    all still raise).
+    and continue.
+
+    Story 5.5b AC-1: `warning_sink` collects structured warnings for empty
+    arrays (`persistent_facts = []`) — the AC 8 contract from Story 4.4 is
+    NARROWED here. Empty arrays now emit a `TOML_EMPTY_ARRAY_SKIPPED` entry
+    in `warning_sink` and are skipped (no `self.*` entry produced) instead
+    of raising. Non-empty non-`file:` lists STILL raise (`["literal"]`,
+    `[1, 2, 3]`, mixed-type — all raise). When `warning_sink` is None,
+    warnings are silently dropped (legacy contract for non-engine callers).
     """
     _paths = layer_paths or {}
     _list_priority = list_priority_map or {}
@@ -296,12 +321,15 @@ def _flatten_toml(
         if isinstance(v, dict):
             # Story 4.4: forward `glob_sink` so `file:` arrays nested under
             # TOML table sections (e.g. `[workflow] persistent_facts = [...]`)
-            # are intercepted too. Without this forward, the latent-bug fix
-            # for skills like `bmad-create-story` (which puts persistent_facts
-            # under `[workflow]`) silently fails.
+            # are intercepted too. Story 5.5b AC-1: also forward
+            # `warning_sink` so empty arrays under any nested table emit
+            # the same `TOML_EMPTY_ARRAY_SKIPPED` warning as root-level
+            # ones — without forwarding, `[workflow] activation_steps = []`
+            # would still raise (the very latent-bug fix that AC-1 closes).
             _flatten_toml(
                 v, dotted, layer_name, priority_map, result, _paths,
                 list_priority_map, glob_sink=glob_sink,  # pragma: allow-raw-io
+                warning_sink=warning_sink,
             )
         elif isinstance(v, list):
             full_key = f"self.{dotted}"
@@ -313,13 +341,26 @@ def _flatten_toml(
                 _list_priority.get(full_key)
                 or priority_map.get(full_key, layer_name)
             )
+            # (AC 8 narrowed by 5.5b AC-1: empty list emits
+            # TOML_EMPTY_ARRAY_SKIPPED warning and is skipped; non-empty
+            # non-file: lists still raise.)
+            if not v:
+                # Story 5.5b AC-1: empty arrays (e.g. `persistent_facts = []`)
+                # emit a structured warning and skip — preserving structural
+                # consistency with upstream BMAD's `[workflow]` schema (keys
+                # like `activation_steps_prepend = []` are valid extension
+                # placeholders). Non-engine callers that pass `warning_sink=None`
+                # silently drop the warning (backward-compat).
+                if warning_sink is not None:
+                    warning_sink.append({
+                        "code": "TOML_EMPTY_ARRAY_SKIPPED",
+                        "key": dotted,
+                        "path": _paths.get(winning_layer),
+                    })
+                continue
             # Story 4.4: `file:`-prefixed array → glob expansion route.
-            # The `v and` guard intentionally short-circuits on empty lists
-            # (AC 8: `persistent_facts = []` MUST raise — `file:` semantics
-            # require at least one item). Do not drop this guard.
             if (
                 glob_sink is not None  # pragma: allow-raw-io
-                and v
                 and all(isinstance(item, str) and item.startswith("file:") for item in v)
             ):
                 glob_sink.append(  # pragma: allow-raw-io
@@ -422,12 +463,16 @@ class VariableScope:
         self,
         table: dict[str, ResolvedValue],
         glob_expansions: list[GlobExpansion] | None = None,  # pragma: allow-raw-io
+        toml_warnings: list[dict[str, Any]] | None = None,  # Story 5.5b AC-1
     ) -> None:
         self._table = table
         # Story 4.4: defensive `list(...)` so the caller can't mutate the
         # internal list after the scope is built. Empty list (no glob
         # inputs) is the common case and fully valid.
         self._glob_expansions: list[GlobExpansion] = list(glob_expansions or [])  # pragma: allow-raw-io
+        # Story 5.5b AC-1: collected `TOML_EMPTY_ARRAY_SKIPPED` warnings.
+        # Engine reads this for NDJSON/stderr emission via compile.py.
+        self._toml_warnings: list[dict[str, Any]] = list(toml_warnings or [])
 
     @classmethod
     def build(
@@ -440,6 +485,7 @@ class VariableScope:
         toml_layers: list[tuple[str, dict[str, Any]]] | None = None,
         toml_layer_paths: list[str] | None = None,
         scenario_root: str | None = None,
+        toml_warning_sink: list[dict[str, Any]] | None = None,
     ) -> "VariableScope":
         """Build a VariableScope from config sources.
 
@@ -463,6 +509,13 @@ class VariableScope:
         # without any glob inputs (the common case) — `cls(table, glob_
         # expansions=[])` is the equivalent of the pre-Story-4.4 return.
         glob_expansions: list[GlobExpansion] = []  # pragma: allow-raw-io
+        # Story 5.5b AC-1: structured warning sink for `TOML_EMPTY_ARRAY_SKIPPED`
+        # entries collected by `_flatten_toml`. If the caller supplied an
+        # external list (e.g. compile.py's per-skill emission buffer), warnings
+        # are appended there too; otherwise stays internal-only.
+        _toml_warnings: list[dict[str, Any]] = (
+            toml_warning_sink if toml_warning_sink is not None else []
+        )
 
         # Non-self.* cascade: 4-tier last-write-wins
         # bmad-config < module-config < user-config < install-flag
@@ -533,6 +586,7 @@ class VariableScope:
                 merged, "", "", priority_map, table, _layer_paths or None,
                 list_priority_map=list_priority_map or None,
                 glob_sink=_glob_sink,  # pragma: allow-raw-io
+                warning_sink=_toml_warnings,
             )
 
             # Story 5.3: populate base_value_hash for variables overridden above
@@ -700,7 +754,7 @@ class VariableScope:
                         contributing_source_paths=contributing_sorted,
                     ))
 
-        return cls(table, glob_expansions=glob_expansions)  # pragma: allow-raw-io
+        return cls(table, glob_expansions=glob_expansions, toml_warnings=_toml_warnings)  # pragma: allow-raw-io
 
     def resolve(self, name: str) -> ResolvedValue:
         """Look up `name` in the pre-materialized table.
@@ -962,7 +1016,15 @@ def _variant_candidate(
     base_candidate: PurePosixPath | None,
     leaf: str,
 ) -> PurePosixPath | None:
-    """Tier-4 probe: IDE-suffixed siblings of the base candidate's name."""
+    """Tier-4 probe: IDE-suffixed siblings of the base candidate's name.
+
+    Story 5.5b AC-11: TOCTOU recovery. The directory may exist at `is_dir`
+    time but be removed before `list_dir_sorted` (e.g. concurrent
+    `bmad install` race). Treat the OSError as "directory not found" —
+    return None, same as the `not is_dir` branch. Per-entry races
+    (entry vanishes between `list_dir_sorted` and `is_file`) silently
+    skip the entry.
+    """
     if base_candidate is None:
         return None
     if not leaf.endswith(_TEMPLATE_SUFFIX):
@@ -971,7 +1033,13 @@ def _variant_candidate(
     if not io.is_dir(str(parent)):
         return None
     stem = leaf[: -len(_TEMPLATE_SUFFIX)]
-    entries = io.list_dir_sorted(str(parent))
+    try:
+        entries = io.list_dir_sorted(str(parent))
+    except OSError:
+        # AC-11: TOCTOU between is_dir and list_dir_sorted — directory
+        # disappeared (race with concurrent install or upgrade). Treat
+        # as "no variants found" rather than crashing.
+        return None
     matches: list[PurePosixPath] = []
     for entry in entries:
         for ide in variants.KNOWN_IDES:
@@ -982,7 +1050,14 @@ def _variant_candidate(
                 # the variant probe and crash later in `read_template` with
                 # a raw `IsADirectoryError` outside the `CompilerError`
                 # taxonomy.
-                if io.is_file(str(entry)):
+                #
+                # AC-11: per-entry TOCTOU — entry may vanish between
+                # list_dir_sorted and is_file. Silently skip on OSError.
+                try:
+                    _is_file = io.is_file(str(entry))
+                except OSError:
+                    _is_file = False
+                if _is_file:
                     try:
                         safe_entry = io.ensure_within_root(entry, context.scenario_root)
                     except errors.OverrideOutsideRootError:
@@ -1250,9 +1325,14 @@ def _walk_nodes(
                 source=enclosing_source,
             )
 
-        # Cycle detection via resolved_path identity on the DFS stack.
+        # Cycle detection via canonical-form path identity on the DFS stack.
+        # Story 5.5b AC-12: case-insensitive filesystems (Windows, macOS-default)
+        # let `Fragments/a.template.md` and `fragments/A.template.md` resolve to
+        # the same file but produce different `PurePosixPath` strings — raw
+        # equality misses this. Compare canonicalized keys instead.
+        _new_canon = _canonicalize_for_cycle(resolved_path)
         for frame in visited_stack:
-            if frame.resolved_path == resolved_path:
+            if _canonicalize_for_cycle(frame.resolved_path) == _new_canon:
                 chain = [f.authored_src for f in visited_stack] + [node.src]
                 token = _make_include_token(node)
                 raise errors.CyclicIncludeError(
