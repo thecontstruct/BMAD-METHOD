@@ -264,11 +264,22 @@ class Installer {
         title: 'Compiling migrated skills',
         task: async (message) => {
           const compilerHelper = require('../compiler/invoke-python');
-          if (!(await compilerHelper.hasMigratedSkillsInScope(paths, allModules, officialModules))) {
+          // R2 BH-6: enumerateMigratedSkills already walks the source tree;
+          // the prior hasMigratedSkillsInScope preflight here was a redundant
+          // second walk. Use the count of enumerated skills as the skip signal.
+          // (The hasMigratedSkillsInScope call at line 48 still gates the
+          // Python-version check; it stays.)
+          const skills = await compilerHelper.enumerateMigratedSkills(
+            paths,
+            allModules,
+            officialModules,
+          );
+          if (skills.length === 0) {
             addResult('Compile migrated skills', 'skip', 'no migrated skills');
             return 'Skipped — no migrated skills';
           }
-          const result = await compilerHelper.runInstallPhase({
+          const result = await compilerHelper.runBatchInstall({
+            skills,
             bmadDir: paths.bmadDir,
             projectRoot: paths.projectRoot,
             message,

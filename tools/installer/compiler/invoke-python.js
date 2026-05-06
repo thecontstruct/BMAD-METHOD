@@ -3,6 +3,8 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const os = require('node:os');
+const crypto = require('node:crypto');
 
 // Frozen for v1 — mirrors bmad_compile.variants.KNOWN_IDES
 const KNOWN_IDES = ['cursor', 'claudecode'];
@@ -25,7 +27,7 @@ function _spawnPython(args, options = {}) {
     proc.stderr.on('data', (d) => {
       stderr += d;
     });
-    proc.on('close', (code) => resolve({ code, stdout, stderr }));
+    proc.on('close', (code, signal) => resolve({ code, stdout, stderr, signal }));
   });
 }
 
@@ -135,8 +137,8 @@ async function hasMigratedSkillsInScope(paths, modules, officialModules) {
 /**
  * Format a kind:"error" event in caret-friendly style mirroring errors.format().
  */
-function _formatError(event) {
-  if (!event) return 'compile.py --install-phase failed (no error event emitted)';
+function _formatError(event, source = '--install-phase') {
+  if (!event) return `compile.py ${source} failed (no error event emitted)`;
   const file = event.file ?? '<unknown>';
   const line = event.line == null ? '?' : event.line;
   const col = event.col == null ? '?' : event.col;
@@ -219,6 +221,181 @@ async function runInstallPhase({ bmadDir, projectRoot, message }) {
 }
 
 /**
+ * Recursively walk a module source tree, accumulating absolute paths of all
+ * migrated-skill candidates per the basename-match rule (R3-A1).
+ *
+ * Unlike `_hasSkillsInTree` (which short-circuits on first match), this collects
+ * EVERY matching skill — required by `enumerateMigratedSkills` for batch input.
+ */
+async function _collectSkillsInTree(dirPath, depth, maxDepth, results) {
+  if (depth > maxDepth) return;
+  let entries;
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  const fileNames = entries.filter((e) => e.isFile()).map((e) => e.name);
+  const dirName = path.basename(dirPath);
+  if (_isSkillDir(dirName, fileNames)) {
+    results.push(dirPath);
+    return; // do not recurse into a skill dir
+  }
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      await _collectSkillsInTree(path.join(dirPath, entry.name), depth + 1, maxDepth, results);
+    }
+  }
+}
+
+/**
+ * Enumerate every migrated skill across the selected modules' source trees,
+ * returning batch-input rows of `{skillDir, installDir}`. For a single-root
+ * install, every `installDir` is `paths.bmadDir`.
+ *
+ * Mirrors `hasMigratedSkillsInScope`'s discovery semantics, including the
+ * `findModuleSource` network-error fallback (returns empty array AND keeps the
+ * boolean preflight at installer.js:48 effective; the optimistic-empty path
+ * means zero skills compile when the source isn't cloned, which is safe).
+ *
+ * @param {Object} paths - InstallPaths instance (uses paths.bmadDir)
+ * @param {string[]} modules - array of module codes
+ * @param {Object} officialModules - OfficialModules instance
+ * @returns {Promise<Array<{skillDir: string, installDir: string}>>}
+ */
+async function enumerateMigratedSkills(paths, modules, officialModules) {
+  const skills = [];
+  for (const moduleCode of modules) {
+    let sourcePath;
+    try {
+      sourcePath = await officialModules.findModuleSource(moduleCode);
+    } catch (error) {
+      // Network/clone error: log and skip this module (do NOT propagate). The
+      // boolean preflight at installer.js:48 stays effective via its own try/catch.
+      console.warn(`bmad: enumerateMigratedSkills could not resolve source for ${moduleCode}: ${error.message}`);
+      continue;
+    }
+    if (!sourcePath) continue;
+
+    const moduleSkills = [];
+    await _collectSkillsInTree(sourcePath, 0, 6, moduleSkills);
+    for (const skillDir of moduleSkills) {
+      skills.push({ skillDir, installDir: paths.bmadDir });
+    }
+  }
+  return skills;
+}
+
+/**
+ * Run `compile.py --batch <skills.json>` and parse the newline-delimited JSON stdout.
+ *
+ * Writes a temp `skills.json` describing every batch entry, spawns python3 once
+ * (single interpreter cold-start), parses NDJSON output, returns the summary.
+ * Cleans up the temp file in a `finally` block.
+ *
+ * @param {Object} opts
+ * @param {Array<{skillDir: string, installDir: string}>} opts.skills
+ * @param {string} opts.bmadDir   - Path to the installed _bmad directory (compile.py lives here)
+ * @param {string} opts.projectRoot - cwd for the Python subprocess
+ * @param {Function} [opts.message] - Progress callback, called with each skill name
+ * @returns {Promise<{compiled: number, writtenFiles: string[], lockfilePath: string|null}>}
+ */
+async function runBatchInstall({ skills, bmadDir, projectRoot, message }) {
+  const compilePy = path.join(bmadDir, 'scripts', 'compile.py');
+  try {
+    await fs.access(compilePy);
+  } catch {
+    throw new Error(`compile.py not found at: ${compilePy}`);
+  }
+
+  const tmpFile = path.join(os.tmpdir(), `bmad-batch-${crypto.randomUUID()}.json`);
+  const payload = skills.map(({ skillDir, installDir }) => ({
+    skill_dir: path.resolve(skillDir),
+    install_dir: path.resolve(installDir),
+  }));
+
+  try {
+    try {
+      await fs.writeFile(tmpFile, JSON.stringify(payload), 'utf8');
+    } catch (error) {
+      throw new Error(`bmad install: failed to write batch input file: ${error.message}`);
+    }
+
+    let result;
+    try {
+      result = await _spawnPython([compilePy, '--batch', tmpFile], { cwd: projectRoot });
+    } catch (error) {
+      throw new Error(`Failed to spawn python3: ${error.message}`);
+    }
+
+    const lines = result.stdout.split('\n').filter((l) => l.trim() !== '');
+    const events = [];
+    let firstError = null;
+    for (const line of lines) {
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        const sigMsg = result.signal ? ` (process killed by signal ${result.signal})` : '';
+        throw new Error(
+          `compile.py --batch emitted non-JSON line${sigMsg}:\n  ${line.slice(0, 200)}\n\nstderr:\n${result.stderr}`,
+        );
+      }
+      events.push(event);
+      // Skip the progress callback for hash-skipped events (compiled === false /
+      // status === "skipped"); the user shouldn't see "Compiling X..." for a no-op.
+      if (
+        event.kind === 'skill'
+        && event.compiled !== false
+        && message
+        && event.skill
+      ) {
+        message(`Compiling ${event.skill}...`);
+      }
+      if (event.kind === 'error' && !firstError) firstError = event;
+    }
+
+    if (result.code !== 0 || firstError) {
+      let msg = _formatError(firstError, '--batch');
+      if (result.signal) msg += ` (process killed by signal ${result.signal})`;
+      if (result.stderr.trim()) msg += `\n\nstderr:\n${result.stderr.trim()}`;
+      throw new Error(msg);
+    }
+
+    const summary = events.toReversed().find((e) => e.kind === 'summary');
+    if (!summary) {
+      let msg = 'compile.py --batch did not emit a summary event';
+      if (result.stderr.trim()) msg += `\n\nstderr:\n${result.stderr.trim()}`;
+      throw new Error(msg);
+    }
+
+    // R2 F6: rare path — process exits 0 but a signal was received (Windows
+    // signal semantics differ from POSIX; SIGINT/SIGTERM after summary-flush
+    // can leave code === 0). The summary made it through so the run is
+    // semantically successful, but the signal is worth surfacing.
+    if (result.signal) {
+      console.warn(`bmad: compile.py --batch received signal ${result.signal} (exit code 0; summary emitted)`);
+    }
+
+    const writtenFiles = [];
+    for (const event of events) {
+      if (event.kind === 'skill' && Array.isArray(event.written)) {
+        for (const f of event.written) writtenFiles.push(f);
+      }
+    }
+    return {
+      compiled: summary.compiled,
+      writtenFiles,
+      lockfilePath: summary.lockfile_path ?? null,
+    };
+  } finally {
+    await fs.unlink(tmpFile).catch(() => {});
+  }
+}
+
+/**
  * Run `upgrade.py --dry-run --json` and return the parsed drift report object.
  *
  * @param {Object} opts
@@ -265,4 +442,12 @@ async function runUpgradeYes({ upgradePy, projectRoot }) {
   }
 }
 
-module.exports = { checkPythonVersion, hasMigratedSkillsInScope, runInstallPhase, runUpgradeDryRun, runUpgradeYes };
+module.exports = {
+  checkPythonVersion,
+  hasMigratedSkillsInScope,
+  enumerateMigratedSkills,
+  runInstallPhase,
+  runBatchInstall,
+  runUpgradeDryRun,
+  runUpgradeYes,
+};

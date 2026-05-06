@@ -9,3 +9,6 @@ dev = ["mypy"]
 
 [tool.mypy]
 mypy_path = "src/scripts"
+
+[tool.pytest.ini_options]
+markers = ["perf: performance advisory tests (excluded by default)"]

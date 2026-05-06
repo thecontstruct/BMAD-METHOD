@@ -19,7 +19,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from bmad_compile import engine, variants
+from bmad_compile import engine, lazy_compile as _lc, variants
 from bmad_compile.errors import CompilerError, LockfileVersionMismatchError
 
 
@@ -33,6 +33,136 @@ _ANSI_RESET = "\033[0m"
 def _emit(obj: dict[str, Any]) -> None:
     """Write a JSON event to stdout (sort_keys=True) and flush."""
     print(json.dumps(obj, sort_keys=True), flush=True)
+
+
+def _compile_one_skill(
+    dirpath: Path,
+    install_dir: Path,
+    *,
+    hash_skip: bool = False,
+) -> list[dict[str, Any]]:
+    """Compile a single skill source dir; return ordered NDJSON event dicts.
+
+    Returns zero or more `kind:"warning"` events followed by exactly one
+    `kind:"skill"` or `kind:"error"` event. Callers iterate the list to emit
+    events in order and inspect the last event's `kind` to update counters.
+
+    When `hash_skip=True` and a lockfile entry exists with all hashes matching
+    current inputs, returns a single `kind:"skill"` event with `compiled=False`,
+    `status="skipped"`, `lockfile_updated=False`, and `written=[]` — no engine
+    invocation. Used by `--batch` mode for AC-3 hash-based skip on re-install.
+    """
+    events: list[dict[str, Any]] = []
+    module = dirpath.parent.name
+    dir_name = dirpath.name
+    skill_id = f"{module}/{dir_name}"
+
+    # Hash-skip dispatch (AC-3, --batch only). install_dir == scenario_root for
+    # both --install-phase and --batch (each batch entry's install_dir is the
+    # _bmad install root, which is what lazy_compile.py treats as scenario_root).
+    #
+    # ECH-1 (R1): `_lc._needs_recompile` calls `drift.py` helpers that perform
+    # raw filesystem reads on tracked-input paths. If a tracked input is deleted
+    # between the lockfile read and the hash check (TOCTOU), `OSError` /
+    # `FileNotFoundError` propagates and would terminate _run_batch before the
+    # summary event is emitted (JS caller sees "no summary event"). Treat any
+    # exception during the hash check conservatively as "needs recompile" — the
+    # engine call below will surface a CompilerError event if the missing input
+    # is genuinely required.
+    if hash_skip:
+        lockfile_path = install_dir / "_config" / "bmad.lock"
+        try:
+            entry = _lc._find_lockfile_entry(lockfile_path, dir_name)
+            should_skip = (
+                entry is not None and not _lc._needs_recompile(entry, install_dir)
+            )
+        except Exception:  # noqa: BLE001 — TOCTOU/IO defense, fall through to compile
+            # R1 ECH-1: broad except is intentional. Narrowing to (OSError,
+            # FileNotFoundError, PermissionError) would let programming errors
+            # (e.g. KeyError on a structurally-malformed lockfile entry)
+            # propagate out of _compile_one_skill, terminating _run_batch's
+            # loop before the summary event is emitted — breaking the JS
+            # caller's "no summary event" parser. F3 from R2 acknowledges
+            # silent-recompile is safer for correctness even at the cost of
+            # diagnostic clarity. A warning-event-on-non-OSError refinement
+            # is logged to deferred-work.md.
+            should_skip = False
+        if should_skip:
+            events.append({
+                "schema_version": 1,
+                "kind": "skill",
+                "skill": skill_id,
+                "status": "skipped",
+                "written": [],
+                "compiled": False,
+                "lockfile_updated": False,
+            })
+            return events
+
+    # Full-skill override warning (mirrors --install-phase, Story 3.4 pattern)
+    _full_skill_override = (
+        install_dir / "custom" / "fragments" / module / dir_name / "SKILL.template.md"
+    )
+    if _full_skill_override.is_file():
+        events.append({
+            "schema_version": 1,
+            "kind": "warning",
+            "skill": skill_id,
+            "message": (
+                f"warning: full-skill override at '{_full_skill_override}' "
+                "bypasses fragment-level upgrade safety; this skill will not "
+                "receive fragment-level upgrades from the base module"
+            ),
+        })
+
+    try:
+        engine.compile_skill(
+            dirpath,
+            install_dir,
+            target_ide=None,
+            lockfile_root=install_dir,
+            override_root=install_dir / "custom",
+        )
+        skill_md = install_dir / module / dir_name / "SKILL.md"
+        skill_event: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "skill",
+            "skill": skill_id,
+            "status": "ok",
+            "written": [str(skill_md)],
+            "lockfile_updated": True,
+        }
+        if hash_skip:
+            # --batch mode adds the per-skill `compiled` boolean (AC-3).
+            skill_event["compiled"] = True
+        events.append(skill_event)
+    except CompilerError as exc:
+        events.append({
+            "schema_version": 1,
+            "kind": "error",
+            "skill": skill_id,
+            "status": "error",
+            "code": exc.code,
+            "file": exc.file,
+            "line": exc.line,
+            "col": exc.col,
+            "message": exc.desc,
+            "hint": exc.hint,
+        })
+    except Exception as exc:  # noqa: BLE001
+        events.append({
+            "schema_version": 1,
+            "kind": "error",
+            "skill": skill_id,
+            "status": "error",
+            "code": "INTERNAL_ERROR",
+            "file": str(dirpath),
+            "line": None,
+            "col": None,
+            "message": f"{type(exc).__name__}: {exc}",
+            "hint": None,
+        })
+    return events
 
 
 def _run_install_phase(install_dir: Path) -> int:
@@ -71,69 +201,17 @@ def _run_install_phase(install_dir: Path) -> int:
         )
 
         if is_skill:
-            module = dirpath.parent.name
-            _full_skill_override = (
-                install_dir / "custom" / "fragments" / module / dir_name / "SKILL.template.md"
-            )
-            if _full_skill_override.is_file():
-                _emit({
-                    "schema_version": 1,
-                    "kind": "warning",
-                    "skill": f"{module}/{dir_name}",
-                    "message": (
-                        f"warning: full-skill override at '{_full_skill_override}' "
-                        "bypasses fragment-level upgrade safety; this skill will not "
-                        "receive fragment-level upgrades from the base module"
-                    ),
-                })
-            try:
-                engine.compile_skill(
-                    dirpath,
-                    install_dir,
-                    target_ide=None,
-                    lockfile_root=install_dir,
-                    override_root=install_dir / "custom",
-                )
-                skill_md = install_dir / module / dir_name / "SKILL.md"
-                _emit({
-                    "schema_version": 1,
-                    "kind": "skill",
-                    "skill": f"{module}/{dir_name}",
-                    "status": "ok",
-                    "written": [str(skill_md)],
-                    "lockfile_updated": True,
-                })
-                compiled += 1
-            except CompilerError as exc:
-                errors += 1
-                _emit({
-                    "schema_version": 1,
-                    "kind": "error",
-                    "skill": f"{dirpath.parent.name}/{dir_name}",
-                    "status": "error",
-                    "code": exc.code,
-                    "file": exc.file,
-                    "line": exc.line,
-                    "col": exc.col,
-                    "message": exc.desc,
-                    "hint": exc.hint,
-                })
-            except Exception as exc:  # noqa: BLE001
-                # Unexpected exception (not a CompilerError): emit a structured error
-                # event so the NDJSON contract is preserved and the batch continues.
-                errors += 1
-                _emit({
-                    "schema_version": 1,
-                    "kind": "error",
-                    "skill": f"{dirpath.parent.name}/{dir_name}",
-                    "status": "error",
-                    "code": "INTERNAL_ERROR",
-                    "file": str(dirpath),
-                    "line": None,
-                    "col": None,
-                    "message": f"{type(exc).__name__}: {exc}",
-                    "hint": None,
-                })
+            for ev in _compile_one_skill(dirpath, install_dir, hash_skip=False):
+                _emit(ev)
+                # ECH-3 (R1): defensive — only count "ok" skill events. With
+                # hash_skip=False this is currently equivalent to `kind == "skill"`
+                # (no skip events possible), but this guard prevents a future
+                # regression that inadvertently passes hash_skip=True from
+                # silently inflating the compiled count with skipped skills.
+                if ev["kind"] == "skill" and ev.get("status") == "ok":
+                    compiled += 1
+                elif ev["kind"] == "error":
+                    errors += 1
             return  # do not recurse into skill subdirs
 
         for entry in entries:
@@ -152,6 +230,197 @@ def _run_install_phase(install_dir: Path) -> int:
     })
 
     return 0 if errors == 0 else 1
+
+
+def _run_batch(batch_file: Path) -> int:
+    """Read JSON skill list from batch_file, compile each with hash-skip, emit NDJSON.
+
+    Schema: batch_file contains a JSON array of objects with `skill_dir` and
+    `install_dir` (both absolute path strings). Each entry produces zero or more
+    warning events plus one skill or error event. Per-skill `compiled` boolean
+    distinguishes recompiled (true) from hash-skipped (false). Summary uses an
+    `int compiled` count for parity with `--install-phase`.
+
+    Continues on per-skill error (matches `--install-phase` semantics). Returns
+    0 on success, 1 if any error event was emitted (incl. JSON parse / validation).
+
+    `LockfileVersionMismatchError` is a `CompilerError` subclass and collapses
+    to exit 1 here (deliberate parity with `--install-phase`; the error event's
+    `code` field carries `"LOCKFILE_VERSION_MISMATCH"` for JS callers).
+    """
+    try:
+        raw = batch_file.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        _emit({
+            "schema_version": 1,
+            "kind": "error",
+            "skill": None,
+            "status": "error",
+            "code": "BATCH_FILE_NOT_FOUND",
+            "file": str(batch_file),
+            "line": None,
+            "col": None,
+            "message": f"batch file not found: {exc}",
+            "hint": None,
+        })
+        return 1
+    except OSError as exc:
+        _emit({
+            "schema_version": 1,
+            "kind": "error",
+            "skill": None,
+            "status": "error",
+            "code": "BATCH_FILE_READ_ERROR",
+            "file": str(batch_file),
+            "line": None,
+            "col": None,
+            "message": f"failed to read batch file: {exc}",
+            "hint": None,
+        })
+        return 1
+
+    try:
+        entries = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _emit({
+            "schema_version": 1,
+            "kind": "error",
+            "skill": None,
+            "status": "error",
+            "code": "BATCH_FILE_MALFORMED",
+            "file": str(batch_file),
+            "line": exc.lineno,
+            "col": exc.colno,
+            "message": f"batch file is not valid JSON: {exc.msg}",
+            "hint": None,
+        })
+        return 1
+
+    if not isinstance(entries, list):
+        _emit({
+            "schema_version": 1,
+            "kind": "error",
+            "skill": None,
+            "status": "error",
+            "code": "BATCH_FILE_MALFORMED",
+            "file": str(batch_file),
+            "line": None,
+            "col": None,
+            "message": "batch file root must be a JSON array",
+            "hint": None,
+        })
+        return 1
+
+    compiled_count = 0
+    error_count = 0
+    seen: set[tuple[str, str]] = set()
+    last_install_dir: Path | None = None
+
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            _emit({
+                "schema_version": 1,
+                "kind": "error",
+                "skill": None,
+                "status": "error",
+                "code": "BATCH_ENTRY_INVALID",
+                "file": str(batch_file),
+                "line": None,
+                "col": None,
+                "message": f"entry {idx} is not a JSON object",
+                "hint": None,
+            })
+            sys.stderr.write(
+                f"error: batch entry {idx} is not a JSON object\n"
+            )
+            error_count += 1
+            continue
+
+        skill_dir_raw = entry.get("skill_dir")
+        install_dir_raw = entry.get("install_dir")
+        if not isinstance(skill_dir_raw, str) or not isinstance(install_dir_raw, str):
+            _emit({
+                "schema_version": 1,
+                "kind": "error",
+                "skill": None,
+                "status": "error",
+                "code": "BATCH_ENTRY_INVALID",
+                "file": str(batch_file),
+                "line": None,
+                "col": None,
+                "message": (
+                    f"entry {idx} requires string fields 'skill_dir' and 'install_dir'"
+                ),
+                "hint": None,
+            })
+            sys.stderr.write(
+                f"error: batch entry {idx} requires string 'skill_dir' and 'install_dir'\n"
+            )
+            error_count += 1
+            continue
+
+        skill_path = Path(skill_dir_raw)
+        install_path = Path(install_dir_raw)
+        if not skill_path.is_absolute() or not install_path.is_absolute():
+            _emit({
+                "schema_version": 1,
+                "kind": "error",
+                "skill": None,
+                "status": "error",
+                "code": "BATCH_ENTRY_INVALID",
+                "file": str(batch_file),
+                "line": None,
+                "col": None,
+                "message": (
+                    f"entry {idx}: both 'skill_dir' and 'install_dir' must be absolute paths"
+                ),
+                "hint": None,
+            })
+            sys.stderr.write(
+                f"error: batch entry {idx} requires absolute paths\n"
+            )
+            error_count += 1
+            continue
+
+        skill_path = skill_path.resolve()
+        install_path = install_path.resolve()
+
+        dedup_key = (str(skill_path), str(install_path))
+        if dedup_key in seen:
+            _emit({
+                "schema_version": 1,
+                "kind": "warning",
+                "skill": f"{skill_path.parent.name}/{skill_path.name}",
+                "message": "duplicate batch entry skipped",
+            })
+            continue
+        seen.add(dedup_key)
+        # Track install_dir of the last NON-DEDUP entry so the summary's
+        # `lockfile_path` reflects an entry that was actually compiled (or at
+        # least attempted) rather than a skipped duplicate (BH-6).
+        last_install_dir = install_path
+
+        for ev in _compile_one_skill(skill_path, install_path, hash_skip=True):
+            _emit(ev)
+            if ev["kind"] == "skill":
+                if ev.get("compiled") is True:
+                    compiled_count += 1
+                # status=="skipped" with compiled=False: count toward neither compiled nor error.
+            elif ev["kind"] == "error":
+                error_count += 1
+
+    summary: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "summary",
+        "compiled": compiled_count,
+        "errors": error_count,
+        "lockfile_path": (
+            str(last_install_dir / "_config" / "bmad.lock") if last_install_dir is not None else None
+        ),
+    }
+    _emit(summary)
+
+    return 0 if error_count == 0 else 1
 
 
 def _colorize_diff(lines: list[str]) -> str:
@@ -327,7 +596,14 @@ def main(argv: list[str] | None = None) -> int:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--skill", default=None, help="Skill source directory (per-skill mode).")
     mode.add_argument("--install-phase", action="store_true", help="Batch-compile all migrated skills under --install-dir.")
-    ap.add_argument("--install-dir", required=True, help="Output directory (per-skill) or install root (install-phase).")
+    mode.add_argument(
+        "--batch", default=None, metavar="SKILLS_JSON",
+        help="JSON file listing skills to compile in batch (single interpreter cold-start).",
+    )
+    ap.add_argument(
+        "--install-dir", required=False, default=None,
+        help="Output directory (per-skill) or install root (install-phase). Not required for --batch (each entry carries its own install_dir).",
+    )
     ap.add_argument("--tools", default=None, help="Target IDE for variant selection (e.g. cursor, claudecode).")
     ap.add_argument(
         "--set", dest="var_overrides", action="append", metavar="KEY=VALUE",
@@ -364,6 +640,24 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.skill_canonical is not None and args.install_phase:
         sys.stderr.write("error: positional skill argument cannot be combined with --install-phase\n")
+        return 1
+    if args.skill_canonical is not None and args.batch:
+        sys.stderr.write("error: positional skill argument cannot be combined with --batch\n")
+        return 1
+    if args.batch and args.diff:
+        sys.stderr.write("error: --batch cannot be combined with --diff\n")
+        return 1
+    if args.batch and args.explain:
+        sys.stderr.write("error: --batch cannot be combined with --explain\n")
+        return 1
+    if args.batch and args.tree:
+        sys.stderr.write("error: --batch cannot be combined with --tree\n")
+        return 1
+    if args.batch and args.json:
+        sys.stderr.write("error: --batch cannot be combined with --json\n")
+        return 1
+    if args.batch and args.var_overrides:
+        sys.stderr.write("error: --set cannot be used with --batch (per-entry overrides not supported)\n")
         return 1
     if args.diff and args.install_phase:
         sys.stderr.write("error: --diff cannot be used with --install-phase\n")
@@ -414,6 +708,17 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(f"error: --set KEY is empty in: {kv!r}\n")
             return 1
         install_flags[k] = v
+
+    # --batch dispatch MUST occur BEFORE install_path resolution: --batch does
+    # not require --install-dir (each JSON entry carries its own install_dir),
+    # so reaching Path(args.install_dir).resolve() with args.install_dir=None
+    # would raise TypeError (R2-P1).
+    if args.batch:
+        return _run_batch(Path(args.batch))
+
+    if args.install_dir is None:
+        sys.stderr.write("error: --install-dir is required (only --batch may omit it)\n")
+        return 1
 
     install_path = Path(args.install_dir).resolve()
 
