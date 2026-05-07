@@ -1,0 +1,36 @@
+{
+  "drift": [
+    {
+      "glob_changes": [
+        {
+          "added_matches": [
+            "docs/new-guide.md"
+          ],
+          "new_match_set_hash": "abcdef1234567890abcdef1234567890",
+          "old_match_set_hash": "1234567890abcdef1234567890abcdef",
+          "pattern": "file:docs/*.md",
+          "removed_matches": [
+            "docs/old-guide.md"
+          ],
+          "toml_key": "self.context.docs"
+        }
+      ],
+      "new_defaults": [],
+      "orphaned_overrides": [],
+      "prose_fragment_changes": [],
+      "skill": "mock-module/skill-a",
+      "toml_default_changes": [],
+      "variable_provenance_shifts": []
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "glob_changes": 1,
+    "new_defaults": 0,
+    "orphaned_overrides": 0,
+    "prose_fragment_changes": 0,
+    "toml_default_changes": 0,
+    "total_skills_with_drift": 1,
+    "variable_provenance_shifts": 0
+  }
+}

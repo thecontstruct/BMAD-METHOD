@@ -1,0 +1,13 @@
+{
+  "drift": [],
+  "schema_version": 1,
+  "summary": {
+    "glob_changes": 0,
+    "new_defaults": 0,
+    "orphaned_overrides": 0,
+    "prose_fragment_changes": 0,
+    "toml_default_changes": 0,
+    "total_skills_with_drift": 0,
+    "variable_provenance_shifts": 0
+  }
+}

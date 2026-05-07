@@ -1,0 +1,60 @@
+{
+  "fragments": [
+    {
+      "hash": "789012345678abcdef010203040506ab",
+      "resolved_from": "base",
+      "src": "fragments/icon-glyph.template.md"
+    },
+    {
+      "hash": "a1b2c3d4e5f6789012345678abcdef01",
+      "resolved_from": "base",
+      "src": "fragments/intro.template.md"
+    }
+  ],
+  "schema_version": 1,
+  "toml_fields": [
+    {
+      "current_value": "A base skill.",
+      "default_value": "A base skill.",
+      "layers": {
+        "base": {
+          "hash": "d4e5f6789012345678abcdef01020304",
+          "value": "A base skill."
+        }
+      },
+      "path": "agent.description"
+    },
+    {
+      "current_value": "robot",
+      "default_value": "robot",
+      "layers": {
+        "base": {
+          "hash": "8901234567abcdef012345678abcdef02",
+          "value": "robot"
+        }
+      },
+      "path": "agent.icon"
+    },
+    {
+      "current_value": "star",
+      "default_value": "star",
+      "layers": {
+        "base": {
+          "hash": "9012345678abcdef01234567890abcdf",
+          "value": "star"
+        }
+      },
+      "path": "menu.glyph"
+    }
+  ],
+  "variables": [
+    {
+      "name": "self.agent.icon",
+      "resolved_at": "compile-time",
+      "source": "toml",
+      "source_path": "mock-module/skill-a/customize.toml",
+      "toml_layer": "base",
+      "value": "robot"
+    }
+  ]
+}

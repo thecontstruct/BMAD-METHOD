@@ -1,0 +1,29 @@
+{
+  "drift": [
+    {
+      "glob_changes": [],
+      "new_defaults": [],
+      "orphaned_overrides": [
+        {
+          "override_hash": "e5f6789012345678abcdef0102030405",
+          "path": "custom/fragments/mock-module/skill-a/intro.template.md",
+          "reason": "base_fragment_removed"
+        }
+      ],
+      "prose_fragment_changes": [],
+      "skill": "mock-module/skill-a",
+      "toml_default_changes": [],
+      "variable_provenance_shifts": []
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "glob_changes": 0,
+    "new_defaults": 0,
+    "orphaned_overrides": 1,
+    "prose_fragment_changes": 0,
+    "toml_default_changes": 0,
+    "total_skills_with_drift": 1,
+    "variable_provenance_shifts": 0
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "drift": [
+    {
+      "glob_changes": [],
+      "new_defaults": [
+        {
+          "key": "agent.temperature",
+          "new_value": "0.7",
+          "source": "defaults"
+        }
+      ],
+      "orphaned_overrides": [],
+      "prose_fragment_changes": [],
+      "skill": "mock-module/skill-a",
+      "toml_default_changes": [],
+      "variable_provenance_shifts": []
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "glob_changes": 0,
+    "new_defaults": 1,
+    "orphaned_overrides": 0,
+    "prose_fragment_changes": 0,
+    "toml_default_changes": 0,
+    "total_skills_with_drift": 1,
+    "variable_provenance_shifts": 0
+  }
+}
