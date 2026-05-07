@@ -1,0 +1,24 @@
+{
+  "fragments": [
+    {
+      "hash": "01234567890abcdef01234567890abcd",
+      "resolved_from": "base",
+      "src": "fragments/activation.template.md"
+    }
+  ],
+  "schema_version": 1,
+  "toml_fields": [
+    {
+      "current_value": "Hello!",
+      "default_value": "Hello!",
+      "layers": {
+        "base": {
+          "hash": "fedcba9876543210fedcba9876543210",
+          "value": "Hello!"
+        }
+      },
+      "path": "greeting_template"
+    }
+  ],
+  "variables": []
+}

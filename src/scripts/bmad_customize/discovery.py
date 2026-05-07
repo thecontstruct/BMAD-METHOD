@@ -16,8 +16,25 @@ Event schemas emitted by this module:
     {"action": "request_disambiguation", "candidates": list[dict]}
     Emitted when ambiguous intent is detected; handler returns immediately after
     (no further events follow — execution suspends pending user input).
+  propose_route:
+    {"action": "propose_route", "plane": str, "field_path": str (TOML plane only),
+     "fragment_name": str (prose plane only), "target_file": str,
+     "requires_confirmation": bool}
+    Emitted by routing.py when intent maps cleanly to one plane. Either
+    field_path (TOML) or fragment_name (prose) is present, never both.
+  request_plane_disambiguation:
+    {"action": "request_plane_disambiguation",
+     "candidates": list[{"plane": str, "field_path"?: str, "fragment_name"?: str,
+                         "target_file"?: str}]}
+    Emitted by routing.py when intent matches both TOML and prose candidates,
+    or when no candidate is found. Each candidate includes "plane".
+  warn_full_skill:
+    {"action": "warn_full_skill", "bypass_warning": str,
+     "requires_confirmation": bool, "requires_second_confirmation": bool}
+    Emitted by routing.py when intent requests full-skill replacement.
+    No compiler call precedes this event (pre-compile path).
 
-Interface:
+Interface (discover_surface — see also routing.py for routing events):
   discover_surface(
       intent: str,
       skill_id: str,

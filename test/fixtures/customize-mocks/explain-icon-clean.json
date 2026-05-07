@@ -1,0 +1,24 @@
+{
+  "fragments": [
+    {
+      "hash": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "resolved_from": "base",
+      "src": "fragments/intro.template.md"
+    }
+  ],
+  "schema_version": 1,
+  "toml_fields": [
+    {
+      "current_value": "\ud83d\udccb",
+      "default_value": "\ud83d\udccb",
+      "layers": {
+        "base": {
+          "hash": "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d",
+          "value": "\ud83d\udccb"
+        }
+      },
+      "path": "agent.icon"
+    }
+  ],
+  "variables": []
+}
