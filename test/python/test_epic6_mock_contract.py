@@ -72,9 +72,9 @@ class TestSchemaFixtureContract(unittest.TestCase):
                 failures.append(f"{fixture_path.name}: JSON parse error — {exc}")
                 continue
             sv = data.get("schema_version")
-            if sv != 1:
+            if not isinstance(sv, int) or isinstance(sv, bool) or sv != 1:
                 failures.append(
-                    f"{fixture_path.name}: schema_version is {sv!r}, expected 1"
+                    f"{fixture_path.name}: schema_version is {sv!r}, expected integer 1"
                 )
         if failures:
             self.fail(
@@ -95,10 +95,21 @@ class TestSchemaFixtureContract(unittest.TestCase):
                 schema = _infer_schema(fixture_path.name)
             except ValueError as exc:
                 self.fail(str(exc))
+            schema_name = (
+                "explain-v1.json" if fixture_path.name.startswith("explain-")
+                else "dry-run-v1.json"
+            )
             try:
                 validate(data, schema)
-            except (ValidationError, Exception) as exc:
-                failures.append(f"{fixture_path.name}: {exc}")
+            except ValidationError as exc:
+                failures.append(
+                    f"{fixture_path.name} (schema {schema_name}): {exc}"
+                )
+            except Exception as exc:
+                self.fail(
+                    f"Unexpected error validating {fixture_path.name} against "
+                    f"{schema_name}: {exc!r}"
+                )
         if failures:
             self.fail(
                 f"{len(failures)} fixture(s) failed schema validation:\n"
@@ -182,6 +193,7 @@ class TestMockCompilerHarness(unittest.TestCase):
         self.assertEqual(calls[0]["pattern"], "compile --explain --json")
         self.assertEqual(calls[0]["fixture"], "explain-pristine.json")
         self.assertIn("timestamp_ns", calls[0])
+        self.assertIsInstance(calls[0]["timestamp_ns"], int)
         self.assertEqual(calls[1]["pattern"], "upgrade --dry-run --json")
         self.assertEqual(calls[1]["fixture"], "dry-run-no-drift.json")
 
@@ -224,14 +236,16 @@ class TestMockCompilerHarness(unittest.TestCase):
     def test_empty_calls_after_invocation_fails_loudly(self) -> None:
         """Guard: empty calls list after expected invocations must fail loudly.
 
-        Demonstrates the mandatory guard pattern for Stories 6.2–6.6 test scaffolding:
-        if a skill invocation completes but MockCompiler.calls is empty, the test
-        must call self.fail() with a directed message rather than silently passing.
+        Covers two scenarios Stories 6.2–6.6 scaffolding must guard against:
+
+        (a) Zero-invocation: skill never called subprocess at all — calls is empty.
+        (b) Mismatched-pattern: skill called subprocess but for a different operation
+            than expected — the filtered call list for the expected pattern is empty.
         """
+        # --- Scenario (a): zero-invocation ---
         mock = self._make_mock()
         mock.register("compile --explain --json", "explain-pristine.json")
-        # Simulate: skill was invoked but didn't route through MockCompiler
-        # (orchestration wiring is absent).
+        # Simulate: skill was invoked but didn't route through MockCompiler at all.
         with self.assertRaises(AssertionError) as ctx:
             if not mock.calls:
                 self.fail(
@@ -241,6 +255,23 @@ class TestMockCompilerHarness(unittest.TestCase):
                     "MockCompiler.intercept()"
                 )
         self.assertIn("MockCompiler.calls is empty", str(ctx.exception))
+
+        # --- Scenario (b): mismatched-pattern ---
+        # Skill called subprocess (explain), but orchestration expected dry-run.
+        mock2 = self._make_mock()
+        mock2.register("compile --explain --json", "explain-pristine.json")
+        mock2.intercept("compile --explain --json")  # explain was called, not dry-run
+        expected_dry_run_calls = [
+            c for c in mock2.calls if "upgrade --dry-run" in c["pattern"]
+        ]
+        with self.assertRaises(AssertionError) as ctx2:
+            if not expected_dry_run_calls:
+                self.fail(
+                    "MockCompiler.calls contains no 'upgrade --dry-run' intercepts "
+                    "after skill invocation — orchestration called 'compile --explain' "
+                    "instead of 'upgrade --dry-run'"
+                )
+        self.assertIn("no 'upgrade --dry-run' intercepts", str(ctx2.exception))
 
     def test_calls_returns_copy_not_internal_list(self) -> None:
         """mock.calls returns a copy — external mutation does not affect internal state."""
