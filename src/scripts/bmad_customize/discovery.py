@@ -33,8 +33,19 @@ Event schemas emitted by this module:
      "requires_confirmation": bool, "requires_second_confirmation": bool}
     Emitted by routing.py when intent requests full-skill replacement.
     No compiler call precedes this event (pre-compile path).
+  propose_draft:
+    {"action": "propose_draft", "plane": str, "field_path": str (TOML only),
+     "fragment_name": str (prose only), "target_file": str,
+     "current_value": str (TOML only — present when field found in explain payload),
+     "intent": str, "revision_feedback": str (present on revision iterations only),
+     "requires_confirmation": bool}
+    Emitted by drafting.py when the handler fetches current surface content and
+    proposes a draft for LLM-shell rendering. No filesystem writes occur. Either
+    field_path (TOML) or fragment_name (prose) is present, never both.
+    current_value is absent when the matching TOML field is not found (graceful
+    degradation). revision_feedback is absent on first iteration.
 
-Interface (discover_surface — see also routing.py for routing events):
+Interface (discover_surface — see also routing.py, drafting.py for handler events):
   discover_surface(
       intent: str,
       skill_id: str,
