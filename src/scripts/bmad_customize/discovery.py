@@ -23,7 +23,8 @@ Interface:
       skill_id: str,
       compile_py: Path,
       emit_fn: Callable[[dict[str, Any]], None],
-      run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+      run_fn: Optional[Callable[..., subprocess.CompletedProcess[str]]] = None,
+      # None → resolved at call time; default behaviour is subprocess.run
   ) -> None
 
   intent:      natural-language customization intent (accepted for API stability;
@@ -31,7 +32,7 @@ Interface:
   skill_id:    resolved skill identifier (e.g. "mock-module/skill-a")
   compile_py:  path to compile.py; ignored by run_fn in tests
   emit_fn:     event collector callback
-  run_fn:      default subprocess.run; overridden by skill_test_runner patch in tests
+  run_fn:      resolved to subprocess.run at call time when None; pass explicit callable for DI
 
 Production callers derive compile_py via:
   # A1 (Story 6.2): dev-tree path assumption; Story 6.7 must generalize to
@@ -46,7 +47,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-_ICON_SUBSTRINGS: list[str] = ["icon", "glyph", "emoji", "logo"]
+_ICON_SUBSTRINGS: tuple[str, ...] = ("icon", "glyph", "emoji", "logo")
 
 
 def discover_surface(
