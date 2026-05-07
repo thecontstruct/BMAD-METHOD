@@ -60,8 +60,48 @@ Event schemas emitted by this module:
     Emitted by writer.py::revert_override after reverting the override.
     deleted=True when the file was newly created and has been deleted;
     deleted=False when the file pre-existed and its content has been restored.
+  drift_triage_start:
+    {"action": "drift_triage_start", "total_prose_changes": int,
+     "total_toml_changes": int, "total_orphans": int,
+     "total_new_defaults": int, "total_glob_changes": int}
+    Emitted by drift.py as the first event before processing any drift entry.
+    Carries summary counts from the dry-run payload's summary block.
+  propose_prose_drift:
+    {"action": "propose_prose_drift", "skill": str, "path": str, "tier": str,
+     "old_hash": str, "new_hash": str, "user_override_hash": str,
+     "requires_confirmation": bool}
+    Emitted by drift.py for each prose_fragment_changes entry. Carries hashes
+    only (not actual content); the LLM shell fetches content for presentation.
+    requires_confirmation is always True.
+  propose_toml_default_drift:
+    {"action": "propose_toml_default_drift", "skill": str, "key": str,
+     "old_hash": str, "new_value": str, "user_override_value": str,
+     "requires_confirmation": bool}
+    Emitted by drift.py for each toml_default_changes entry. old_hash is the
+    hash of the prior default (not the value string). requires_confirmation
+    is always True.
+  propose_toml_orphan:
+    {"action": "propose_toml_orphan", "skill": str, "path": str,
+     "reason": str, "override_hash": str, "requires_confirmation": bool}
+    Emitted by drift.py for each orphaned_overrides entry. The LLM shell
+    offers to remove the orphaned override via revert_override(pre_write_content=None).
+    requires_confirmation is always True.
+  propose_toml_new_default:
+    {"action": "propose_toml_new_default", "skill": str, "key": str,
+     "new_value": str, "source": str}
+    Emitted by drift.py for each new_defaults entry. Informational only —
+    no requires_confirmation field is emitted.
+  propose_glob_drift:
+    {"action": "propose_glob_drift", "skill": str, "pattern": str,
+     "toml_key": str, "added_matches": list[str], "removed_matches": list[str]}
+    Emitted by drift.py for each glob_changes entry. Informational only —
+    no requires_confirmation field is emitted.
+  drift_triage_complete:
+    {"action": "drift_triage_complete"}
+    Emitted by drift.py after all drift entries have been processed. Signals
+    the LLM shell to instruct the user to re-run bmad upgrade.
 
-Interface (discover_surface — see also routing.py, drafting.py, writer.py for handler events):
+Interface (discover_surface — see also routing.py, drafting.py, writer.py, drift.py for handler events):
   discover_surface(
       intent: str,
       skill_id: str,
