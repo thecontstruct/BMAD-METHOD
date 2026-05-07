@@ -1,0 +1,5 @@
+--- mock-module/skill-a/SKILL.md
++++ mock-module/skill-a/SKILL.md	(recompiled)
+@@ -10,3 +10,3 @@
+-Original menu handler content.
++Revised menu handler content.

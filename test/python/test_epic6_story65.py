@@ -1,0 +1,263 @@
+"""Story 6.5: Writer handler tests — post-accept write, --diff verification,
+and revert-on-rejection.
+
+Covers AC-1 (override write to exact path with sparse content), AC-2
+(--diff invocation and propose_diff_review event ordering), AC-3 (revert
+on diff rejection: delete-when-new vs restore-when-pre-existing).
+"""
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any
+
+# Add test/ to path for harness.* imports
+_TEST_DIR = Path(__file__).resolve().parent.parent
+if str(_TEST_DIR) not in sys.path:
+    sys.path.insert(0, str(_TEST_DIR))
+
+# Add src/scripts to path for bmad_customize.* imports
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from bmad_customize.writer import revert_override, write_override
+from harness.mock_compiler import MockCompiler
+from harness.skill_test_runner import run_handler_with_mock
+
+_FIXTURES_ROOT = _TEST_DIR / "fixtures" / "customize-mocks"
+_COMPILE_PY = _SCRIPTS_DIR / "compile.py"
+
+_GUARD_MSG = (
+    "MockCompiler.calls is empty after skill invocation -- "
+    "run_handler_with_mock seam wiring broken."
+)
+
+
+# ---------------------------------------------------------------------------
+# AC-1 / AC-2: TOML plane write + --diff
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideTOML(unittest.TestCase):
+    """write_override on the TOML plane: file written + propose_diff_review."""
+
+    def setUp(self) -> None:
+        self.mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        self.mock.register("--diff", "diff-icon-change.txt")
+        self._tmp = tempfile.TemporaryDirectory()
+        self._target = str(Path(self._tmp.name) / "_bmad/custom/skill-a.user.toml")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self) -> list[dict[str, Any]]:
+        return run_handler_with_mock(
+            write_override,
+            self.mock,
+            plane="toml",
+            target_file=self._target,
+            accepted_content='agent.icon = "🎯"\n',
+            skill_id="mock-module/skill-a",
+            compile_py=_COMPILE_PY,
+        )
+
+    def test_target_file_written(self) -> None:
+        self._run()
+        self.assertTrue(Path(self._target).exists())
+
+    def test_file_content_matches_accepted(self) -> None:
+        self._run()
+        self.assertEqual(
+            Path(self._target).read_text(encoding="utf-8"),
+            'agent.icon = "🎯"\n',
+        )
+
+    def test_parent_dirs_created(self) -> None:
+        self._run()
+        self.assertTrue(Path(self._target).parent.exists())
+
+    def test_write_override_complete_emitted(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(events[0]["action"], "write_override_complete")
+
+    def test_propose_diff_review_emitted(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertIn("propose_diff_review", [e["action"] for e in events])
+
+    def test_diff_text_matches_fixture(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(
+            events[-1]["diff_text"],
+            (_FIXTURES_ROOT / "diff-icon-change.txt").read_text(encoding="utf-8"),
+        )
+
+    def test_requires_confirmation_true(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertIs(events[-1]["requires_confirmation"], True)
+
+
+# ---------------------------------------------------------------------------
+# AC-1 / AC-2: Prose plane write + --diff
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideProse(unittest.TestCase):
+    """write_override on the prose plane: nested fragment path + diff event."""
+
+    def setUp(self) -> None:
+        self.mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        self.mock.register("--diff", "diff-prose-change.txt")
+        self._tmp = tempfile.TemporaryDirectory()
+        self._target = str(
+            Path(self._tmp.name)
+            / "_bmad/custom/fragments/mock-module/skill-a/menu-handler.template.md"
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self) -> list[dict[str, Any]]:
+        return run_handler_with_mock(
+            write_override,
+            self.mock,
+            plane="prose",
+            target_file=self._target,
+            accepted_content="Revised menu handler content.\n",
+            skill_id="mock-module/skill-a",
+            compile_py=_COMPILE_PY,
+        )
+
+    def test_target_file_written(self) -> None:
+        self._run()
+        self.assertTrue(Path(self._target).exists())
+
+    def test_file_content_matches_accepted(self) -> None:
+        self._run()
+        self.assertEqual(
+            Path(self._target).read_text(encoding="utf-8"),
+            "Revised menu handler content.\n",
+        )
+
+    def test_write_override_complete_emitted(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(events[0]["action"], "write_override_complete")
+
+    def test_propose_diff_review_emitted(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertIn("propose_diff_review", [e["action"] for e in events])
+
+    def test_requires_confirmation_true(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertIs(events[-1]["requires_confirmation"], True)
+
+
+# ---------------------------------------------------------------------------
+# AC-3: Revert on diff rejection (pure filesystem; no MockCompiler)
+# ---------------------------------------------------------------------------
+
+
+class TestRevertOverride(unittest.TestCase):
+    """revert_override deletes (when newly created) or restores (when pre-existing)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _make_file(self, content: str) -> str:
+        p = Path(self._tmp.name) / "skill-a.user.toml"
+        p.write_text(content, encoding="utf-8")
+        return str(p)
+
+    def test_revert_deletes_new_file(self) -> None:
+        events: list[dict[str, Any]] = []
+        target = self._make_file("old content\n")
+        revert_override(target, pre_write_content=None, emit_fn=events.append)
+        self.assertFalse(Path(target).exists())
+
+    def test_revert_restores_existing_file(self) -> None:
+        events: list[dict[str, Any]] = []
+        target = self._make_file("old\n")
+        Path(target).write_text("new\n", encoding="utf-8")
+        revert_override(target, pre_write_content="old\n", emit_fn=events.append)
+        self.assertEqual(Path(target).read_text(encoding="utf-8"), "old\n")
+
+    def test_revert_complete_emitted_on_delete(self) -> None:
+        events: list[dict[str, Any]] = []
+        target = self._make_file("old content\n")
+        revert_override(target, pre_write_content=None, emit_fn=events.append)
+        self.assertEqual(events[-1]["action"], "revert_complete")
+        self.assertIs(events[-1]["deleted"], True)
+
+    def test_revert_complete_emitted_on_restore(self) -> None:
+        events: list[dict[str, Any]] = []
+        target = self._make_file("old\n")
+        Path(target).write_text("new\n", encoding="utf-8")
+        revert_override(target, pre_write_content="old\n", emit_fn=events.append)
+        self.assertEqual(events[-1]["action"], "revert_complete")
+        self.assertIs(events[-1]["deleted"], False)
+
+
+# ---------------------------------------------------------------------------
+# AC-2: --diff subprocess + event ordering contract
+# ---------------------------------------------------------------------------
+
+
+class TestDiffContract(unittest.TestCase):
+    """Subprocess + event ordering: write before diff, exactly one --diff call."""
+
+    def setUp(self) -> None:
+        self.mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        self.mock.register("--diff", "diff-icon-change.txt")
+        self._tmp = tempfile.TemporaryDirectory()
+        self._target = str(Path(self._tmp.name) / "_bmad/custom/skill-a.user.toml")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self) -> list[dict[str, Any]]:
+        return run_handler_with_mock(
+            write_override,
+            self.mock,
+            plane="toml",
+            target_file=self._target,
+            accepted_content='agent.icon = "🎯"\n',
+            skill_id="mock-module/skill-a",
+            compile_py=_COMPILE_PY,
+        )
+
+    def test_events_sequence_write_then_diff(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(events[0]["action"], "write_override_complete")
+        self.assertEqual(events[1]["action"], "propose_diff_review")
+
+    def test_exactly_one_mock_call_per_write(self) -> None:
+        self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(len(self.mock.calls), 1)
+
+    def test_diff_text_non_empty(self) -> None:
+        events = self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertTrue(events[-1]["diff_text"])
+
+    def test_no_explain_call_in_write_handler(self) -> None:
+        self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(self.mock.calls[0]["pattern"], "--diff")
+
+
+if __name__ == "__main__":
+    unittest.main()

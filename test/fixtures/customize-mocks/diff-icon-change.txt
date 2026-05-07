@@ -1,0 +1,7 @@
+--- mock-module/skill-a/SKILL.md
++++ mock-module/skill-a/SKILL.md	(recompiled)
+@@ -1,5 +1,5 @@
+ ---
+-icon: 📋
++icon: 🎯
+ ---

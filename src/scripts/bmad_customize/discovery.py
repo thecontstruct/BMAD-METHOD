@@ -44,8 +44,24 @@ Event schemas emitted by this module:
     field_path (TOML) or fragment_name (prose) is present, never both.
     current_value is absent when the matching TOML field is not found (graceful
     degradation). revision_feedback is absent on first iteration.
+  write_override_complete:
+    {"action": "write_override_complete", "plane": str, "target_file": str}
+    Emitted by writer.py immediately after the override file is written to disk
+    and before the --diff subprocess call. Signals the LLM shell that the write
+    succeeded.
+  propose_diff_review:
+    {"action": "propose_diff_review", "diff_text": str, "target_file": str,
+     "requires_confirmation": bool}
+    Emitted by writer.py after capturing --diff output. diff_text is the raw
+    unified-diff string (may be empty if no change detected). requires_confirmation
+    is always True. Signals the LLM shell to render the diff for user review.
+  revert_complete:
+    {"action": "revert_complete", "target_file": str, "deleted": bool}
+    Emitted by writer.py::revert_override after reverting the override.
+    deleted=True when the file was newly created and has been deleted;
+    deleted=False when the file pre-existed and its content has been restored.
 
-Interface (discover_surface — see also routing.py, drafting.py for handler events):
+Interface (discover_surface — see also routing.py, drafting.py, writer.py for handler events):
   discover_surface(
       intent: str,
       skill_id: str,
