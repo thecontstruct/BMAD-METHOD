@@ -1,0 +1,22 @@
+# bmad-customize skill customization surface.
+# Template-compiled from bmad-customize.template.md — name and description
+# are resolved as {{self.name}} / {{self.description}} at compile time.
+
+name = "bmad-customize"
+description = "Authors and updates customization overrides for installed BMad skills. Use when the user says 'customize bmad', 'override a skill', 'change agent behavior', or 'customize a workflow'."
+
+[workflow]
+
+# --- Configurable below. Overrides merge per BMad structural rules: ---
+#   scalars: override wins • arrays (activation_steps_*): append
+
+# Steps to run before the standard activation (config load, greet).
+# Overrides append. Use for pre-flight loads, compliance checks, etc.
+
+activation_steps_prepend = []
+
+# Steps to run after greet but before the workflow begins.
+# Overrides append. Use for context-heavy setup that should happen
+# once the user has been acknowledged.
+
+activation_steps_append = []

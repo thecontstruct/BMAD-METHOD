@@ -1,6 +1,6 @@
 ---
-name: bmad-customize
-description: Authors and updates customization overrides for installed BMad skills. Use when the user says 'customize bmad', 'override a skill', 'change agent behavior', or 'customize a workflow'.
+name: {{self.name}}
+description: {{self.description}}
 ---
 
 # BMad Customize
@@ -11,11 +11,7 @@ Scope v1: per-skill `[agent]` overrides (`bmad-agent-<role>.toml` / `.user.toml`
 
 When the target's `customize.toml` doesn't expose what the user wants, say so plainly. Don't invent fields.
 
-## Preflight
-
-- No `{project-root}/_bmad/` → BMad isn't installed. Say so, stop.
-- `{project-root}/_bmad/scripts/resolve_customization.py` missing → continue, but Step 6 verify falls back to manual merge.
-- Both present → proceed.
+<<include path="fragments/preflight.md">>
 
 ## Activation
 
@@ -104,8 +100,4 @@ Default by character (policy → team, personal → user), confirm before writin
 
 Otherwise the skill isn't done — finish or tell the user they're exiting incomplete.
 
-## When this skill can't help
-
-- **Central config** (`{project-root}/_bmad/custom/config.toml`) — see the [How to Customize BMad guide](https://docs.bmad-method.org/how-to/customize-bmad/).
-- **Step logic, ordering, behavior not in `customize.toml`** — open a feature request, or use `bmad-builder` to create a custom skill. Offer to help with either.
-- **Skills without a `customize.toml`** — not customizable.
+<<include path="fragments/when-this-skill-cant-help.md">>
