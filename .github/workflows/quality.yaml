@@ -111,3 +111,34 @@ jobs:
 
       - name: Validate skills
         run: npm run validate:skills
+
+  validate-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # DN-R2-6 (Phil Option C 2026-05-08): no `pip install` step is needed because
+      # src/scripts/compile.py is stdlib-only (per the Python compiler architecture
+      # established in Stories 5.1–5.5b — no pyyaml, no requests, no third-party deps).
+      # If a future story adds a non-stdlib Python import, this job MUST be updated to
+      # `pip install -r <requirements>` between Setup Python and Validate compile hashes.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate compile hashes
+        run: npm run validate:compile
+
+      - name: Test validate-compile
+        run: npm run test:validate-compile
