@@ -52,15 +52,15 @@ def _infer_schema(filename: str) -> dict:
 class TestSchemaFixtureContract(unittest.TestCase):
     """Contract tests: every fixture validates against its frozen v1 schema."""
 
-    def test_fixture_count_is_exactly_14(self) -> None:
-        """Exactly 14 .json fixtures exist under customize-mocks/ (AC-1 invariant)."""
+    def test_fixture_count_is_exactly_15(self) -> None:
+        """Exactly 15 .json fixtures exist under customize-mocks/ (AC-1 invariant)."""
         fixtures = sorted(_FIXTURES_ROOT.glob("*.json"))
         self.assertEqual(
             len(fixtures),
-            14,
-            f"Expected exactly 14 fixtures, found {len(fixtures)}: "
+            15,
+            f"Expected exactly 15 fixtures, found {len(fixtures)}: "
             + ", ".join(f.name for f in fixtures),
-        )  # Story 6.7b added dry-run-provenance-shift.json (13 → 14); 6.7c will add the self-dogfood fixture (14 → 15).
+        )  # Story 6.7c added dry-run-bmad-customize-self.json (14 → 15).
 
     def test_all_fixtures_declare_schema_version_1(self) -> None:
         """Every fixture has schema_version == 1 (integer)."""

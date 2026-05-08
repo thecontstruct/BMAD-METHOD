@@ -1,0 +1,38 @@
+{
+  "drift": [
+    {
+      "glob_changes": [],
+      "new_defaults": [],
+      "orphaned_overrides": [],
+      "prose_fragment_changes": [
+        {
+          "new_hash": "bbb00000000000000000000000000002",
+          "old_hash": "aaa00000000000000000000000000001",
+          "path": "fragments/when-this-skill-cant-help.md",
+          "tier": "user-module-fragment",
+          "user_override_hash": "ccc00000000000000000000000000003"
+        }
+      ],
+      "skill": "core-skills/bmad-customize",
+      "toml_default_changes": [
+        {
+          "key": "icon",
+          "new_value": "customize-icon-v2",
+          "old_hash": "ddd00000000000000000000000000004",
+          "user_override_value": "my-custom-icon"
+        }
+      ],
+      "variable_provenance_shifts": []
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "glob_changes": 0,
+    "new_defaults": 0,
+    "orphaned_overrides": 0,
+    "prose_fragment_changes": 1,
+    "toml_default_changes": 1,
+    "total_skills_with_drift": 1,
+    "variable_provenance_shifts": 0
+  }
+}
