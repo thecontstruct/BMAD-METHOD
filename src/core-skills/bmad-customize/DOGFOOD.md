@@ -2,7 +2,7 @@
 
 Release gate procedure for verifying `bmad-customize` self-upgrade behavior before each BMAD release.
 
-**Coordination Owner:** **Phil M** — inaugural dogfood owner (Story 6.7 PR). Named owner assignment process formalized in Story 7.5. Owner must be a core maintainer with commit rights.
+**Coordination Owner:** **Phil M, permanent.** The Coordination Owner role does not rotate; Phil M owns every release-gate execution (per Phil's resolution 2026-05-08, Epic 6 retrospective §7.3 Option A). Revisit at Epic 8 retro. Owner must be a core maintainer with commit rights.
 
 **Reference fixture:** `test/fixtures/customize-mocks/dry-run-bmad-customize-self.json` (simulates a bmad-customize self-upgrade dry-run with one drifted prose fragment and one drifted TOML default).
 
