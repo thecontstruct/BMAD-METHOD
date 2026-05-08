@@ -43,8 +43,7 @@ Interface:
                      when None, the key is omitted from the event entirely
 
 Production callers derive compile_py via:
-  # A1 (Story 6.2): same dev-tree path assumption as discovery.py;
-  # see deferred-work.md Story 6.7 entry.
+  # dev-tree path; installed-package derivation deferred until packaging story
   compile_py = Path(__file__).resolve().parent.parent / "compile.py"
 """
 from __future__ import annotations
@@ -54,6 +53,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from ._errors import BmadSubprocessError
 
 
 def draft_content(
@@ -87,14 +88,31 @@ def draft_content(
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
     )
-    # A1 (Story 6.2): same dev-tree path assumption as discovery.py; see deferred-work.md Story 6.7 entry.
-    result = _run(
-        [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    payload: dict[str, Any] = json.loads(result.stdout)
+    # dev-tree path; installed-package derivation deferred until packaging story
+    cmd = [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"]
+    try:
+        result = _run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise BmadSubprocessError(
+            f"draft_content: bmad compile failed (rc={exc.returncode}): {exc.stderr}"
+        ) from exc
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise BmadSubprocessError(
+            f"draft_content: invalid JSON from compile.py: {result.stdout[:200]!r}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise BmadSubprocessError(
+            f"draft_content: expected JSON object, got {type(raw).__name__}"
+        )
+    payload: dict[str, Any] = raw
 
     event: dict[str, Any] = {
         "action": "propose_draft",
@@ -106,7 +124,7 @@ def draft_content(
 
     if plane == "toml" and field_path is not None:
         event["field_path"] = field_path
-        for field in payload.get("toml_fields", []):
+        for field in payload.get("toml_fields") or []:
             path = field.get("path", "")
             last_seg = path.split(".")[-1] if "." in path else path
             if last_seg == field_path:

@@ -63,7 +63,8 @@ Event schemas emitted by this module:
   drift_triage_start:
     {"action": "drift_triage_start", "total_prose_changes": int,
      "total_toml_changes": int, "total_orphans": int,
-     "total_new_defaults": int, "total_glob_changes": int}
+     "total_new_defaults": int, "total_glob_changes": int,
+     "total_provenance_shifts": int}
     Emitted by drift.py as the first event before processing any drift entry.
     Carries summary counts from the dry-run payload's summary block.
   propose_prose_drift:
@@ -96,6 +97,13 @@ Event schemas emitted by this module:
      "toml_key": str, "added_matches": list[str], "removed_matches": list[str]}
     Emitted by drift.py for each glob_changes entry. Informational only —
     no requires_confirmation field is emitted.
+  propose_variable_provenance_shift:
+    {"action": "propose_variable_provenance_shift", "skill": str,
+     "name": str, "old_source": str, "new_source": str,
+     "old_toml_layer": str | null, "new_toml_layer": str | null}
+    Emitted by drift.py for each variable_provenance_shifts entry. Reports that
+    a variable's compilation provenance changed between BMAD versions.
+    Informational only — no requires_confirmation field (OQ-6=Option A).
   drift_triage_complete:
     {"action": "drift_triage_complete"}
     Emitted by drift.py after all drift entries have been processed. Signals
@@ -119,8 +127,7 @@ Interface (discover_surface — see also routing.py, drafting.py, writer.py, dri
   run_fn:      resolved to subprocess.run at call time when None; pass explicit callable for DI
 
 Production callers derive compile_py via:
-  # A1 (Story 6.2): dev-tree path assumption; Story 6.7 must generalize to
-  # installed/packaged path.
+  # dev-tree path; installed-package derivation deferred until packaging story
   compile_py = Path(__file__).resolve().parent.parent / "compile.py"
 """
 from __future__ import annotations
@@ -130,6 +137,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from ._errors import BmadSubprocessError
 
 _ICON_SUBSTRINGS: tuple[str, ...] = ("icon", "glyph", "emoji", "logo")
 
@@ -160,14 +169,31 @@ def discover_surface(
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
     )
-    result = _run(
-        [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    cmd = [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"]
+    try:
+        result = _run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise BmadSubprocessError(
+            f"discover_surface: bmad compile failed (rc={exc.returncode}): {exc.stderr}"
+        ) from exc
     # (2) Parse JSON output
-    payload: dict[str, Any] = json.loads(result.stdout)
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise BmadSubprocessError(
+            f"discover_surface: invalid JSON from compile.py: {result.stdout[:200]!r}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise BmadSubprocessError(
+            f"discover_surface: expected JSON object, got {type(raw).__name__}"
+        )
+    payload: dict[str, Any] = raw
     # (3) Emit discover event unconditionally as the first event
     emit_fn({"action": "discover", "skill_id": skill_id, "source": "--explain --json"})
     # (4) Detect ambiguity: toml condition AND fragment condition must both hold

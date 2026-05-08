@@ -1,0 +1,31 @@
+{
+  "drift": [
+    {
+      "glob_changes": [],
+      "new_defaults": [],
+      "orphaned_overrides": [],
+      "prose_fragment_changes": [],
+      "skill": "mock-module/skill-a",
+      "toml_default_changes": [],
+      "variable_provenance_shifts": [
+        {
+          "name": "icon",
+          "new_source": "user-toml",
+          "new_toml_layer": "user",
+          "old_source": "toml-default",
+          "old_toml_layer": null
+        }
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "glob_changes": 0,
+    "new_defaults": 0,
+    "orphaned_overrides": 0,
+    "prose_fragment_changes": 0,
+    "toml_default_changes": 0,
+    "total_skills_with_drift": 1,
+    "variable_provenance_shifts": 1
+  }
+}

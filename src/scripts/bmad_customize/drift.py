@@ -48,8 +48,7 @@ Interface:
               explicit callable for explicit dependency injection only.
 
 Production callers derive upgrade_py via:
-  # A1 (Story 6.2): same dev-tree path assumption as discovery.py;
-  # see deferred-work.md Story 6.7 entry.
+  # dev-tree path; installed-package derivation deferred until packaging story
   upgrade_py = Path(__file__).resolve().parent.parent / "upgrade.py"
 """
 from __future__ import annotations
@@ -59,6 +58,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from ._errors import BmadSubprocessError
 
 
 def drift_triage(
@@ -91,14 +92,30 @@ def drift_triage(
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
     )
-    # A1 (Story 6.2): same dev-tree path assumption; see deferred-work.md Story 6.7 entry.
-    result = _run(
-        [sys.executable, str(upgrade_py), "--dry-run", "--json"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    payload: dict[str, Any] = json.loads(result.stdout)
+    # dev-tree path; installed-package derivation deferred until packaging story
+    try:
+        result = _run(
+            [sys.executable, str(upgrade_py), "--dry-run", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise BmadSubprocessError(
+            f"drift_triage: bmad upgrade --dry-run failed (rc={exc.returncode}): {exc.stderr}"
+        ) from exc
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise BmadSubprocessError(
+            f"drift_triage: invalid JSON from upgrade.py: {result.stdout[:200]!r}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise BmadSubprocessError(
+            f"drift_triage: expected JSON object, got {type(raw).__name__}"
+        )
+    payload: dict[str, Any] = raw
     sv = payload.get("schema_version")
     if sv != 1:
         raise ValueError(f"Unsupported dry-run schema version: {sv!r}")
@@ -111,64 +128,75 @@ def drift_triage(
         "total_orphans": summary.get("orphaned_overrides", 0),
         "total_new_defaults": summary.get("new_defaults", 0),
         "total_glob_changes": summary.get("glob_changes", 0),
+        "total_provenance_shifts": summary.get("variable_provenance_shifts", 0),
     })
 
-    for entry in payload.get("drift", []):
-        skill: str = entry.get("skill", "")
+    try:
+        for entry in payload.get("drift", []):
+            skill: str = entry.get("skill", "")
 
-        for change in entry.get("prose_fragment_changes", []):
-            emit_fn({
-                "action": "propose_prose_drift",
-                "skill": skill,
-                "path": change["path"],
-                "tier": change["tier"],
-                "old_hash": change["old_hash"],
-                "new_hash": change["new_hash"],
-                "user_override_hash": change.get("user_override_hash"),
-                "requires_confirmation": True,
-            })
+            for change in entry.get("prose_fragment_changes", []):
+                emit_fn({
+                    "action": "propose_prose_drift",
+                    "skill": skill,
+                    "path": change["path"],
+                    "tier": change["tier"],
+                    "old_hash": change["old_hash"],
+                    "new_hash": change["new_hash"],
+                    "user_override_hash": change.get("user_override_hash"),
+                    "requires_confirmation": True,
+                })
 
-        for change in entry.get("toml_default_changes", []):
-            emit_fn({
-                "action": "propose_toml_default_drift",
-                "skill": skill,
-                "key": change["key"],
-                "old_hash": change["old_hash"],
-                "new_value": change["new_value"],
-                "user_override_value": change.get("user_override_value"),
-                "requires_confirmation": True,
-            })
+            for change in entry.get("toml_default_changes", []):
+                emit_fn({
+                    "action": "propose_toml_default_drift",
+                    "skill": skill,
+                    "key": change["key"],
+                    "old_hash": change["old_hash"],
+                    "new_value": change["new_value"],
+                    "user_override_value": change.get("user_override_value"),
+                    "requires_confirmation": True,
+                })
 
-        for change in entry.get("orphaned_overrides", []):
-            emit_fn({
-                "action": "propose_toml_orphan",
-                "skill": skill,
-                "path": change["path"],
-                "reason": change["reason"],
-                "override_hash": change["override_hash"],
-                "requires_confirmation": True,
-            })
+            for change in entry.get("orphaned_overrides", []):
+                emit_fn({
+                    "action": "propose_toml_orphan",
+                    "skill": skill,
+                    "path": change["path"],
+                    "reason": change["reason"],
+                    "override_hash": change["override_hash"],
+                    "requires_confirmation": True,
+                })
 
-        for change in entry.get("new_defaults", []):
-            emit_fn({
-                "action": "propose_toml_new_default",
-                "skill": skill,
-                "key": change["key"],
-                "new_value": change["new_value"],
-                "source": change["source"],
-            })
+            for change in entry.get("new_defaults", []):
+                emit_fn({
+                    "action": "propose_toml_new_default",
+                    "skill": skill,
+                    "key": change["key"],
+                    "new_value": change["new_value"],
+                    "source": change["source"],
+                })
 
-        for change in entry.get("glob_changes", []):
-            emit_fn({
-                "action": "propose_glob_drift",
-                "skill": skill,
-                "pattern": change["pattern"],
-                "toml_key": change["toml_key"],
-                "added_matches": change["added_matches"],
-                "removed_matches": change["removed_matches"],
-            })
+            for change in entry.get("glob_changes", []):
+                emit_fn({
+                    "action": "propose_glob_drift",
+                    "skill": skill,
+                    "pattern": change["pattern"],
+                    "toml_key": change["toml_key"],
+                    "added_matches": change["added_matches"],
+                    "removed_matches": change["removed_matches"],
+                })
 
-        # variable_provenance_shifts: intentionally not iterated — no event schema
-        # defined in Story 6.6. Do not add handling; deferred to a later story.
-
-    emit_fn({"action": "drift_triage_complete"})
+            for change in entry.get("variable_provenance_shifts", []):
+                emit_fn({
+                    "action": "propose_variable_provenance_shift",
+                    "skill": skill,
+                    "name": change["name"],
+                    "old_source": change["old_source"],
+                    "new_source": change["new_source"],
+                    "old_toml_layer": change.get("old_toml_layer"),
+                    "new_toml_layer": change.get("new_toml_layer"),
+                })
+                # No requires_confirmation — informational per OQ-6=Option A.
+    finally:
+        emit_fn({"action": "drift_triage_complete"})

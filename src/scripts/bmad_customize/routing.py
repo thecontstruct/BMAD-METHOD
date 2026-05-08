@@ -41,8 +41,7 @@ Interface:
                explicit callable for explicit dependency injection only
 
 Production callers derive compile_py via:
-  # A1 (Story 6.2): same dev-tree path assumption as discovery.py;
-  # see deferred-work.md Story 6.7 entry.
+  # dev-tree path; installed-package derivation deferred until packaging story
   compile_py = Path(__file__).resolve().parent.parent / "compile.py"
 """
 from __future__ import annotations
@@ -53,6 +52,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from ._errors import BmadSubprocessError
 
 _FULL_SKILL_PHRASES: tuple[str, ...] = (
     "entire skill",
@@ -163,18 +164,35 @@ def route_intent(
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
     )
-    # A1 (Story 6.2): same dev-tree path assumption as discovery.py; see deferred-work.md Story 6.7 entry.
-    result = _run(
-        [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    payload: dict[str, Any] = json.loads(result.stdout)
+    # dev-tree path; installed-package derivation deferred until packaging story
+    cmd = [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"]
+    try:
+        result = _run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise BmadSubprocessError(
+            f"route_intent: bmad compile failed (rc={exc.returncode}): {exc.stderr}"
+        ) from exc
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise BmadSubprocessError(
+            f"route_intent: invalid JSON from compile.py: {result.stdout[:200]!r}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise BmadSubprocessError(
+            f"route_intent: expected JSON object, got {type(raw).__name__}"
+        )
+    payload: dict[str, Any] = raw
     # (3) Tokenize intent and match against surface
     tokens = _extract_tokens(intent)
-    toml_fields: list[dict[str, Any]] = payload.get("toml_fields", [])
-    fragments: list[dict[str, Any]] = payload.get("fragments", [])
+    toml_fields: list[dict[str, Any]] = payload.get("toml_fields") or []
+    fragments: list[dict[str, Any]] = payload.get("fragments") or []
     toml_candidates = _match_toml(toml_fields, tokens, skill_id)
     prose_candidates = _match_prose(fragments, tokens, skill_id)
     # (4) Routing decision

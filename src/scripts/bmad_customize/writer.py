@@ -76,8 +76,7 @@ Interface:
   emit_fn:           event collector callback
 
 Production callers derive compile_py via:
-  # A1 (Story 6.2): same dev-tree path assumption as discovery.py;
-  # see deferred-work.md Story 6.7 entry.
+  # dev-tree path; installed-package derivation deferred until packaging story
   compile_py = Path(__file__).resolve().parent.parent / "compile.py"
 """
 from __future__ import annotations
@@ -86,6 +85,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from ._errors import BmadSubprocessError
 
 
 def write_override(
@@ -126,14 +127,20 @@ def write_override(
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
     )
-    # A1 (Story 6.2): same dev-tree path assumption as discovery.py; see deferred-work.md Story 6.7 entry.
+    # dev-tree path; installed-package derivation deferred until packaging story
     # NOTE: --diff uses positional skill_canonical arg (NOT --skill; see compile.py line 694).
-    result = _run(
-        [sys.executable, str(compile_py), skill_id, "--diff"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = _run(
+            [sys.executable, str(compile_py), skill_id, "--diff"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise BmadSubprocessError(
+            f"write_override: bmad compile --diff failed (rc={exc.returncode}): {exc.stderr}"
+        ) from exc
     diff_text = result.stdout
 
     emit_fn({
