@@ -29,13 +29,13 @@ Briefs produced here are honest, right-sized to purpose, and built for what come
 
 **Create.** A brief the user is proud of, that meets their needs, drawn out through real conversation — do not assume: instead converse and understand, and then help craft the best product brief for their needs. Begin in `## Discovery` before drafting; the brief comes after the picture is on the table. Shape follows the product and need. Treat `{workflow.brief_template}` as a starting structure, not a contract: drop sections that do not earn their place, add sections the product needs, reorder freely - create sections for specialized domains or concerns also as needed. The brief serves the product's story, not the template's shape. Bind `{doc_workspace}` to a fresh folder at `{workflow.output_dir}/{workflow.output_folder_name}/` and write `brief.md` there with YAML frontmatter (title, status, created, updated). For Update and Validate, `{doc_workspace}` is the existing folder of the brief being targeted.
 
-**Update.** Reconcile an existing brief with a change signal (edit request, downstream artifact, anything). Read the brief, the addendum if present, `decision-log.md`, and any original inputs first — past decisions and rejected ideas matter. Then run the `## Discovery` posture against the change signal before proposing changes. Identify what is now stale or wrong, propose changes, apply on agreement, bump `updated`. If the change signal contradicts prior decisions, surface the conflict before changing anything. In headless mode, if the prompt clearly signals intent to override the contradicted decision, proceed with the change and autonomously write the full audit trail — a new `decision-log.md` entry naming the reversal and its rationale, and an `addendum.md` override section — without waiting for user confirmation; if intent to override is ambiguous, halt with `blocked` status naming the specific conflict. If the change is fundamental, name it as a re-draft and offer Create instead. If `distillate.md` exists, regenerate it after changes are applied (re-invoke `bmad-distillator` per Finalize step 3); if unavailable, flag the distillate as stale.
+**Update.** Reconcile an existing brief with a change signal (edit request, downstream artifact, anything). Read the brief, the addendum if present, `decision-log.md`, and any original inputs first — past decisions and rejected ideas matter. Then run the `## Discovery` posture against the change signal before proposing changes. Identify what is now stale or wrong, propose changes, apply on agreement, bump `updated`, and write a new `decision-log.md` entry recording what changed and why — every update, clean or override, must be logged. If the change signal contradicts prior decisions, surface the conflict before changing anything. In headless mode, if the prompt clearly signals intent to override the contradicted decision, write the full audit trail first, then apply the change — you must: (1) add a new entry to `decision-log.md` naming the decision being reversed and its rationale, (2) add an override section to `addendum.md` (creating it if absent). Both are mandatory before modifying `brief.md`; do not wait for user confirmation. If intent to override is ambiguous, halt with `blocked` status naming the specific conflict. If the change is fundamental, name it as a re-draft and offer Create instead. If `distillate.md` exists, you must regenerate it after changes are applied by invoking `bmad-distillator`; this step is required, not optional. If `bmad-distillator` is unavailable, flag the distillate as stale in the JSON output.
 
-**Validate.** Honest critique against the brief's own purpose. Read the brief, the addendum if present, `decision-log.md`, and any original inputs first — a validation that ignores prior decisions, rejected ideas, or context the user supplied is shallow. Cite specific lines. Caveat what cannot be evaluated. Return inline — no separate file unless asked. Offer to roll findings into an Update.
+**Validate.** Honest critique against the brief's own purpose. Read the brief, the addendum if present, `decision-log.md`, and any original inputs first — a validation that ignores prior decisions, rejected ideas, or context the user supplied is shallow. Cite specific lines. Caveat what cannot be evaluated. Return inline — no separate file unless asked. Always offer to roll findings into an Update, even in headless mode — include `"offer_to_update": true` in the JSON status block.
 
 ## Headless Mode
 
-When invoked headless, do not ask. Complete the intent using what is provided, what exists in `{doc_workspace}`, or what you can discover yourself. If intent remains ambiguous after inference, halt with a `blocked` JSON status and a `reason` field — do not prompt. End with a JSON response listing status, intent, and artifact paths, for example:
+When invoked headless, do not ask. Complete the intent using what is provided, what exists in `{doc_workspace}`, or what you can discover yourself. If intent remains ambiguous after inference, halt with a `blocked` JSON status and a `reason` field — do not prompt. End with a JSON response listing status, intent, and artifact paths. The `intent` field must match the detected intent: `"create"`, `"update"`, or `"validate"`. Examples:
 
 ```json
 {
@@ -46,6 +46,14 @@ When invoked headless, do not ask. Complete the intent using what is provided, w
   "distillate": "{doc_workspace}/distillate.md",
   "decision_log": "{doc_workspace}/decision-log.md",
   "open_questions": []
+}
+```
+
+```json
+{
+  "status": "complete",
+  "intent": "validate",
+  "offer_to_update": true
 }
 ```
 

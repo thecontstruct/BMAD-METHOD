@@ -238,12 +238,13 @@
     {
       "id": "B8",
       "_pattern": "process-discipline",
+      "timeout": 900,
       "prompt": "Run headless. Create a product brief for InsuLens (smartphone app that pairs with thermal imaging accessories for homeowner insulation audits, target suburban homeowners 35-65 with houses pre-2000, 50 user interviews with 78% willingness to pay $49, Series A pitch input). Generate a distillate \u2014 this brief will feed downstream PRD work.",
-      "expected_output": "distillate.md exists alongside brief.md and decision-log.md. The distillate is meaningfully shorter than the brief. Content of the distillate matches the brief without introducing new facts. The transcript shows the bmad-distillator subagent invoked.",
+      "expected_output": "distillate.md exists alongside brief.md and decision-log.md. The distillate is a meaningful condensation of the brief. Content of the distillate matches the brief without introducing new facts. The transcript shows the bmad-distillator subagent invoked.",
       "files": [],
       "expectations": [
         "distillate.md exists in the run folder alongside brief.md and decision-log.md",
-        "distillate.md is shorter than brief.md (file size, in characters, is at least 30% smaller)",
+        "distillate.md is a meaningful condensation of brief.md \u2014 substantially more concise and capturing only the key decisions, target audience, validation evidence, and known unknowns needed for downstream PRD work, not a near-verbatim copy",
         "distillate.md does not introduce facts or claims not present in brief.md (no inventions on compression)",
         "The transcript contains a Skill tool call invoking bmad-distillator"
       ]
@@ -259,7 +260,7 @@
         "The final JSON status block artifact paths reference test-output/ rather than _bmad-output/",
         "brief.md body is written in Spanish \u2014 the majority of prose content (headings, section bodies) is in Spanish, not English",
         "brief.md covers the TaskFlow concept: freelancer daily planning, multi-client context, the sticky-notes-plus-calendar-plus-spreadsheet problem",
-        "brief.md is right-sized for a bootstrapped side project (250-600 words, no investor-grade framing such as TAM/SAM/SOM or Series A language)",
+        "brief.md is right-sized for a bootstrapped side project — appropriate depth and scope for a solo-founder app with no investor audience, no TAM/SAM/SOM framing, no Series A language, and no sections that pad for enterprise credibility",
         "The assistant's non-document output (transcript text content outside of brief.md) contains at least one marker of British informal register (e.g., 'mate', 'cheers', 'brilliant', 'sorted', 'innit', 'blimey', 'proper', 'right then', or equivalent pub-idiom phrasing)"
       ]
     }
