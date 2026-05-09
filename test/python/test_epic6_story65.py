@@ -7,6 +7,7 @@ on diff rejection: delete-when-new vs restore-when-pre-existing).
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from bmad_customize._errors import BmadSubprocessError
 from bmad_customize.writer import revert_override, write_override
 from harness.mock_compiler import MockCompiler
 from harness.skill_test_runner import run_handler_with_mock
@@ -260,6 +262,212 @@ class TestDiffContract(unittest.TestCase):
         self._run()
         self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
         self.assertEqual(self.mock.calls[0]["pattern"], "--diff")
+
+
+# ---------------------------------------------------------------------------
+# AC-1 (7.8): revert_override delete branch — directory at target path
+# ---------------------------------------------------------------------------
+
+
+class TestRevertDeleteBranchDirectory(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_raises_on_directory_target(self) -> None:
+        target = str(Path(self._tmp.name) / "a_dir")
+        Path(target).mkdir()
+        with self.assertRaises(BmadSubprocessError) as ctx:
+            revert_override(target, pre_write_content=None, emit_fn=lambda _: None)
+        self.assertIn(target, str(ctx.exception))
+
+    def test_directory_not_removed_on_error(self) -> None:
+        target = str(Path(self._tmp.name) / "a_dir")
+        Path(target).mkdir()
+        try:
+            revert_override(target, pre_write_content=None, emit_fn=lambda _: None)
+        except BmadSubprocessError:
+            pass
+        self.assertTrue(Path(target).is_dir())
+
+    def test_no_event_emitted_on_error(self) -> None:
+        target = str(Path(self._tmp.name) / "a_dir")
+        Path(target).mkdir()
+        events: list[dict[str, Any]] = []
+        try:
+            revert_override(target, pre_write_content=None, emit_fn=events.append)
+        except BmadSubprocessError:
+            pass
+        self.assertEqual(events, [])
+
+
+# ---------------------------------------------------------------------------
+# AC-2 (7.8): revert_override restore branch — symlink at target path (OQ-A=A)
+# ---------------------------------------------------------------------------
+
+
+class TestRevertRestoreBranchSymlink(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _make_symlink(self, link_path: str, target_content: str = "symlink-target\n") -> str:
+        real = Path(self._tmp.name) / "real_file.txt"
+        real.write_text(target_content, encoding="utf-8")
+        try:
+            os.symlink(str(real), link_path)
+        except OSError:
+            self.skipTest("symlink creation not permitted on this platform")
+        return link_path
+
+    def test_symlink_replaced_with_regular_file(self) -> None:
+        link = self._make_symlink(str(Path(self._tmp.name) / "override.toml"))
+        revert_override(link, pre_write_content="restored\n", emit_fn=lambda _: None)
+        self.assertTrue(Path(link).is_file() and not Path(link).is_symlink())
+        self.assertEqual(Path(link).read_text(encoding="utf-8"), "restored\n")
+
+    def test_symlink_target_not_modified(self) -> None:
+        real = Path(self._tmp.name) / "real_file.txt"
+        link = str(Path(self._tmp.name) / "override.toml")
+        real.write_text("original-target-content\n", encoding="utf-8")
+        try:
+            os.symlink(str(real), link)
+        except OSError:
+            self.skipTest("symlink creation not permitted on this platform")
+        revert_override(link, pre_write_content="restored\n", emit_fn=lambda _: None)
+        self.assertEqual(real.read_text(encoding="utf-8"), "original-target-content\n")
+
+    def test_revert_complete_emitted_on_symlink_restore(self) -> None:
+        link = self._make_symlink(str(Path(self._tmp.name) / "override.toml"))
+        events: list[dict[str, Any]] = []
+        revert_override(link, pre_write_content="restored\n", emit_fn=events.append)
+        self.assertEqual(events[-1]["action"], "revert_complete")
+        self.assertIs(events[-1]["deleted"], False)
+
+
+# ---------------------------------------------------------------------------
+# AC-3 (7.8): write_override mkdir — parent path is a non-directory
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideMkdirConflict(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_raises_when_parent_is_a_file(self) -> None:
+        conflict = Path(self._tmp.name) / "not_a_dir"
+        conflict.write_text("blocker\n", encoding="utf-8")
+        target = str(conflict / "skill-a.user.toml")
+        with self.assertRaises(BmadSubprocessError) as ctx:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=lambda _: None,
+            )
+        self.assertIn(str(conflict), str(ctx.exception))
+
+    def test_no_events_emitted_on_mkdir_error(self) -> None:
+        conflict = Path(self._tmp.name) / "not_a_dir"
+        conflict.write_text("blocker\n", encoding="utf-8")
+        target = str(conflict / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+            )
+        except BmadSubprocessError:
+            pass
+        self.assertEqual(events, [])
+
+
+# ---------------------------------------------------------------------------
+# AC-4 (7.8): write_override emit_fn-raise — revert_override reachable (OQ-B=A)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideEmitFnRaise(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _raising_emit(self, event: dict[str, Any]) -> None:
+        raise RuntimeError("emit_fn intentionally raises")
+
+    def test_file_on_disk_when_emit_fn_raises(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=self._raising_emit,
+            )
+        except RuntimeError:
+            pass
+        self.assertTrue(Path(target).exists())
+
+    def test_revert_delete_reachable_from_shell_exception_handler(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=self._raising_emit,
+            )
+        except RuntimeError:
+            revert_override(target, pre_write_content=None, emit_fn=events.append)
+        self.assertGreater(len(events), 0, "revert_override did not emit revert_complete")
+        self.assertFalse(Path(target).exists())
+        self.assertEqual(events[-1]["action"], "revert_complete")
+        self.assertIs(events[-1]["deleted"], True)
+
+    def test_revert_restore_reachable_from_shell_exception_handler(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        Path(target).write_text("prior content\n", encoding="utf-8")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=self._raising_emit,
+            )
+        except RuntimeError:
+            revert_override(target, pre_write_content="prior content\n", emit_fn=events.append)
+        self.assertGreater(len(events), 0, "revert_override did not emit revert_complete")
+        self.assertEqual(Path(target).read_text(encoding="utf-8"), "prior content\n")
+        self.assertEqual(events[-1]["action"], "revert_complete")
+        self.assertIs(events[-1]["deleted"], False)
 
 
 if __name__ == "__main__":

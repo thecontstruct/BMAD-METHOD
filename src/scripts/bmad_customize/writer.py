@@ -119,9 +119,19 @@ def write_override(
     On subprocess.CalledProcessError or any subprocess failure, the
     exception propagates; propose_diff_review is NOT emitted. Recovery
     (e.g. calling revert_override) is the LLM shell's responsibility.
+
+    If emit_fn raises on the write_override_complete event, write_text has already
+    succeeded — the file is on disk. The caller holds target_file a-priori and is
+    responsible for calling revert_override(target_file, pre_write_content, emit_fn)
+    in its exception handler to clean up.
     """
     target_path = Path(target_file)
-    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+    except (FileExistsError, NotADirectoryError) as exc:
+        raise BmadSubprocessError(
+            f"write_override: parent path exists as a non-directory: {str(target_path.parent)}"
+        ) from exc
     target_path.write_text(accepted_content, encoding="utf-8")
 
     emit_fn({
@@ -170,12 +180,22 @@ def revert_override(
             existence guard before unlink() prevents a FileNotFoundError
             if the LLM shell has already deleted the file out-of-band;
             revert_complete is still emitted with deleted=True.
+            Raises BmadSubprocessError (without emitting revert_complete)
+            if the target path is a directory — unlink() would fail
+            platform-inconsistently; the directory is left intact.
       str:  the file pre-existed; restore its content via write_text.
             revert_complete is emitted with deleted=False.
+            If target_path is a symlink, it is removed first so
+            write_text creates a regular file at target_path rather
+            than writing through to the symlink destination.
     """
     target_path = Path(target_file)
     if pre_write_content is None:
         if target_path.exists():
+            if target_path.is_dir():
+                raise BmadSubprocessError(
+                    f"revert_override: target_file is a directory, not a file: {target_file}"
+                )
             target_path.unlink()
         emit_fn({
             "action": "revert_complete",
@@ -183,6 +203,8 @@ def revert_override(
             "deleted": True,
         })
     else:
+        if target_path.is_symlink():
+            target_path.unlink()
         target_path.write_text(pre_write_content, encoding="utf-8")
         emit_fn({
             "action": "revert_complete",
