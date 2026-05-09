@@ -42,6 +42,7 @@ Interface:
       target_file: str,
       accepted_content: str,
       skill_id: str,
+      install_dir: str,
       compile_py: Path,
       emit_fn: Callable[[dict[str, Any]], None],
       run_fn: Optional[Callable[..., subprocess.CompletedProcess[str]]] = None,
@@ -56,7 +57,10 @@ Interface:
                     does not transform or validate this content
   skill_id:         resolved skill identifier (e.g. "mock-module/skill-a");
                     passed as the POSITIONAL skill_canonical arg to --diff,
-                    NOT via --skill (compile.py rejects --skill + --diff)
+                    NOT via --skill (compile.py rejects --skill + --diff);
+                    combined with --install-dir for compile.py:745-747 invariant
+  install_dir:      path to the bmad install directory; passed as compile.py
+                    --install-dir; required by compile.py:745-747
   compile_py:       path to compile.py; used in the --diff subprocess call
   emit_fn:          event collector callback
   run_fn:           resolved to subprocess.run at call time when None;
@@ -75,9 +79,10 @@ Interface:
                      (its content is restored on revert)
   emit_fn:           event collector callback
 
-Production callers derive compile_py via:
+Production callers derive compile_py and install_dir via:
   # dev-tree path; installed-package derivation deferred until packaging story
   compile_py = Path(__file__).resolve().parent.parent / "compile.py"
+  install_dir = str(Path(__file__).resolve().parent.parent.parent)
 """
 from __future__ import annotations
 
@@ -94,6 +99,7 @@ def write_override(
     target_file: str,
     accepted_content: str,
     skill_id: str,
+    install_dir: str,
     compile_py: Path,
     emit_fn: Callable[[dict[str, Any]], None],
     run_fn: Optional[Callable[..., "subprocess.CompletedProcess[str]"]] = None,
@@ -107,7 +113,7 @@ def write_override(
          shell observes the write even if --diff later fails.
       4. Resolve _run at call time (so unittest.mock.patch("subprocess.run", ...)
          intercepts the call without callers passing run_fn).
-      5. Invoke compile.py with positional skill_canonical + --diff.
+      5. Invoke compile.py with positional skill_canonical + --install-dir + --diff.
       6. Emit propose_diff_review carrying the raw stdout as diff_text.
 
     On subprocess.CalledProcessError or any subprocess failure, the
@@ -131,7 +137,7 @@ def write_override(
     # NOTE: --diff uses positional skill_canonical arg (NOT --skill; see compile.py line 694).
     try:
         result = _run(
-            [sys.executable, str(compile_py), skill_id, "--diff"],
+            [sys.executable, str(compile_py), skill_id, "--install-dir", install_dir, "--diff"],
             capture_output=True,
             text=True,
             encoding="utf-8",

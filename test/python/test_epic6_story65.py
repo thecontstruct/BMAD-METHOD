@@ -61,6 +61,7 @@ class TestWriteOverrideTOML(unittest.TestCase):
             target_file=self._target,
             accepted_content='agent.icon = "🎯"\n',
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -131,6 +132,7 @@ class TestWriteOverrideProse(unittest.TestCase):
             target_file=self._target,
             accepted_content="Revised menu handler content.\n",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -234,6 +236,7 @@ class TestDiffContract(unittest.TestCase):
             target_file=self._target,
             accepted_content='agent.icon = "🎯"\n',
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 

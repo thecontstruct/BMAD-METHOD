@@ -54,6 +54,12 @@ R2 Opus review patches applied (2026-05-08; Phil's resolutions):
     DN-R2-5=B:  _e2e_run_fn timeout uses max-with-floor instead of setdefault — caller
                 cannot narrow the test's bound, but can extend it.
     DN-R2-7=A:  Explicit `text.encode("utf-8")` (was implicit default).
+
+Story 7.3b retirement (2026-05-09):
+    The DN-R2-2=A workaround (run_fn-side --install-dir injection) is retired.
+    write_override in writer.py now passes --install-dir directly to
+    compile.py --diff, matching the 7.3a fix in discovery.py / routing.py /
+    drafting.py. Test fixtures no longer need to rewrite subprocess args.
 """
 
 from __future__ import annotations
@@ -200,16 +206,15 @@ class TestE2ECustomizationLifecycle(unittest.TestCase):
             kw.pop("cwd", None)
             caller_timeout = kw.get("timeout") if isinstance(kw.get("timeout"), (int, float)) else 0
             kw["timeout"] = max(caller_timeout, SUBPROCESS_TIMEOUT_SECONDS)
-            # DN-R2-2=A: inject --install-dir so compile --diff locates the skill.
-            full_args = args + (["--install-dir", str(self.install_dir)] if "--diff" in args else [])
+            # Retired by Story 7.3b: write_override now passes --install-dir itself.
             try:
-                return subprocess.run(full_args, cwd=str(REPO_ROOT), **kw)
+                return subprocess.run(args, cwd=str(REPO_ROOT), **kw)
             except subprocess.TimeoutExpired as exc:
                 partial_stderr = exc.stderr if isinstance(exc.stderr, str) else ""
                 partial_stdout = exc.stdout if isinstance(exc.stdout, str) else ""
                 raise AssertionError(
                     f"Step 2 FAIL: write_override subprocess timed out after {kw['timeout']}s "
-                    f"— args={full_args!r}, partial stdout={partial_stdout!r}, partial stderr={partial_stderr!r}"
+                    f"— args={args!r}, partial stdout={partial_stdout!r}, partial stderr={partial_stderr!r}"
                 ) from exc
 
         write_override(
@@ -217,9 +222,10 @@ class TestE2ECustomizationLifecycle(unittest.TestCase):
             target_file=str(override_file),
             accepted_content=_accepted_content,
             skill_id="core/bmad-customize",  # DN-R2-3=A
+            install_dir=str(self.install_dir),
             compile_py=COMPILE_SCRIPT,
             emit_fn=lambda event: events.append(event),
-            run_fn=_e2e_run_fn,
+            run_fn=_e2e_run_fn,  # retained for timeout (R2-BH-1, DN-R2-5=B) and cwd-pop (BH-3)
         )
         self._assert_step(2, override_file.exists(), f"override file not created at {override_file}")
         # WN-R2C-2: verify override file content matches accepted_content exactly.
