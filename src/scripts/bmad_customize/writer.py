@@ -128,9 +128,9 @@ def write_override(
     target_path = Path(target_file)
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-    except (FileExistsError, NotADirectoryError) as exc:
+    except (FileExistsError, NotADirectoryError, FileNotFoundError) as exc:
         raise BmadSubprocessError(
-            f"write_override: parent path exists as a non-directory: {str(target_path.parent)}"
+            f"write_override: parent path is not a usable directory: {target_path.parent}"
         ) from exc
     target_path.write_text(accepted_content, encoding="utf-8")
 

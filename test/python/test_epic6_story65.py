@@ -270,6 +270,8 @@ class TestDiffContract(unittest.TestCase):
 
 
 class TestRevertDeleteBranchDirectory(unittest.TestCase):
+    """revert_override delete branch refuses to unlink a directory."""
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
 
@@ -309,40 +311,40 @@ class TestRevertDeleteBranchDirectory(unittest.TestCase):
 
 
 class TestRevertRestoreBranchSymlink(unittest.TestCase):
+    """revert_override restore branch unlinks symlink before write_text (OQ-A=A)."""
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _make_symlink(self, link_path: str, target_content: str = "symlink-target\n") -> str:
+    def _make_symlink(
+        self, link_path: str, target_content: str = "symlink-target\n"
+    ) -> tuple[str, Path]:
         real = Path(self._tmp.name) / "real_file.txt"
         real.write_text(target_content, encoding="utf-8")
         try:
             os.symlink(str(real), link_path)
         except OSError:
             self.skipTest("symlink creation not permitted on this platform")
-        return link_path
+        return link_path, real
 
     def test_symlink_replaced_with_regular_file(self) -> None:
-        link = self._make_symlink(str(Path(self._tmp.name) / "override.toml"))
+        link, _ = self._make_symlink(str(Path(self._tmp.name) / "override.toml"))
         revert_override(link, pre_write_content="restored\n", emit_fn=lambda _: None)
         self.assertTrue(Path(link).is_file() and not Path(link).is_symlink())
         self.assertEqual(Path(link).read_text(encoding="utf-8"), "restored\n")
 
     def test_symlink_target_not_modified(self) -> None:
-        real = Path(self._tmp.name) / "real_file.txt"
-        link = str(Path(self._tmp.name) / "override.toml")
-        real.write_text("original-target-content\n", encoding="utf-8")
-        try:
-            os.symlink(str(real), link)
-        except OSError:
-            self.skipTest("symlink creation not permitted on this platform")
+        link, real = self._make_symlink(
+            str(Path(self._tmp.name) / "override.toml"), "original-target-content\n"
+        )
         revert_override(link, pre_write_content="restored\n", emit_fn=lambda _: None)
         self.assertEqual(real.read_text(encoding="utf-8"), "original-target-content\n")
 
     def test_revert_complete_emitted_on_symlink_restore(self) -> None:
-        link = self._make_symlink(str(Path(self._tmp.name) / "override.toml"))
+        link, _ = self._make_symlink(str(Path(self._tmp.name) / "override.toml"))
         events: list[dict[str, Any]] = []
         revert_override(link, pre_write_content="restored\n", emit_fn=events.append)
         self.assertEqual(events[-1]["action"], "revert_complete")
@@ -355,6 +357,8 @@ class TestRevertRestoreBranchSymlink(unittest.TestCase):
 
 
 class TestWriteOverrideMkdirConflict(unittest.TestCase):
+    """write_override raises BmadSubprocessError when parent path is a non-directory."""
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
 
@@ -403,6 +407,8 @@ class TestWriteOverrideMkdirConflict(unittest.TestCase):
 
 
 class TestWriteOverrideEmitFnRaise(unittest.TestCase):
+    """revert_override remains reachable when emit_fn raises post-write (OQ-B=A)."""
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
 
