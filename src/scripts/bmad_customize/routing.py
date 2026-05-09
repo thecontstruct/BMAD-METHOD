@@ -34,7 +34,10 @@ Interface:
   skill_id:     resolved skill identifier (e.g. "mock-module/skill-a"); used to
                 derive target_file paths and as compile.py positional
                 <skill_canonical> argument
-  install_dir:  path to the BMAD install directory; passed as --install-dir to compile.py
+  install_dir:  path to the BMAD install directory (root containing _bmad/);
+                passed as --install-dir to compile.py; accepted for API
+                consistency with discover_surface but NEVER dereferenced on
+                the full-skill pre-compile path (same as compile_py below)
   compile_py:   path to compile.py; accepted for API consistency with
                 discover_surface but NEVER dereferenced on the full-skill
                 pre-compile path (handler emits warn_full_skill and returns
@@ -43,9 +46,10 @@ Interface:
   run_fn:       resolved to subprocess.run at call time when None; pass an
                 explicit callable for explicit dependency injection only
 
-Production callers derive compile_py via:
-  # dev-tree path; installed-package derivation deferred until packaging story
+Production callers derive compile_py and install_dir via:
+  # dev-tree paths; installed-package derivation deferred until packaging story
   compile_py = Path(__file__).resolve().parent.parent / "compile.py"
+  install_dir = str(Path(__file__).resolve().parent.parent.parent)  # repo/install root containing _bmad/
 """
 from __future__ import annotations
 

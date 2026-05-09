@@ -35,8 +35,8 @@ Interface:
                      not re-derived here)
   skill_id:          resolved skill identifier; used as compile.py positional
                      <skill_canonical> argument
-  install_dir:       path to the BMAD install directory; passed as --install-dir
-                     to compile.py
+  install_dir:       path to the BMAD install directory (root containing _bmad/);
+                     passed as --install-dir to compile.py
   compile_py:        path to compile.py; used on ALL paths (draft_content always
                      calls --explain --json to fetch current surface state,
                      unlike route_intent which skips it on the full-skill path)
@@ -46,9 +46,10 @@ Interface:
   revision_feedback: when provided, echoed into the event under the same key;
                      when None, the key is omitted from the event entirely
 
-Production callers derive compile_py via:
-  # dev-tree path; installed-package derivation deferred until packaging story
+Production callers derive compile_py and install_dir via:
+  # dev-tree paths; installed-package derivation deferred until packaging story
   compile_py = Path(__file__).resolve().parent.parent / "compile.py"
+  install_dir = str(Path(__file__).resolve().parent.parent.parent)  # repo/install root containing _bmad/
 """
 from __future__ import annotations
 
