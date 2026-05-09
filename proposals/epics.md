@@ -406,7 +406,7 @@ Every release passes automated quality gates — no regressions, no silent losse
 
 **Primary NFRs:** NFR-M2, NFR-M3, NFR-M4
 
-**Implementation notes:** `npm run validate:compile` (recompile-all + lockfile diff) and `npm run validate:skills` (schema check) as PR gates. E2E customization lifecycle integration test (9-step flow). Model 3 distribution matrix (compiler-present vs compiler-absent). Abandoned-session test (enforces FR55). Docs gate: author migration guide, `bmad-customize` walkthrough, `bmad.lock` schema, `--explain` vocabulary, 5-minute quickstart — **Paige (Technical Writer)** is the designated reviewer. Dogfood-gate owner named in release PR. "25% override adoption" metric resolved (scope telemetry-lite proxy OR downgrade to Phase 2 measurement). Distribution detection (Models 1/2/3) in `install.js`. Third-party dogfood migration is **soft gate** — preferred complete before v1 release, but ship-blocking status waived; missing dogfood flagged in release notes as known gap.
+**Implementation notes:** `npm run validate:compile` (recompile-all + lockfile diff) and `npm run validate:skills` (schema check) as PR gates. E2E customization lifecycle integration test (9-step flow). Model 3 distribution matrix (compiler-present vs compiler-absent). Abandoned-session test (enforces FR55). Docs gate: author migration guide, `bmad-customize` walkthrough, `bmad.lock` schema, `--explain` vocabulary, 5-minute quickstart — release manager confirms presence via the `docs-gate` CI job before merge. Dogfood-gate owner named in release PR. "25% override adoption" metric resolved (scope telemetry-lite proxy OR downgrade to Phase 2 measurement). Distribution detection (Models 1/2/3) in `install.js`. Third-party dogfood migration is **soft gate** — preferred complete before v1 release, but ship-blocking status waived; missing dogfood flagged in release notes as known gap.
 
 ---
 
@@ -1427,9 +1427,10 @@ So that release-blocking items are closed before the release PR merges.
   4. `--explain` tag vocabulary reference (`docs/compile/explain-vocabulary.md`)
   5. 5-minute quickstart (`docs/compile/quickstart.md`)
 
-> **Resolution (2026-05-09, course-correct):** Paige hard-gate clause removed from AC-1.
-> OQ-B (CODEOWNERS for `docs/compile/*`) reverted; Paige approval is not in v1 scope.
-> The 5-docs presence check stands as the sole AC-1 deliverable.
+> **Resolution (2026-05-09, course-correct):** the documentation-review hard-gate
+> clause was removed from AC-1. OQ-B (CODEOWNERS for `docs/compile/*`) reverted; no
+> human-reviewer hard gate is in v1 scope. The 5-docs presence check stands as the
+> sole AC-1 deliverable.
 
 **Given** the dogfood gate
 **When** release readiness is assessed
