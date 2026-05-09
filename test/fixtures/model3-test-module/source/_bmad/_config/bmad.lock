@@ -1,0 +1,16 @@
+{
+  "bmad_version": "1.0.0",
+  "compiled_at": "1.0.0",
+  "entries": [
+    {
+      "compiled_hash": "49d635fd32f9bd031436ea132478b97bbf7ca1c2664b76d03841368997ac5667",
+      "fragments": [],
+      "glob_inputs": [],
+      "skill": "test-skill",
+      "source_hash": "49d635fd32f9bd031436ea132478b97bbf7ca1c2664b76d03841368997ac5667",
+      "variables": [],
+      "variant": null
+    }
+  ],
+  "version": 1
+}

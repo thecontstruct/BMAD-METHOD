@@ -339,19 +339,12 @@ async function runBatchInstall({ skills, bmadDir, projectRoot, message }) {
         event = JSON.parse(line);
       } catch {
         const sigMsg = result.signal ? ` (process killed by signal ${result.signal})` : '';
-        throw new Error(
-          `compile.py --batch emitted non-JSON line${sigMsg}:\n  ${line.slice(0, 200)}\n\nstderr:\n${result.stderr}`,
-        );
+        throw new Error(`compile.py --batch emitted non-JSON line${sigMsg}:\n  ${line.slice(0, 200)}\n\nstderr:\n${result.stderr}`);
       }
       events.push(event);
       // Skip the progress callback for hash-skipped events (compiled === false /
       // status === "skipped"); the user shouldn't see "Compiling X..." for a no-op.
-      if (
-        event.kind === 'skill'
-        && event.compiled !== false
-        && message
-        && event.skill
-      ) {
+      if (event.kind === 'skill' && event.compiled !== false && message && event.skill) {
         message(`Compiling ${event.skill}...`);
       }
       if (event.kind === 'error' && !firstError) firstError = event;
@@ -406,10 +399,7 @@ async function runBatchInstall({ skills, bmadDir, projectRoot, message }) {
 async function runUpgradeDryRun({ upgradePy, projectRoot }) {
   let result;
   try {
-    result = await _spawnPython(
-      [upgradePy, '--dry-run', '--json', '--project-root', projectRoot],
-      { cwd: projectRoot }
-    );
+    result = await _spawnPython([upgradePy, '--dry-run', '--json', '--project-root', projectRoot], { cwd: projectRoot });
   } catch (error) {
     throw new Error(`Failed to spawn upgrade.py: ${error.message}`);
   }
@@ -433,13 +423,150 @@ async function runUpgradeDryRun({ upgradePy, projectRoot }) {
  * @returns {Promise<void>}
  */
 async function runUpgradeYes({ upgradePy, projectRoot }) {
-  const result = await _spawnPython(
-    [upgradePy, '--yes', '--project-root', projectRoot],
-    { cwd: projectRoot }
-  );
+  const result = await _spawnPython([upgradePy, '--yes', '--project-root', projectRoot], { cwd: projectRoot });
   if (result.code !== 0) {
     throw new Error(`upgrade.py --yes failed (exit ${result.code}):\n${result.stderr}`);
   }
+}
+
+/**
+ * Detect the Model tier of a skill directory (Story 7.3 OQ-1=A).
+ *
+ * Model 3: BOTH `<basename>.template.md` (or `<basename>.<ide>.template.md`) AND `SKILL.md` present.
+ * Model 2: `*.template.md` present, NO `SKILL.md`.
+ * Model 1: NO `*.template.md` (precompiled-only or non-skill).
+ *
+ * @param {string} skillDirPath - Absolute path to the skill directory.
+ * @returns {Promise<'model1' | 'model2' | 'model3'>}
+ */
+async function detectModelTier(skillDirPath) {
+  let entries;
+  try {
+    entries = await fs.readdir(skillDirPath, { withFileTypes: true });
+  } catch (error) {
+    // ECH-1 (Phil R1 2026-05-08): only ENOENT (dir absent) is a legitimate model1 default.
+    // EACCES / ENOTDIR / other errors indicate a real problem — surfacing them gives the
+    // operator a useful diagnostic instead of a misleading "Python 3.11+ required" error
+    // routed through applyModel3FallbackIfAllEligible's `return false` path.
+    if (error && error.code === 'ENOENT') return 'model1';
+    throw error;
+  }
+  const fileNames = entries.filter((e) => e.isFile()).map((e) => e.name);
+  const dirName = path.basename(skillDirPath);
+  const hasTemplate = _isSkillDir(dirName, fileNames);
+  const hasSkillMd = fileNames.includes('SKILL.md');
+
+  if (hasTemplate && hasSkillMd) return 'model3';
+  if (hasTemplate) return 'model2';
+  return 'model1';
+}
+
+/**
+ * Copy a Model 3 precompiled `SKILL.md` from a skill source directory into the install
+ * directory at the same path layout that `runBatchInstall` would produce.
+ *
+ * Path layout: `<installDir>/<moduleName>/<skillBasename>/SKILL.md` where
+ * `moduleName = path.basename(path.dirname(skillDir))` — mirrors compile.py's batch-mode
+ * scenario_root derivation (lockfile.py:206 — frag.path = _normalize_path(...)).
+ *
+ * Idempotency contract (BH-2 / ECH-4 documented per Phil 2026-05-08): `fs.copyFile` overwrites
+ * the destination by default (no `COPYFILE_EXCL` flag); a partially-copied multi-skill batch
+ * left behind by a prior failed `applyModel3FallbackIfAllEligible` is safely overwritten on
+ * retry. Callers do NOT need a rollback path for partial failures — the next successful run
+ * restores correct state.
+ *
+ * Security guards:
+ *   - BH-1 (DN-R2-2=A): **lexical** containment check via `path.resolve` — asserts resolved
+ *     `destDir` starts with `installDirAbs + path.sep`. Defends against tampered `..` segments
+ *     in `moduleName` / `skillBasename`. Does NOT follow symlinks (`path.resolve` is purely
+ *     lexical); operator is responsible for source-tree integrity if a symlinked installDir
+ *     or pre-existing dangling symlink could be exploited. Realpath-based defense out of scope
+ *     for Story 7.3.
+ *   - ECH-7 (R2-BH-7 strengthened): reject empty / `.` / `path.sep` moduleName so degenerate
+ *     skillDir inputs (`/`, `./test-skill`) fail loud rather than silently producing a wrong
+ *     install path layout.
+ *   - BH-3 / ECH-2 (R2-BH-3 broadened): wrap any `copyFile` error with skillBasename + error
+ *     code context so TOCTOU races (ENOENT, EISDIR, EACCES, EBUSY) yield an actionable
+ *     diagnostic identifying which skill failed.
+ *
+ * @param {string} skillDir - Source skill directory containing the precompiled SKILL.md.
+ * @param {string} installDir - Destination install root.
+ * @returns {Promise<void>}
+ */
+async function copyPrecompiledFallback(skillDir, installDir) {
+  const sourceSkillMd = path.join(skillDir, 'SKILL.md');
+  const moduleName = path.basename(path.dirname(skillDir));
+  const skillBasename = path.basename(skillDir);
+  // ECH-7 + R2-BH-7 (Phil R2 2026-05-08): reject empty / '.' / path-sep moduleName.
+  // Catches degenerate inputs like `/` (basename → '') and `./test-skill` (basename of dirname → '.')
+  // that would otherwise silently produce a wrong install path layout.
+  if (!moduleName || moduleName === '.' || moduleName === path.sep) {
+    throw new Error(
+      `copyPrecompiledFallback: could not derive moduleName from skillDir path: ${skillDir} (got moduleName=${JSON.stringify(moduleName)})`,
+    );
+  }
+  const installDirAbs = path.resolve(installDir);
+  const destDir = path.resolve(path.join(installDirAbs, moduleName, skillBasename));
+  // BH-1: containment check — reject any path that escapes installDir (tampered fragments[0]
+  // or symlink-injected moduleName must not resolve outside the install root).
+  if (destDir !== installDirAbs && !destDir.startsWith(installDirAbs + path.sep)) {
+    throw new Error(`copyPrecompiledFallback: resolved destination "${destDir}" escapes installDir "${installDirAbs}"`);
+  }
+  const destSkillMd = path.join(destDir, 'SKILL.md');
+  await fs.mkdir(destDir, { recursive: true });
+  try {
+    // BH-2 / ECH-4: fs.copyFile overwrites the destination by default — partial-batch retry is safe.
+    await fs.copyFile(sourceSkillMd, destSkillMd);
+  } catch (error) {
+    // BH-3 / ECH-2 (R2-BH-3 broadened per Phil 2026-05-08): wrap ANY copyFile error with the
+    // skill path + error code so TOCTOU races (ENOENT, EISDIR, EACCES, EBUSY, etc.) yield an
+    // actionable diagnostic identifying which skill failed. The prior ENOENT-only wrap left
+    // EISDIR/EACCES/EBUSY producing raw fs errors with no skill context.
+    if (error && error.code) {
+      throw new Error(
+        `copyPrecompiledFallback: failed to copy SKILL.md (skill="${skillBasename}", source="${sourceSkillMd}", code=${error.code}): ${error.message}`,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Routing helper for Model 3 compiler-absent fallback (Story 7.3 OQ-1=A, DN-4=G3).
+ *
+ * If EVERY skill in the input list is Model 3 (precompiled SKILL.md available next to the
+ * template), copy each precompiled SKILL.md verbatim to its install location. Returns true.
+ *
+ * If ANY skill is not Model 3, return false WITHOUT copying anything — the caller is
+ * expected to throw the "Python 3.11+ required" error.
+ *
+ * Tested directly in `test/test-model3-distribution-matrix.js` (DN-4=G3 — no Installer.install
+ * indirection; the helper is the routing edge under test).
+ *
+ * H1 scope (DN-5=H1): Story 7.3 minimal — installer.js callers should `return;` after a
+ * successful applyModel3FallbackIfAllEligible to skip IDE setup, manifest generation, and
+ * lockfile writes. Story 7.6 refines this to a flag-based continuation that completes the
+ * full install flow.
+ *
+ * @param {Array<{skillDir: string, installDir: string}>} skills - skill batch input.
+ * @returns {Promise<boolean>} true if all skills are Model 3 and fallback was applied.
+ */
+async function applyModel3FallbackIfAllEligible(skills) {
+  // DN-R1-1=A (Phil R1 2026-05-08): empty-skills guard. The function name says "fallback
+  // applied"; zero copies means it wasn't. Without this guard, an empty array (e.g. when
+  // every module's findModuleSource throws and enumerateMigratedSkills returns []) loops
+  // zero times in pass 1, returns vacuous true, and the installer.js caller `return`s with
+  // a silent no-op install. Returning false here forces the caller to throw.
+  if (skills.length === 0) return false;
+  // R2-BH-4 (Phil R2 2026-05-08): parallelize tier detection. Each detectModelTier call is
+  // an independent fs.readdir — sequential await is O(n) round-trips on a slow disk; Promise.all
+  // collapses to a single tick of concurrent I/O. Order-independent; correctness identical.
+  const tiers = await Promise.all(skills.map((s) => detectModelTier(s.skillDir)));
+  if (tiers.some((tier) => tier !== 'model3')) return false;
+  for (const { skillDir, installDir } of skills) {
+    await copyPrecompiledFallback(skillDir, installDir);
+  }
+  return true;
 }
 
 module.exports = {
@@ -450,4 +577,8 @@ module.exports = {
   runBatchInstall,
   runUpgradeDryRun,
   runUpgradeYes,
+  // Story 7.3 (Model 3 distribution matrix; OQ-1=A, DN-4=G3, DN-5=H1).
+  detectModelTier,
+  copyPrecompiledFallback,
+  applyModel3FallbackIfAllEligible,
 };

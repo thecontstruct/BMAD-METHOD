@@ -42,12 +42,21 @@ class Installer {
       const officialModules = await OfficialModules.build(config, paths);
       const existingInstall = await ExistingInstall.detect(paths.bmadDir);
 
-      // AC 1: Python 3.11+ hard check — before any file copies
+      // AC 1: Python 3.11+ hard check — before any file copies.
+      // Story 7.3 (OQ-1=A, DN-5=H1): if Python is absent AND every migrated skill is Model 3
+      // (precompiled SKILL.md available next to the template), copy the precompiled fallback
+      // and `return` (skipping IDE setup, manifest, lockfile — Story 7.6 refines this to a
+      // flag-based continuation). Otherwise, keep the throw.
       const compiler = require('../compiler/invoke-python');
       const modulesToInstall = config.modules || [];
       if (await compiler.hasMigratedSkillsInScope(paths, modulesToInstall, officialModules)) {
         const pyCheck = await compiler.checkPythonVersion();
         if (!pyCheck.ok) {
+          const skills = await compiler.enumerateMigratedSkills(paths, modulesToInstall, officialModules);
+          const applied = await compiler.applyModel3FallbackIfAllEligible(skills);
+          if (applied) {
+            return;
+          }
           const detected = pyCheck.reason === 'not found' ? `not found: ${pyCheck.detected}` : `detected: ${pyCheck.detected}`;
           throw new Error(
             `Python 3.11+ required but ${detected}.\n` +
@@ -269,11 +278,7 @@ class Installer {
           // second walk. Use the count of enumerated skills as the skip signal.
           // (The hasMigratedSkillsInScope call at line 48 still gates the
           // Python-version check; it stays.)
-          const skills = await compilerHelper.enumerateMigratedSkills(
-            paths,
-            allModules,
-            officialModules,
-          );
+          const skills = await compilerHelper.enumerateMigratedSkills(paths, allModules, officialModules);
           if (skills.length === 0) {
             addResult('Compile migrated skills', 'skip', 'no migrated skills');
             return 'Skipped — no migrated skills';
