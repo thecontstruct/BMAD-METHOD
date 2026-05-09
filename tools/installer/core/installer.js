@@ -43,25 +43,27 @@ class Installer {
       const existingInstall = await ExistingInstall.detect(paths.bmadDir);
 
       // AC 1: Python 3.11+ hard check — before any file copies.
-      // Story 7.3 (OQ-1=A, DN-5=H1): if Python is absent AND every migrated skill is Model 3
-      // (precompiled SKILL.md available next to the template), copy the precompiled fallback
-      // and `return` (skipping IDE setup, manifest, lockfile — Story 7.6 refines this to a
-      // flag-based continuation). Otherwise, keep the throw.
+      // Story 7.3 (OQ-1=A, DN-5=H1) shipped a minimal Model 3 fallback that exited the
+      // installer here (`return;`) so IDE/manifest/lockfile never ran. Story 7.6 (OQ-B=A,
+      // Phil R3 Option A) replaces the early return with a closure-scoped flag so the
+      // remainder of the install flow runs; the downstream Compile task short-circuits on
+      // the flag because the precompiled SKILL.md files are already in place.
       const compiler = require('../compiler/invoke-python');
       const modulesToInstall = config.modules || [];
+      let model3FallbackApplied = false;
       if (await compiler.hasMigratedSkillsInScope(paths, modulesToInstall, officialModules)) {
         const pyCheck = await compiler.checkPythonVersion();
         if (!pyCheck.ok) {
           const skills = await compiler.enumerateMigratedSkills(paths, modulesToInstall, officialModules);
           const applied = await compiler.applyModel3FallbackIfAllEligible(skills);
-          if (applied) {
-            return;
+          if (!applied) {
+            const detected = pyCheck.reason === 'not found' ? `not found: ${pyCheck.detected}` : `detected: ${pyCheck.detected}`;
+            throw new Error(
+              `Python 3.11+ required but ${detected}.\n` +
+                `install Python 3.11+ from https://www.python.org/downloads/ or via your OS package manager.`,
+            );
           }
-          const detected = pyCheck.reason === 'not found' ? `not found: ${pyCheck.detected}` : `detected: ${pyCheck.detected}`;
-          throw new Error(
-            `Python 3.11+ required but ${detected}.\n` +
-              `install Python 3.11+ from https://www.python.org/downloads/ or via your OS package manager.`,
-          );
+          model3FallbackApplied = true;
         }
       }
 
@@ -116,7 +118,9 @@ class Installer {
 
       const allModules = config.modules || [];
 
-      await this._installAndConfigure(config, originalConfig, paths, allModules, allModules, addResult, officialModules);
+      await this._installAndConfigure(config, originalConfig, paths, allModules, allModules, addResult, officialModules, {
+        model3FallbackApplied,
+      });
 
       await this._setupIdes(config, allModules, paths, addResult, previousSkillIds);
 
@@ -234,7 +238,16 @@ class Installer {
   /**
    * Install modules, create directories, generate configs and manifests.
    */
-  async _installAndConfigure(config, originalConfig, paths, officialModuleIds, allModules, addResult, officialModules) {
+  async _installAndConfigure(
+    config,
+    originalConfig,
+    paths,
+    officialModuleIds,
+    allModules,
+    addResult,
+    officialModules,
+    compileOptions = {},
+  ) {
     const isQuickUpdate = config.isQuickUpdate();
     const moduleConfigs = officialModules.moduleConfigs;
 
@@ -272,6 +285,14 @@ class Installer {
       {
         title: 'Compiling migrated skills',
         task: async (message) => {
+          // Story 7.6 (OQ-B=A flag-thread): when Python is absent and every migrated skill
+          // shipped a precompiled SKILL.md fallback, applyModel3FallbackIfAllEligible has
+          // already populated the install dir verbatim. Skip the compile spawn — invoking
+          // runBatchInstall here would unconditionally call _spawnPython and crash.
+          if (compileOptions.model3FallbackApplied) {
+            addResult('Compile migrated skills', 'skip', 'Model 3 fallback applied (compiler absent)');
+            return 'Skipped — Model 3 fallback applied';
+          }
           const compilerHelper = require('../compiler/invoke-python');
           // R2 BH-6: enumerateMigratedSkills already walks the source tree;
           // the prior hasMigratedSkillsInScope preflight here was a redundant

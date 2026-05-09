@@ -984,6 +984,26 @@ def _parse_include_src(
         effective_module = current_module
         relative_subpath = pp
         had_module_prefix = False
+
+    # Story 7.6 AC-6: cross-third-party includes are not allowed. Only the `core`
+    # module and the author's own module namespace may appear as an explicit
+    # cross-module prefix. Bare-path includes (had_module_prefix=False) resolve
+    # to current_module and are unaffected — only validate when an explicit
+    # prefix matched a module root.
+    if had_module_prefix and effective_module not in ("core", current_module):
+        raise errors.PrecedenceUndefinedError(
+            f"Cross-third-party include not allowed: "
+            f"{src!r} (module {effective_module!r}) from template in "
+            f"module {current_module!r}. "
+            f"Only 'core/' and own module namespace permitted.",
+            hint=(
+                "include paths may be bare (resolved against the current skill), "
+                "prefixed with the current module name, or prefixed with 'core/' "
+                "to reach the core module's tree. References to other third-party "
+                "modules are out of scope for v1."
+            ),
+        )
+
     leaf = relative_subpath.name
     return effective_module, relative_subpath, leaf, had_module_prefix
 

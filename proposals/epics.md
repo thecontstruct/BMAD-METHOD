@@ -1477,11 +1477,13 @@ So that I can install any module uniformly regardless of authoring choice.
 **Given** a module containing both `*.template.md` and precompiled `SKILL.md`
 **When** the installer runs on a compiler-present system (Python 3.11+)
 **Then** it detects Model 3, compiles from source (preferring source over fallback), and produces compiled output
+**And** the full install flow completes (IDE setup, manifest, lockfile — not short-circuited by the Story 7.3 early return)
 
 **Given** the same Model 3 module
 **When** the installer runs on a compiler-absent system (no Python 3.11)
 **Then** it falls back to the precompiled `SKILL.md` and installs verbatim
 **And** installed output matches between compiler-present and compiler-absent environments (Story 7.3 CI matrix enforces the contract)
+**And** the full install flow completes (not short-circuited)
 
 **Given** a third-party module skill template with `<<include path="core/persona-guard.template.md">>`
 **When** the compiler resolves the include

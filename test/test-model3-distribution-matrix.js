@@ -25,7 +25,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { runBatchInstall, applyModel3FallbackIfAllEligible } = require('../tools/installer/compiler/invoke-python');
+const { runBatchInstall, applyModel3FallbackIfAllEligible, detectModelTier } = require('../tools/installer/compiler/invoke-python');
 
 const colors = { reset: '[0m', green: '[32m', red: '[31m', dim: '[2m' };
 let passed = 0;
@@ -98,6 +98,10 @@ const FIXTURE_GOLDEN_HASH = '49d635fd32f9bd031436ea132478b97bbf7ca1c2664b76d0384
 // invoke-python.js:162 calls fs.access(compilePy) immediately, so bmadDir must be a real
 // directory containing scripts/compile.py. The repo's `src/` directory satisfies this.
 const BMAD_DIR_FOR_COMPILE = path.join(__dirname, '..', 'src');
+
+// Story 7.6 fixtures — Model 1 (SKILL.md only) and Model 2 (template only).
+const MODEL1_SKILL_DIR = path.join(__dirname, 'fixtures', 'model1-test-module', 'source', 'model1-test-module', 'test-skill');
+const MODEL2_SKILL_DIR = path.join(__dirname, 'fixtures', 'model2-test-module', 'source', 'model2-test-module', 'test-skill');
 
 /**
  * BH-6 / ECH-5 (Phil R1 2026-05-08): assert the on-disk golden SKILL.md hash matches the
@@ -289,6 +293,180 @@ async function main() {
     } catch (error) {
       assert(false, 'AC-3 corrupted FIXTURE_PRECOMPILED on disk (R2-ECH-4 regression guard)', error.message);
     }
+  });
+
+  // Story 7.6 AC-1: Model 1 module — verbatim-copy install path.
+  // Per Phil's OQ-A=A resolution: implicit bypass via `enumerateMigratedSkills` excluding
+  // SKILL.md-only modules. The compiler is never invoked for Model 1; the standard
+  // module-copy path (copyModuleWithFiltering) handles the SKILL.md verbatim.
+  await runTest('AC-1 (7.6): Model 1 module detects as model1 and is excluded from compiler routing', async () => {
+    const tier = await detectModelTier(MODEL1_SKILL_DIR);
+    assert(tier === 'model1', 'AC-1 (7.6): detectModelTier returns "model1" for SKILL.md-only fixture', `got: ${tier}`);
+
+    // applyModel3FallbackIfAllEligible must return false for a non-Model-3 skill (forces caller to throw).
+    const tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-model1-ac1-'));
+    try {
+      const skills = [{ skillDir: MODEL1_SKILL_DIR, installDir: tmpInstall }];
+      const applied = await applyModel3FallbackIfAllEligible(skills);
+      assert(applied === false, 'AC-1 (7.6): applyModel3FallbackIfAllEligible returns false for Model 1 (not all skills are Model 3)');
+    } finally {
+      await fs.rm(tmpInstall, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  // Story 7.6 AC-2: Model 2 module — compiler-invoked install.
+  // DN-24 (R2-C AA-2): assertion is mechanically verifiable via runBatchInstall's `compiled`
+  // count and the post-compile output content (no `{{...}}` markers — those are resolved at
+  // compile time and would only persist in a verbatim copy).
+  await runTest('AC-2 (7.6): Model 2 module detects as model2 and runBatchInstall compiles it', async () => {
+    const tier = await detectModelTier(MODEL2_SKILL_DIR);
+    assert(tier === 'model2', 'AC-2 (7.6): detectModelTier returns "model2" for template-only fixture', `got: ${tier}`);
+
+    const tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-model2-ac2-'));
+    try {
+      // OVERRIDE_OUTSIDE_ROOT contract: copy fixture into install tree before compiling
+      // (same pattern as AC-1/AC-3 7.3 tests above).
+      const installedSkillDir = path.join(tmpInstall, 'model2-test-module', 'test-skill');
+      await copyDirShallow(MODEL2_SKILL_DIR, installedSkillDir);
+
+      const result = await runBatchInstall({
+        skills: [{ skillDir: installedSkillDir, installDir: tmpInstall }],
+        bmadDir: BMAD_DIR_FOR_COMPILE,
+        projectRoot: process.cwd(),
+      });
+      assert(result.compiled === 1, 'AC-2 (7.6): runBatchInstall reports 1 compiled skill', `got: ${result.compiled}`);
+
+      const installedPath = path.join(tmpInstall, 'model2-test-module', 'test-skill', 'SKILL.md');
+      const exists = await fs
+        .access(installedPath)
+        .then(() => true)
+        .catch(() => false);
+      assert(exists, 'AC-2 (7.6): compiled SKILL.md exists at install location', `expected: ${installedPath}`);
+      if (!exists) return;
+
+      const installed = await fs.readFile(installedPath, 'utf8');
+      // The fixture template uses {{self.name}} / {{self.description}} in frontmatter.
+      // A compiled output resolves these; a verbatim copy would still carry the markers.
+      assert(
+        !installed.includes('{{self.name}}') && !installed.includes('{{self.description}}'),
+        'AC-2 (7.6): compiled SKILL.md has no unresolved {{self.*}} markers (compile actually ran)',
+      );
+      assert(
+        installed.includes('name: model2-test-skill'),
+        'AC-2 (7.6): frontmatter resolves {{self.name}} to customize.toml value "model2-test-skill"',
+      );
+    } finally {
+      await fs.rm(tmpInstall, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  // Story 7.6 AC-3a (compile-source-preference, unconditional per R2-A R-2):
+  // Verifies Model 3 compiler-present install prefers compiled-from-source over the
+  // precompiled fallback. The existing AC-1 (7.3) test above already exercises the
+  // compile path; this test makes the source-preference contract explicit by mutating
+  // the precompiled fallback in-place to a divergent hash, running the compile, and
+  // asserting the installed output matches the live-compiled hash (not the divergent
+  // precompiled).
+  //
+  // The mutation happens inside the temp install dir (NOT the canonical fixture dir
+  // under test/fixtures/) so the on-disk fixture is never corrupted. R2-ECH-4
+  // (Phil R2 2026-05-08) regression guard: do NOT write to FIXTURE_PRECOMPILED.
+  await runTest('AC-3a (7.6): Model 3 compiler-present install prefers compiled-from-source over precompiled fallback', async () => {
+    const tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-model3-ac3a-'));
+    try {
+      const installedSkillDir = path.join(tmpInstall, 'model3-test-module', 'test-skill');
+      await copyDirShallow(FIXTURE_SKILL_DIR, installedSkillDir);
+
+      // Mutate the precompiled SKILL.md inside the temp install (NOT the fixture). This
+      // simulates a stale or hand-edited precompiled artifact divergent from what the
+      // compiler would produce. The compile run that follows must overwrite this with
+      // the live-compiled output — otherwise Model 3 source-preference is broken.
+      const tmpPrecompiledPath = path.join(installedSkillDir, 'SKILL.md');
+      const precompiledOriginal = await fs.readFile(tmpPrecompiledPath, 'utf8');
+      const divergentContent = precompiledOriginal + '\n<!-- DIVERGED: not the compiled output -->\n';
+      await fs.writeFile(tmpPrecompiledPath, divergentContent, 'utf8');
+      const divergentHash = crypto.createHash('sha256').update(Buffer.from(divergentContent)).digest('hex');
+
+      // Sanity: the fixture-on-disk is unchanged (regression guard mirroring R2-ECH-4).
+      const fixtureHash = await hashFile(FIXTURE_PRECOMPILED);
+      assert(
+        fixtureHash === FIXTURE_GOLDEN_HASH,
+        'AC-3a (7.6): canonical fixture under test/fixtures/ remains uncorrupted by mutation',
+        `fixture: ${fixtureHash}, golden: ${FIXTURE_GOLDEN_HASH}`,
+      );
+
+      await runBatchInstall({
+        skills: [{ skillDir: installedSkillDir, installDir: tmpInstall }],
+        bmadDir: BMAD_DIR_FOR_COMPILE,
+        projectRoot: process.cwd(),
+      });
+
+      const installedHash = await hashFile(tmpPrecompiledPath);
+      assert(
+        installedHash !== divergentHash,
+        'AC-3a (7.6): installed SKILL.md is NOT the divergent precompiled fallback (compile.py overwrote it)',
+        `installed: ${installedHash}, divergent: ${divergentHash}`,
+      );
+      assert(
+        installedHash === FIXTURE_GOLDEN_HASH,
+        'AC-3a (7.6): installed SKILL.md matches the live compiler output (= golden)',
+        `installed: ${installedHash}, golden: ${FIXTURE_GOLDEN_HASH}`,
+      );
+    } finally {
+      await fs.rm(tmpInstall, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  // Story 7.6 AC-4 (OQ-B flag-thread): installer.js exposes a closure-scoped
+  // `model3FallbackApplied` flag that replaces the Story 7.3 `if (applied) { return; }`
+  // early return. The flag is threaded into `_installAndConfigure` via `compileOptions`
+  // and the Compile task closure short-circuits on it. Testing the closure body via a
+  // full `Installer.install()` E2E run is heavy (config + paths + module sources). This
+  // wiring test asserts on installer.js source structure: cheap, regression-protective,
+  // and detects reverts of the flag-thread refactor at the file level.
+  //
+  // Coverage note: the actual fallback → flag → short-circuit chain is verified at
+  // integration time (Task 3.7 smoke) and by the existing AC-2 (7.3) test
+  // ("compiler-absent install uses precompiled fallback") combined with the new flag
+  // wiring asserted here.
+  await runTest('AC-4 (7.6, OQ-B flag-thread): installer.js wires the model3FallbackApplied flag end-to-end', async () => {
+    const installerPath = path.join(__dirname, '..', 'tools', 'installer', 'core', 'installer.js');
+    const src = await fs.readFile(installerPath, 'utf8');
+
+    // 1. Flag is declared at install() scope.
+    assert(
+      /let\s+model3FallbackApplied\s*=\s*false\s*;/.test(src),
+      'AC-4 (7.6): installer.js declares `let model3FallbackApplied = false;`',
+    );
+
+    // 2. Flag is set when applyModel3FallbackIfAllEligible returns true.
+    assert(
+      /model3FallbackApplied\s*=\s*true\s*;/.test(src),
+      'AC-4 (7.6): installer.js sets `model3FallbackApplied = true` after fallback applied',
+    );
+
+    // 3. The Story 7.3 H1 early-return block is gone (DN-5=H1 retired).
+    assert(
+      !/if\s*\(\s*applied\s*\)\s*\{\s*return\s*;\s*\}/.test(src),
+      'AC-4 (7.6): the Story 7.3 `if (applied) { return; }` early-return block is removed',
+    );
+
+    // 4. `_installAndConfigure` accepts compileOptions and the call site passes the flag.
+    // Use [\s\S]* to span newlines — Prettier may split the signature across multiple lines.
+    assert(
+      /async _installAndConfigure\([\s\S]*?compileOptions\s*=\s*\{\s*\}[\s\S]*?\)/.test(src),
+      'AC-4 (7.6): _installAndConfigure(...) signature accepts `compileOptions = {}`',
+    );
+    assert(
+      /this\._installAndConfigure\([^)]*\bmodel3FallbackApplied\b[^)]*\)/s.test(src),
+      'AC-4 (7.6): install() passes `model3FallbackApplied` to _installAndConfigure via compileOptions',
+    );
+
+    // 5. The Compile task closure short-circuits on the flag.
+    assert(
+      /compileOptions\.model3FallbackApplied/.test(src),
+      'AC-4 (7.6): the Compile task closure reads `compileOptions.model3FallbackApplied`',
+    );
   });
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
