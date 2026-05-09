@@ -142,3 +142,29 @@ jobs:
 
       - name: Test validate-compile
         run: npm run test:validate-compile
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Story 7.2 e2e job: stdlib-only Python (same contract as the validate-compile job
+      # above — no pip install needed; compile.py + upgrade.py + bmad_customize.writer
+      # are stdlib-only). If a future story adds a non-stdlib import, add `pip install` here.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run E2E lifecycle test
+        run: npm run test:e2e
