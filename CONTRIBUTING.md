@@ -165,6 +165,10 @@ Keep messages under 72 characters. Each commit = one logical change.
 
 ---
 
+## Release Process
+
+Release managers preparing a `bmad-method` release follow the [release checklist](docs/release-checklist.md). Copy that file's hard- and soft-gate sections into the release PR description, fill in the dogfood sign-off, and only merge once every hard-gate item is checked. CI enforces the docs-gate hard gate via `.github/workflows/quality.yaml`.
+
 ## Need Help?
 
 - 💬 **Discord**: [Join the community](https://discord.gg/gk8jAdXWmj)

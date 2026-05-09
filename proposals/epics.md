@@ -1426,7 +1426,10 @@ So that release-blocking items are closed before the release PR merges.
   3. `bmad.lock` schema reference (`docs/compile/bmad-lock-schema.md`)
   4. `--explain` tag vocabulary reference (`docs/compile/explain-vocabulary.md`)
   5. 5-minute quickstart (`docs/compile/quickstart.md`)
-**And** each doc has been reviewed by **Paige (Technical Writer — 📚 BMAD agent)** listed as required reviewer in the release PR; Paige's approval is a hard gate
+
+> **Resolution (2026-05-09, course-correct):** Paige hard-gate clause removed from AC-1.
+> OQ-B (CODEOWNERS for `docs/compile/*`) reverted; Paige approval is not in v1 scope.
+> The 5-docs presence check stands as the sole AC-1 deliverable.
 
 **Given** the dogfood gate
 **When** release readiness is assessed
@@ -1435,9 +1438,13 @@ So that release-blocking items are closed before the release PR merges.
 **Given** the PRD's "25% of installs have ≥ 1 override within 90 days" success metric
 **When** this story is complete
 **Then** the criterion is **explicitly downgraded to a Phase 2 post-release measurement** (rationale: v1 is a Problem-solving MVP, not an experience MVP; no telemetry infrastructure is in-scope; privacy posture per NFR-S1/NFR-S5 favors no-telemetry default)
-**And** the replacement ship-gate-observable metric for v1 is: **"`bmad-customize` skill is invoked end-to-end without error in the dogfood test run defined by Story 6.7"** — measurable in CI, no network/telemetry required
+**And** the replacement ship-gate-observable metric for v1 is: **"`bmad-customize` skill is invoked end-to-end without error in the dogfood test run defined by Story 6.7"** — measurable per DOGFOOD.md procedure (manual release gate, 6-step human-operator sign-off), no network/telemetry required
 **And** a Phase 2 backlog item is filed to revisit the 25% metric with either (a) an opt-in post-upgrade installer prompt, or (b) a Discord community survey conducted ≥ 90 days post-GA
 **And** this resolution may be overridden by the release manager before Story 7.5 is picked up if telemetry-lite is re-scoped into v1; the override must be recorded in the release PR description
+
+> **Resolution (2026-05-09):** 25% metric downgraded to Phase 2 per Story 7.5 AC-3. v1
+> ship-gate metric: "bmad-customize invoked end-to-end without error in Story 6.7 dogfood
+> test." Phase 2 follow-up: deferred-work.md (workspace-level entry).
 
 **Given** any **hard-gate** release item is unresolved (docs present, dogfood owner signed off, metric resolved)
 **When** the release PR is created

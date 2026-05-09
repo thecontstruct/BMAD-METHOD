@@ -126,6 +126,11 @@ export default defineConfig({
           collapsed: true,
           autogenerate: { directory: 'reference' },
         },
+        {
+          label: 'Compile',
+          collapsed: true,
+          autogenerate: { directory: 'compile' },
+        },
         // TEA docs moved to standalone module site; keep BMM sidebar focused.
         {
           label: 'BMad Ecosystem',

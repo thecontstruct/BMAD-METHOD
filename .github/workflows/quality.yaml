@@ -168,3 +168,20 @@ jobs:
 
       - name: Run E2E lifecycle test
         run: npm run test:e2e
+
+  docs-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required compile docs present
+        run: |
+          for f in docs/compile/author-migration-guide.md \
+                    docs/compile/bmad-customize-walkthrough.md \
+                    docs/compile/bmad-lock-schema.md \
+                    docs/compile/explain-vocabulary.md \
+                    docs/compile/quickstart.md; do
+            [ -s "$f" ] || { echo "Missing or empty required doc: $f"; exit 1; }
+          done
+          echo "All required docs present."

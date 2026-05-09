@@ -1,5 +1,11 @@
 # Changelog
 
+## v6.6.0 - TBD
+
+### Known Gaps
+
+- Story 7.7 (third-party module dogfood migration) incomplete; targeted for v6.7.0.
+
 ## v6.5.0 - 2026-04-26
 
 ### 🎁 Features
