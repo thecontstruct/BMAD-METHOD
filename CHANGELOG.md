@@ -4,7 +4,7 @@
 
 ### Known Gaps
 
-- Story 7.7 (third-party module dogfood migration) incomplete; targeted for v6.7.0.
+**Third-party module dogfood migration** — at v6.6.0, the distribution model has been validated through internal Model 1/2/3 fixtures (Story 7.6) and the official `bmad-customize` skill self-dogfood (Epic 6). One real-world third-party module migrated to Model 2 (template source) was preferred but not blocking; the migration is planned for a follow-up release in coordination with a community contributor. Tracked in `_bmad-output/implementation-artifacts/sprint-status.yaml` as `7-7-third-party-module-dogfood-migration-soft-gate: deferred-post-release` and in `_bmad-output/implementation-artifacts/deferred-work.md` under "Deferred from: Epic 7 retro (Story 7.7 deferral)".
 
 ## v6.5.0 - 2026-04-26
 
