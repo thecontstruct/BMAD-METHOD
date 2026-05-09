@@ -53,6 +53,7 @@ class TestRouteTOML(unittest.TestCase):
             self.mock,
             intent="change the icon from 📋 to 🎯",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -105,6 +106,7 @@ class TestRouteProse(unittest.TestCase):
             self.mock,
             intent="rewrite the menu handler to be more concise",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -155,6 +157,7 @@ class TestRoutePlaneDisambiguation(unittest.TestCase):
             self.mock,
             intent="update the greeting and activation flow",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -219,6 +222,7 @@ class TestFullSkillWarning(unittest.TestCase):
         route_intent(
             intent="replace the entire skill with a new one",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=Path("/nonexistent/compile.py"),
             emit_fn=events.append,
         )

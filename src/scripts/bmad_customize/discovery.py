@@ -113,18 +113,21 @@ Interface (discover_surface — see also routing.py, drafting.py, writer.py, dri
   discover_surface(
       intent: str,
       skill_id: str,
+      install_dir: str,
       compile_py: Path,
       emit_fn: Callable[[dict[str, Any]], None],
       run_fn: Optional[Callable[..., subprocess.CompletedProcess[str]]] = None,
       # None → resolved at call time; default behaviour is subprocess.run
   ) -> None
 
-  intent:      natural-language customization intent (accepted for API stability;
-               unused in Story 6.2 -- do not branch on its value)
-  skill_id:    resolved skill identifier (e.g. "mock-module/skill-a")
-  compile_py:  path to compile.py; ignored by run_fn in tests
-  emit_fn:     event collector callback
-  run_fn:      resolved to subprocess.run at call time when None; pass explicit callable for DI
+  intent:       natural-language customization intent (accepted for API stability;
+                unused in Story 6.2 -- do not branch on its value)
+  skill_id:     resolved skill identifier (e.g. "mock-module/skill-a"); used as
+                compile.py positional <skill_canonical> argument
+  install_dir:  path to the BMAD install directory; passed as --install-dir to compile.py
+  compile_py:   path to compile.py; ignored by run_fn in tests
+  emit_fn:      event collector callback
+  run_fn:       resolved to subprocess.run at call time when None; pass explicit callable for DI
 
 Production callers derive compile_py via:
   # dev-tree path; installed-package derivation deferred until packaging story
@@ -146,6 +149,7 @@ _ICON_SUBSTRINGS: tuple[str, ...] = ("icon", "glyph", "emoji", "logo")
 def discover_surface(
     intent: str,
     skill_id: str,
+    install_dir: str,
     compile_py: Path,
     emit_fn: Callable[[dict[str, Any]], None],
     run_fn: Optional[Callable[..., "subprocess.CompletedProcess[str]"]] = None,
@@ -169,7 +173,7 @@ def discover_surface(
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
     )
-    cmd = [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"]
+    cmd = [sys.executable, str(compile_py), skill_id, "--install-dir", install_dir, "--explain", "--json"]
     try:
         result = _run(
             cmd,

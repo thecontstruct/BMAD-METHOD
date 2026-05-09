@@ -19,6 +19,7 @@ Interface:
       fragment_name: Optional[str],  # prose plane only; None for TOML
       target_file: str,
       skill_id: str,
+      install_dir: str,
       compile_py: Path,
       emit_fn: Callable[[dict[str, Any]], None],
       run_fn: Optional[Callable[..., subprocess.CompletedProcess[str]]] = None,
@@ -32,7 +33,10 @@ Interface:
   fragment_name:     prose fragment name (e.g. "menu-handler"); None on TOML plane
   target_file:       caller-provided override file path (set by routing handler;
                      not re-derived here)
-  skill_id:          resolved skill identifier; passed to compile.py --skill
+  skill_id:          resolved skill identifier; used as compile.py positional
+                     <skill_canonical> argument
+  install_dir:       path to the BMAD install directory; passed as --install-dir
+                     to compile.py
   compile_py:        path to compile.py; used on ALL paths (draft_content always
                      calls --explain --json to fetch current surface state,
                      unlike route_intent which skips it on the full-skill path)
@@ -64,6 +68,7 @@ def draft_content(
     fragment_name: Optional[str],
     target_file: str,
     skill_id: str,
+    install_dir: str,
     compile_py: Path,
     emit_fn: Callable[[dict[str, Any]], None],
     run_fn: Optional[Callable[..., "subprocess.CompletedProcess[str]"]] = None,
@@ -89,7 +94,7 @@ def draft_content(
         run_fn if run_fn is not None else subprocess.run
     )
     # dev-tree path; installed-package derivation deferred until packaging story
-    cmd = [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"]
+    cmd = [sys.executable, str(compile_py), skill_id, "--install-dir", install_dir, "--explain", "--json"]
     try:
         result = _run(
             cmd,

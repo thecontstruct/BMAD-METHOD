@@ -58,6 +58,7 @@ class TestDiscoveryPristine(unittest.TestCase):
             self.mock,
             intent="make this agent's greeting more formal",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -108,6 +109,7 @@ class TestDiscoveryAmbiguous(unittest.TestCase):
             self.mock,
             intent="change the agent icon",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -174,6 +176,7 @@ class TestNFRP4Budget(unittest.TestCase):
             mock,
             intent="make greeting more formal",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
         self.assertGreater(len(mock.calls), 0, _GUARD_MSG)
@@ -188,6 +191,7 @@ class TestNFRP4Budget(unittest.TestCase):
             mock,
             intent="change the icon",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
         self.assertGreater(len(mock.calls), 0, _GUARD_MSG)

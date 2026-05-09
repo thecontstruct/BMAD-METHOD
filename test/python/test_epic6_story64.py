@@ -59,6 +59,7 @@ class TestDraftTOML(unittest.TestCase):
             fragment_name=None,
             target_file="_bmad/custom/skill-a.user.toml",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -121,6 +122,7 @@ class TestDraftProse(unittest.TestCase):
             fragment_name="menu-handler",
             target_file="_bmad/custom/fragments/mock-module/skill-a/menu-handler.template.md",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -177,6 +179,7 @@ class TestNoDiskWriteContract(unittest.TestCase):
             fragment_name=None,
             target_file="_bmad/custom/skill-a.user.toml",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -190,6 +193,7 @@ class TestNoDiskWriteContract(unittest.TestCase):
             fragment_name="menu-handler",
             target_file="_bmad/custom/fragments/mock-module/skill-a/menu-handler.template.md",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -239,6 +243,7 @@ class TestDraftIteration(unittest.TestCase):
             fragment_name=None,
             target_file="_bmad/custom/skill-a.user.toml",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
 
@@ -259,6 +264,7 @@ class TestDraftIteration(unittest.TestCase):
             fragment_name=None,
             target_file="_bmad/custom/skill-a.user.toml",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
         )
         self.assertGreater(len(fresh_mock.calls), 0, _GUARD_MSG)
@@ -293,6 +299,7 @@ class TestDraftRevision(unittest.TestCase):
             fragment_name=None,
             target_file="_bmad/custom/skill-a.user.toml",
             skill_id="mock-module/skill-a",
+            install_dir=".",
             compile_py=_COMPILE_PY,
             revision_feedback="actually use a lightning bolt emoji instead",
         )

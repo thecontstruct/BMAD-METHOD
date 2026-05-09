@@ -21,24 +21,27 @@ Interface:
   route_intent(
       intent: str,
       skill_id: str,
+      install_dir: str,
       compile_py: Path,
       emit_fn: Callable[[dict[str, Any]], None],
       run_fn: Optional[Callable[..., subprocess.CompletedProcess[str]]] = None,
       # None → resolved at call time; default behaviour is subprocess.run
   ) -> None
 
-  intent:      natural-language customization intent (matched against
-               _FULL_SKILL_PHRASES first; tokenized and matched against
-               surface fields/fragments otherwise)
-  skill_id:    resolved skill identifier (e.g. "mock-module/skill-a"); used to
-               derive target_file paths and as compile.py --skill argument
-  compile_py:  path to compile.py; accepted for API consistency with
-               discover_surface but NEVER dereferenced on the full-skill
-               pre-compile path (handler emits warn_full_skill and returns
-               before any run_fn call when _is_full_skill_intent is true)
-  emit_fn:     event collector callback
-  run_fn:      resolved to subprocess.run at call time when None; pass an
-               explicit callable for explicit dependency injection only
+  intent:       natural-language customization intent (matched against
+                _FULL_SKILL_PHRASES first; tokenized and matched against
+                surface fields/fragments otherwise)
+  skill_id:     resolved skill identifier (e.g. "mock-module/skill-a"); used to
+                derive target_file paths and as compile.py positional
+                <skill_canonical> argument
+  install_dir:  path to the BMAD install directory; passed as --install-dir to compile.py
+  compile_py:   path to compile.py; accepted for API consistency with
+                discover_surface but NEVER dereferenced on the full-skill
+                pre-compile path (handler emits warn_full_skill and returns
+                before any run_fn call when _is_full_skill_intent is true)
+  emit_fn:      event collector callback
+  run_fn:       resolved to subprocess.run at call time when None; pass an
+                explicit callable for explicit dependency injection only
 
 Production callers derive compile_py via:
   # dev-tree path; installed-package derivation deferred until packaging story
@@ -132,6 +135,7 @@ def _match_prose(
 def route_intent(
     intent: str,
     skill_id: str,
+    install_dir: str,
     compile_py: Path,
     emit_fn: Callable[[dict[str, Any]], None],
     run_fn: Optional[Callable[..., "subprocess.CompletedProcess[str]"]] = None,
@@ -165,7 +169,7 @@ def route_intent(
         run_fn if run_fn is not None else subprocess.run
     )
     # dev-tree path; installed-package derivation deferred until packaging story
-    cmd = [sys.executable, str(compile_py), "--skill", skill_id, "--explain", "--json"]
+    cmd = [sys.executable, str(compile_py), skill_id, "--install-dir", install_dir, "--explain", "--json"]
     try:
         result = _run(
             cmd,

@@ -70,6 +70,7 @@ class TestCalledProcessError(unittest.TestCase):
             discover_surface(
                 intent="x",
                 skill_id="mock/skill-a",
+                install_dir=".",
                 compile_py=_COMPILE_PY,
                 emit_fn=events.append,
                 run_fn=_cpe_run_fn,
@@ -82,6 +83,7 @@ class TestCalledProcessError(unittest.TestCase):
             route_intent(
                 intent="change icon",
                 skill_id="mock/skill-a",
+                install_dir=".",
                 compile_py=_COMPILE_PY,
                 emit_fn=events.append,
                 run_fn=_cpe_run_fn,
@@ -115,6 +117,7 @@ class TestJsonDecodeError(unittest.TestCase):
             discover_surface(
                 intent="x",
                 skill_id="mock/skill-a",
+                install_dir=".",
                 compile_py=_COMPILE_PY,
                 emit_fn=events.append,
                 run_fn=_stdout_run_fn("<not-json>"),
@@ -127,6 +130,7 @@ class TestJsonDecodeError(unittest.TestCase):
             route_intent(
                 intent="change icon",
                 skill_id="mock/skill-a",
+                install_dir=".",
                 compile_py=_COMPILE_PY,
                 emit_fn=events.append,
                 run_fn=_stdout_run_fn("<not-json>"),
@@ -158,6 +162,7 @@ class TestNullPayload(unittest.TestCase):
             discover_surface(
                 intent="x",
                 skill_id="mock/skill-a",
+                install_dir=".",
                 compile_py=_COMPILE_PY,
                 emit_fn=events.append,
                 run_fn=_stdout_run_fn("null"),
@@ -170,6 +175,7 @@ class TestNullPayload(unittest.TestCase):
             route_intent(
                 intent="change icon",
                 skill_id="mock/skill-a",
+                install_dir=".",
                 compile_py=_COMPILE_PY,
                 emit_fn=events.append,
                 run_fn=_stdout_run_fn("null"),
@@ -186,6 +192,7 @@ class TestNullPayload(unittest.TestCase):
                 fragment_name=None,
                 target_file="_bmad/custom/skill-a.user.toml",
                 skill_id="mock/skill-a",
+                install_dir=".",
                 compile_py=_COMPILE_PY,
                 emit_fn=events.append,
                 run_fn=_stdout_run_fn("null"),
