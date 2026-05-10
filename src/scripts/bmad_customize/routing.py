@@ -207,6 +207,14 @@ def route_intent(
             f"route_intent: expected JSON object, got {type(raw).__name__}"
         )
     payload: dict[str, Any] = raw
+    # Story 7.11 AC-1 (L590, OQ-A=A): forward-compat schema_version guard.
+    # absent or == 1 passes through; any other value raises immediately.
+    schema_version = payload.get("schema_version")
+    if schema_version is not None and schema_version != 1:
+        raise BmadSubprocessError(
+            f"route_intent: unsupported compiler schema_version={schema_version!r}; "
+            f"expected 1 or absent"
+        )
     # (3) Tokenize intent and match against surface
     tokens = _extract_tokens(intent)
     toml_fields: list[dict[str, Any]] = payload.get("toml_fields") or []

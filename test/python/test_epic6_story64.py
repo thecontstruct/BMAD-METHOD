@@ -8,6 +8,7 @@ echoed in event, no staging files).
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -24,6 +25,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from bmad_customize._errors import BmadSubprocessError
 from bmad_customize.drafting import draft_content
 from harness.mock_compiler import MockCompiler
 from harness.skill_test_runner import run_handler_with_mock
@@ -321,6 +323,211 @@ class TestDraftRevision(unittest.TestCase):
         with patch("pathlib.Path.write_text") as mock_write:
             self._run()
             mock_write.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Story 7.11 AC-2: draft_content subprocess input validation (L607/L611/L613)
+# ---------------------------------------------------------------------------
+
+
+class TestDraftContentInputValidation(unittest.TestCase):
+    """draft_content raises BmadSubprocessError on missing compile_py or sys.executable."""
+
+    def _call(
+        self,
+        compile_py: Path | None = None,
+        run_fn: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        kwargs: dict[str, Any] = {}
+        if run_fn is not None:
+            kwargs["run_fn"] = run_fn
+        draft_content(
+            intent="icon",
+            plane="toml",
+            field_path="icon",
+            fragment_name=None,
+            target_file="skill-a.user.toml",
+            skill_id="mock/skill-a",
+            install_dir=".",
+            compile_py=compile_py if compile_py is not None else _COMPILE_PY,
+            emit_fn=events.append,
+            **kwargs,
+        )
+        return events
+
+    def test_missing_compile_py_raises_before_subprocess(self) -> None:
+        missing = Path("/nonexistent/path/compile.py")
+        with self.assertRaises(BmadSubprocessError) as cm:
+            self._call(compile_py=missing)
+        self.assertIn("not found", str(cm.exception).lower())
+
+    def test_missing_compile_py_raises_bmad_not_file_not_found(self) -> None:
+        # Must NOT propagate raw FileNotFoundError; must wrap in BmadSubprocessError.
+        missing = Path("/nonexistent/path/compile.py")
+        try:
+            self._call(compile_py=missing)
+        except BmadSubprocessError:
+            pass  # expected
+        except FileNotFoundError:
+            self.fail("FileNotFoundError must be wrapped in BmadSubprocessError")
+
+    def test_sys_executable_validation_raises_on_nonexistent(self) -> None:
+        # Patch sys.executable IN the drafting module so the existence check
+        # sees the nonexistent path. compile_py exists; only sys.executable fails.
+        # Patch the attribute (not the whole sys module) for surgical isolation.
+        with patch("bmad_customize.drafting.sys.executable", "/nonexistent/python"):
+            with self.assertRaises(BmadSubprocessError) as cm:
+                self._call()
+        self.assertIn("executable", str(cm.exception).lower())
+
+
+# ---------------------------------------------------------------------------
+# Story 7.11 AC-3: draft_content caller-contract enforcement (L622/L624/L626)
+# ---------------------------------------------------------------------------
+
+
+class TestDraftContentContractEnforcement(unittest.TestCase):
+    """draft_content raises on malformed toml_fields, multi-segment field_path,
+    and empty-string revision_feedback (OQ-B=A, OQ-D=A)."""
+
+    @staticmethod
+    def _run_fn_with_fields(toml_fields: list[Any]) -> Any:
+        import json as _json
+        payload = {"toml_fields": toml_fields, "fragments": []}
+
+        def _run_fn(args: list[str], *a: Any, **kw: Any) -> "subprocess.CompletedProcess[str]":
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout=_json.dumps(payload), stderr=""
+            )
+        return _run_fn
+
+    def test_non_dict_toml_field_raises(self) -> None:
+        events: list[dict[str, Any]] = []
+        run_fn = self._run_fn_with_fields(["icon", "logo"])  # strings, not dicts
+        with self.assertRaises(BmadSubprocessError) as cm:
+            draft_content(
+                intent="icon",
+                plane="toml",
+                field_path="icon",
+                fragment_name=None,
+                target_file="x.toml",
+                skill_id="mock/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=run_fn,
+            )
+        self.assertIn("not a dict", str(cm.exception).lower())
+
+    def test_non_dict_raises_not_attribute_error(self) -> None:
+        events: list[dict[str, Any]] = []
+        run_fn = self._run_fn_with_fields([None, 42])
+        try:
+            draft_content(
+                intent="icon",
+                plane="toml",
+                field_path="icon",
+                fragment_name=None,
+                target_file="x.toml",
+                skill_id="mock/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=run_fn,
+            )
+        except BmadSubprocessError:
+            pass
+        except AttributeError:
+            self.fail("AttributeError must be wrapped in BmadSubprocessError")
+
+    def test_multi_segment_field_path_raises(self) -> None:
+        events: list[dict[str, Any]] = []
+        run_fn = self._run_fn_with_fields([{"path": "commands.icon", "current_value": "x"}])
+        with self.assertRaises(BmadSubprocessError) as cm:
+            draft_content(
+                intent="icon",
+                plane="toml",
+                field_path="commands.menu.icon",  # multi-segment
+                fragment_name=None,
+                target_file="x.toml",
+                skill_id="mock/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=run_fn,
+            )
+        self.assertIn("multi-segment", str(cm.exception).lower())
+
+    def test_empty_revision_feedback_raises(self) -> None:
+        mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        mock.register("--explain --json", "explain-icon-clean.json")
+        with self.assertRaises(BmadSubprocessError) as cm:
+            run_handler_with_mock(
+                draft_content,
+                mock,
+                intent="icon",
+                plane="toml",
+                field_path="icon",
+                fragment_name=None,
+                target_file="x.toml",
+                skill_id="mock/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                revision_feedback="",  # empty string — invalid per OQ-D=A
+            )
+        self.assertIn("revision_feedback", str(cm.exception))
+
+
+# ---------------------------------------------------------------------------
+# Story 7.11 AC-6: draft_content TOML field-not-found graceful degradation (L615)
+# ---------------------------------------------------------------------------
+
+
+class TestDraftTOMLFieldNotFound(unittest.TestCase):
+    """TOML field-not-found: propose_draft emitted without current_value
+    (graceful degradation, not a raise)."""
+
+    def test_field_not_found_emits_propose_draft(self) -> None:
+        # explain-icon-clean.json has only "agent.icon"; request a nonexistent
+        # field so the loop terminates without setting current_value.
+        mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        mock.register("--explain --json", "explain-icon-clean.json")
+        events = run_handler_with_mock(
+            draft_content,
+            mock,
+            intent="icon",
+            plane="toml",
+            field_path="nonexistent_field_xyz",
+            fragment_name=None,
+            target_file="x.toml",
+            skill_id="mock/skill-a",
+            install_dir=".",
+            compile_py=_COMPILE_PY,
+        )
+        propose = next((e for e in events if e.get("action") == "propose_draft"), None)
+        self.assertIsNotNone(propose, "propose_draft must be emitted even when field not found")
+
+    def test_field_not_found_no_current_value(self) -> None:
+        mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        mock.register("--explain --json", "explain-icon-clean.json")
+        events = run_handler_with_mock(
+            draft_content,
+            mock,
+            intent="icon",
+            plane="toml",
+            field_path="nonexistent_field_xyz",
+            fragment_name=None,
+            target_file="x.toml",
+            skill_id="mock/skill-a",
+            install_dir=".",
+            compile_py=_COMPILE_PY,
+        )
+        propose = next(e for e in events if e.get("action") == "propose_draft")
+        self.assertNotIn(
+            "current_value", propose,
+            "current_value must be absent when field_path is not found",
+        )
 
 
 if __name__ == "__main__":

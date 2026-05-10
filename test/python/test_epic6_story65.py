@@ -820,5 +820,147 @@ class TestWriteOverrideMkdirAsymmetry(unittest.TestCase):
             revert_override(target, pre_write_content="prior content\n", emit_fn=lambda _: None)
 
 
+# ---------------------------------------------------------------------------
+# Story 7.11 AC-4: write_override filesystem error wrapping (L631)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideFilesystemErrors(unittest.TestCase):
+    """write_override wraps write_text filesystem errors in BmadSubprocessError."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _run_fn_success(args: list[str], *a: Any, **kw: Any) -> "subprocess.CompletedProcess[str]":
+        return subprocess.CompletedProcess(
+            args=args, returncode=0, stdout="--- diff ---\n", stderr=""
+        )
+
+    def test_permission_error_wrapped(self) -> None:
+        from unittest.mock import patch as _patch
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        with _patch("pathlib.Path.write_text", side_effect=PermissionError("denied")):
+            with self.assertRaises(BmadSubprocessError) as cm:
+                write_override(
+                    plane="toml",
+                    target_file=target,
+                    accepted_content='icon = "x"\n',
+                    skill_id="mock/skill-a",
+                    install_dir=".",
+                    compile_py=_COMPILE_PY,
+                    emit_fn=lambda _: None,
+                    run_fn=self._run_fn_success,
+                )
+        self.assertIn("failed to write", str(cm.exception).lower())
+
+    def test_permission_error_not_raw(self) -> None:
+        from unittest.mock import patch as _patch
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        with _patch("pathlib.Path.write_text", side_effect=PermissionError("denied")):
+            try:
+                write_override(
+                    plane="toml",
+                    target_file=target,
+                    accepted_content='icon = "x"\n',
+                    skill_id="mock/skill-a",
+                    install_dir=".",
+                    compile_py=_COMPILE_PY,
+                    emit_fn=lambda _: None,
+                    run_fn=self._run_fn_success,
+                )
+            except BmadSubprocessError:
+                pass
+            except PermissionError:
+                self.fail("PermissionError must be wrapped in BmadSubprocessError")
+
+
+# ---------------------------------------------------------------------------
+# Story 7.11 AC-4: write_override input validation (L641)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideInputValidation(unittest.TestCase):
+    """write_override pre-validates compile_py and skill_id (after write+emit).
+
+    The guards run AFTER the write+emit so the user-accepted content lands on
+    disk before the --diff subprocess is gated on input validity. This test
+    asserts that ordering invariant via the write_override_complete event.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_missing_compile_py_raises_before_diff_subprocess(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        missing_compile = Path("/nonexistent/compile.py")
+        events: list[dict[str, Any]] = []
+        with self.assertRaises(BmadSubprocessError) as cm:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='icon = "x"\n',
+                skill_id="mock/skill-a",
+                install_dir=".",
+                compile_py=missing_compile,
+                emit_fn=events.append,
+            )
+        self.assertIn("not found", str(cm.exception).lower())
+        self.assertTrue(
+            any(e.get("action") == "write_override_complete" for e in events),
+            "write_override_complete must fire before the compile_py guard "
+            "(write+emit ordering contract)",
+        )
+
+    def test_empty_skill_id_raises(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        with self.assertRaises(BmadSubprocessError):
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='icon = "x"\n',
+                skill_id="",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=lambda _: None,
+            )
+
+    def test_whitespace_only_skill_id_raises(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        with self.assertRaises(BmadSubprocessError):
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='icon = "x"\n',
+                skill_id="   ",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=lambda _: None,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Story 7.11 AC-5: write_override durability + revert encoding contract (L633/L637/L639)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideDurabilityContract(unittest.TestCase):
+    """Docstring-only durability boundary (OQ-C=B); revert_override UTF-8 contract."""
+
+    def test_revert_override_encoding_note_in_docstring(self) -> None:
+        # AC-5 / L633 — revert_override docstring must document UTF-8 round-trip.
+        doc = revert_override.__doc__ or ""
+        self.assertIn(
+            "utf-8", doc.lower(),
+            "revert_override docstring must document UTF-8 encoding contract for pre_write_content",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

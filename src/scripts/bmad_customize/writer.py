@@ -111,16 +111,40 @@ def write_override(
       2. Write accepted_content verbatim with utf-8 encoding.
       3. Emit write_override_complete BEFORE the subprocess call so the
          shell observes the write even if --diff later fails.
-      4. Resolve _run at call time (so unittest.mock.patch("subprocess.run", ...)
+      4. Validate compile_py exists and skill_id is non-empty (Story 7.11
+         AC-4 / L641). These guards run AFTER the write+emit so the file is
+         already on disk if the user accepted it; they prevent the --diff
+         subprocess from being spawned on bad inputs.
+      5. Resolve _run at call time (so unittest.mock.patch("subprocess.run", ...)
          intercepts the call without callers passing run_fn).
-      5. Invoke compile.py with positional skill_canonical + --install-dir + --diff.
-      6. Emit propose_diff_review carrying the raw stdout as diff_text.
+      6. Invoke compile.py with positional skill_canonical + --install-dir + --diff.
+      7. Emit propose_diff_review carrying the raw stdout as diff_text.
 
     On subprocess.CalledProcessError from the --diff invocation, diff_failed is
     emitted before re-raising BmadSubprocessError; propose_diff_review is NOT
     emitted. Other subprocess exceptions (FileNotFoundError, TimeoutExpired, OSError)
     propagate uncaught with NO diff_failed event. Recovery (e.g. calling
     revert_override) is the LLM shell's responsibility.
+
+    Story 7.11 AC-4 (L631): write_text is wrapped in a try/except over the
+    PermissionError / OSError / IsADirectoryError / NotADirectoryError set so
+    filesystem failures (read-only target, target is a directory, etc.) yield
+    a typed BmadSubprocessError rather than a raw OS exception. FileNotFoundError
+    is not separately enumerated — and `OSError` would subsume it via class
+    hierarchy in any case (Python 3 makes FileNotFoundError an OSError subclass).
+    The "no mask" guarantee is therefore TEMPORAL, not exception-set-based:
+    `mkdir(parents=True, exist_ok=True)` runs immediately above, so by the time
+    write_text executes the parent directory exists and a FileNotFoundError
+    from write_text cannot indicate the parent-missing case the mkdir-wrap
+    classifies (only a TOCTOU race where the parent is deleted between the two
+    statements could surface FileNotFoundError here).
+
+    Story 7.11 AC-5 (L637, OQ-C=B): write_override_complete signals that
+    write_text returned without error — NOT that bytes are on stable storage.
+    The OS may buffer; fsync is NOT called. If the process crashes after
+    write_text but before the shell observes write_override_complete, the file
+    may be on disk without the shell knowing. Performance tradeoff; consistent
+    with 6.7b's writes (no fsync).
 
     If emit_fn raises on the write_override_complete event, write_text has already
     succeeded — the file is on disk. The caller holds target_file a-priori and is
@@ -136,13 +160,33 @@ def write_override(
         raise BmadSubprocessError(
             f"write_override: parent path is not a usable directory: {target_path.parent}"
         ) from exc
-    target_path.write_text(accepted_content, encoding="utf-8")
+    # Story 7.11 AC-4 (L631): wrap write_text filesystem errors in
+    # BmadSubprocessError. FileNotFoundError is intentionally absent (mkdir-wrap
+    # above handles the parent-missing case).
+    try:
+        target_path.write_text(accepted_content, encoding="utf-8")
+    except (PermissionError, OSError, IsADirectoryError, NotADirectoryError) as exc:
+        raise BmadSubprocessError(
+            f"write_override: failed to write {target_file}: {exc}"
+        ) from exc
 
     emit_fn({
         "action": "write_override_complete",
         "plane": plane,
         "target_file": target_file,
     })
+
+    # Story 7.11 AC-4 (L641): pre-validate compile_py + skill_id BEFORE the
+    # --diff subprocess. Placed AFTER write+emit so the user-accepted content
+    # is on disk first; these guards only protect the --diff invocation.
+    if not compile_py.exists():
+        raise BmadSubprocessError(
+            f"write_override: compile.py not found at {compile_py}"
+        )
+    if not skill_id or not skill_id.strip():
+        raise BmadSubprocessError(
+            "write_override: skill_id must be a non-empty string"
+        )
 
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
@@ -198,6 +242,14 @@ def revert_override(
             If target_path is a symlink, it is removed first so
             write_text creates a regular file at target_path rather
             than writing through to the symlink destination.
+
+    Story 7.11 AC-5 (L633): pre_write_content must have been read from disk
+    using UTF-8 encoding to round-trip correctly. revert_override re-writes
+    via write_text(..., encoding="utf-8"); passing content decoded with a
+    different encoding (e.g., latin-1, cp1252) is a caller error and may
+    corrupt the restored file. Capture the original bytes via
+    `Path.read_text(encoding="utf-8")` (or read_bytes + .decode("utf-8"))
+    before the override write.
     """
     target_path = Path(target_file)
     if pre_write_content is None:

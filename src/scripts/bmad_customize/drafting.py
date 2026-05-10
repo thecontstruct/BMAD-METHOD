@@ -78,19 +78,55 @@ def draft_content(
     """Fetch the current surface state and emit a propose_draft event.
 
     Ordered steps:
-      1. Invoke compiler via run_fn for --explain --json.
-      2. Build base event payload with action, plane, target_file, intent,
+      1. Pre-validate compile_py and sys.executable exist on disk (Story 7.11
+         AC-2, L607/L611/L613). These guards turn a raw FileNotFoundError into
+         a typed BmadSubprocessError before the subprocess is launched.
+      2. Validate caller contracts on revision_feedback and (later) field_path
+         and toml_fields entries (Story 7.11 AC-3, L622/L624/L626).
+      3. Invoke compiler via run_fn for --explain --json.
+      4. Build base event payload with action, plane, target_file, intent,
          requires_confirmation.
-      3. TOML plane: add field_path and (if matching field found) current_value.
-      4. Prose plane: add fragment_name. current_content is not added — the
+      5. TOML plane: add field_path and (if matching field found) current_value.
+      6. Prose plane: add fragment_name. current_content is not added — the
          explain payload carries hash+src but not raw fragment text (OQ-2).
-      5. If revision_feedback is provided, echo it into the event.
-      6. Emit exactly one propose_draft event and return.
+      7. If revision_feedback is provided, echo it into the event.
+      8. Emit exactly one propose_draft event and return.
 
     No filesystem writes occur on any code path. run_fn defaults to None so
     subprocess.run is resolved at call time, letting unittest.mock.patch
     intercept the call without callers passing run_fn.
+
+    Story 7.11 AC-2 (L613): the compile_py and sys.executable guards only
+    confirm the paths resolve to existing files on disk. They do NOT confirm
+    sys.executable is the right Python version or the active venv's
+    interpreter — that is caller responsibility (e.g., shim/venv resolution
+    is upstream of this handler).
     """
+    # Story 7.11 AC-2 (L607/L611): validate compile_py exists before spawning.
+    if not compile_py.exists():
+        raise BmadSubprocessError(
+            f"draft_content: compile.py not found at {compile_py}"
+        )
+    # Story 7.11 AC-2 (L613): validate sys.executable resolves to an existing file.
+    if not Path(sys.executable).exists():
+        raise BmadSubprocessError(
+            f"draft_content: Python executable not found at {sys.executable}"
+        )
+    # Story 7.11 AC-3 (L626, OQ-D=A): empty / whitespace-only revision_feedback
+    # is semantically invalid. None means absent (no echo); a non-empty string
+    # is a real revision iteration.
+    if revision_feedback is not None and not revision_feedback.strip():
+        raise BmadSubprocessError(
+            "draft_content: revision_feedback must be non-empty string or None"
+        )
+    # Story 7.11 AC-3 (L624, OQ-B=A): routing.py emits single-segment field_path
+    # values via `path.split(".")[-1]`. A multi-segment value here means a caller
+    # contract violation; surface it before silent last-segment matching.
+    if plane == "toml" and field_path is not None and "." in field_path:
+        raise BmadSubprocessError(
+            f"draft_content: multi-segment field_path {field_path!r} not supported; "
+            f"routing.py must emit single-segment paths only"
+        )
     _run: Callable[..., subprocess.CompletedProcess[str]] = (
         run_fn if run_fn is not None else subprocess.run
     )
@@ -131,6 +167,12 @@ def draft_content(
     if plane == "toml" and field_path is not None:
         event["field_path"] = field_path
         for field in payload.get("toml_fields") or []:
+            # Story 7.11 AC-3 (L622): caller contract guard on entry shape.
+            # Raises before AttributeError on the field.get(...) call below.
+            if not isinstance(field, dict):
+                raise BmadSubprocessError(
+                    f"draft_content: toml_fields entry is not a dict: {field!r}"
+                )
             path = field.get("path", "")
             last_seg = path.split(".")[-1] if "." in path else path
             if last_seg == field_path:

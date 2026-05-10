@@ -6,6 +6,7 @@ disambiguation), AC-4 (full-skill warning, no compile call).
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -344,6 +345,54 @@ class TestMatchProseSlashInName(unittest.TestCase):
         self.assertIn("widget", msg)
         self.assertIn("fragments/sub-a/widget.template.md", msg)
         self.assertIn("fragments/sub-b/widget.template.md", msg)
+
+
+# ---------------------------------------------------------------------------
+# Story 7.11 AC-1: route_intent schema_version forward-compat guard (L590)
+# ---------------------------------------------------------------------------
+
+
+class TestRouteIntentSchemaVersion(unittest.TestCase):
+    """schema_version guard in route_intent (OQ-A=A).
+
+    Uses an intent that does NOT match _FULL_SKILL_PHRASES so route_intent
+    proceeds past step (1) and invokes the compiler — exercising the guard.
+    """
+
+    @staticmethod
+    def _run_with_version(schema_version: int | None) -> list[dict[str, Any]]:
+        import json as _json
+        payload: dict[str, Any] = {"toml_fields": [], "fragments": []}
+        if schema_version is not None:
+            payload["schema_version"] = schema_version
+
+        def _run_fn(args: list[str], *a: Any, **kw: Any) -> "subprocess.CompletedProcess[str]":
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout=_json.dumps(payload), stderr=""
+            )
+        events: list[dict[str, Any]] = []
+        route_intent(
+            intent="change icon",
+            skill_id="mock/skill-a",
+            install_dir=".",
+            compile_py=_COMPILE_PY,
+            emit_fn=events.append,
+            run_fn=_run_fn,
+        )
+        return events
+
+    def test_schema_version_absent_passes(self) -> None:
+        # Must not raise; routing emits a request_plane_disambiguation with empty
+        # candidates because no fields/fragments are present in payload.
+        self._run_with_version(None)
+
+    def test_schema_version_1_passes(self) -> None:
+        self._run_with_version(1)
+
+    def test_schema_version_2_raises(self) -> None:
+        with self.assertRaises(BmadSubprocessError) as cm:
+            self._run_with_version(2)
+        self.assertIn("schema_version", str(cm.exception))
 
 
 if __name__ == "__main__":

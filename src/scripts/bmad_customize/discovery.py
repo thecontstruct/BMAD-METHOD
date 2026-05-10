@@ -148,6 +148,21 @@ from ._errors import BmadSubprocessError
 _ICON_SUBSTRINGS: tuple[str, ...] = ("icon", "glyph", "emoji", "logo")
 
 
+def _has_icon_token(text: str) -> bool:
+    """True iff any dot/hyphen/underscore/slash-delimited token in *text* is in _ICON_SUBSTRINGS.
+
+    Story 7.11 AC-1 (L567): unanchored substring matching produced false positives
+    on tokens that merely *contained* an icon substring (e.g., 'catalogo.title'
+    contains 'logo'; 'unicode.encoding' contains 'icon'). Token-boundary matching
+    splits on `.`, `-`, `_`, and `/` (the latter so fragment paths like
+    'fragments/icon.template.md' tokenize to ['fragments', 'icon', 'template', 'md']
+    and the icon hits) and requires exact equality against the set.
+    """
+    normalized = text.lower().replace("-", ".").replace("_", ".").replace("/", ".")
+    tokens = normalized.split(".")
+    return any(tok in _ICON_SUBSTRINGS for tok in tokens)
+
+
 def discover_surface(
     intent: str,
     skill_id: str,
@@ -200,29 +215,37 @@ def discover_surface(
             f"discover_surface: expected JSON object, got {type(raw).__name__}"
         )
     payload: dict[str, Any] = raw
+    # Story 7.11 AC-1 (L590, OQ-A=A): forward-compat schema_version guard.
+    # absent or == 1 passes through; any other value raises immediately.
+    schema_version = payload.get("schema_version")
+    if schema_version is not None and schema_version != 1:
+        raise BmadSubprocessError(
+            f"discover_surface: unsupported compiler schema_version={schema_version!r}; "
+            f"expected 1 or absent"
+        )
     # (3) Emit discover event unconditionally as the first event
     emit_fn({"action": "discover", "skill_id": skill_id, "source": "--explain --json"})
     # (4) Detect ambiguity: toml condition AND fragment condition must both hold
     toml_fields: list[dict[str, Any]] = payload.get("toml_fields", [])
     fragments: list[dict[str, Any]] = payload.get("fragments", [])
+    # Story 7.11 AC-1 (L567): token-boundary matching via _has_icon_token avoids
+    # false positives like 'catalogo.title' (substring 'logo') and 'unicode.encoding'
+    # (substring 'icon'). True matches like 'agent.icon' / 'display.logo' still hit.
     toml_icon_count = sum(
-        1 for f in toml_fields
-        if any(sub in f.get("path", "") for sub in _ICON_SUBSTRINGS)
+        1 for f in toml_fields if _has_icon_token(f.get("path", ""))
     )
     frag_icon_match = any(
-        sub in frag.get("src", "")
-        for frag in fragments
-        for sub in _ICON_SUBSTRINGS
+        _has_icon_token(frag.get("src", "")) for frag in fragments
     )
     if toml_icon_count >= 2 and frag_icon_match:
         candidates: list[dict[str, Any]] = [
             {"path": f["path"]}
             for f in toml_fields
-            if any(sub in f.get("path", "") for sub in _ICON_SUBSTRINGS)
+            if _has_icon_token(f.get("path", ""))
         ] + [
             {"src": frag["src"]}
             for frag in fragments
-            if any(sub in frag.get("src", "") for sub in _ICON_SUBSTRINGS)
+            if _has_icon_token(frag.get("src", ""))
         ]
         emit_fn({"action": "request_disambiguation", "candidates": candidates})
         return
