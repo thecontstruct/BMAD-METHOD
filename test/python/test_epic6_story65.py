@@ -8,6 +8,7 @@ on diff rejection: delete-when-new vs restore-when-pre-existing).
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -474,6 +475,167 @@ class TestWriteOverrideEmitFnRaise(unittest.TestCase):
         self.assertEqual(Path(target).read_text(encoding="utf-8"), "prior content\n")
         self.assertEqual(events[-1]["action"], "revert_complete")
         self.assertIs(events[-1]["deleted"], False)
+
+
+# ---------------------------------------------------------------------------
+# AC-3 (7.9): write_override --diff failure protocol event (OQ-B=A, OQ-C=A)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideDiffFailed(unittest.TestCase):
+    """write_override must emit diff_failed before raising when --diff subprocess fails."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _failing_run(
+        self, args: list[str], *a: Any, **kw: Any
+    ) -> "subprocess.CompletedProcess[str]":
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=args, stderr="mock compile --diff error"
+        )
+
+    def _failing_run_long_stderr(
+        self, args: list[str], *a: Any, **kw: Any
+    ) -> "subprocess.CompletedProcess[str]":
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=args, stderr="x" * 600
+        )
+
+    def _failing_run_no_stderr(
+        self, args: list[str], *a: Any, **kw: Any
+    ) -> "subprocess.CompletedProcess[str]":
+        raise subprocess.CalledProcessError(returncode=2, cmd=args)
+
+    def test_diff_failed_event_emitted(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=self._failing_run,
+            )
+        except BmadSubprocessError:
+            pass
+        # R1-AA-4: exactly one diff_failed per invocation
+        diff_failed_events = [e for e in events if e["action"] == "diff_failed"]
+        self.assertEqual(len(diff_failed_events), 1)
+
+    def test_diff_failed_event_has_required_fields(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=self._failing_run,
+            )
+        except BmadSubprocessError:
+            pass
+        fail_evt = next(e for e in events if e.get("action") == "diff_failed")
+        # R1-AA-5/ECH-3: verify field presence AND correct values
+        self.assertEqual(fail_evt["skill_id"], "mock-module/skill-a")
+        self.assertEqual(fail_evt["returncode"], 1)
+        self.assertIn("mock compile --diff error", fail_evt["stderr_excerpt"])
+
+    def test_write_override_complete_precedes_diff_failed(self) -> None:
+        # Sequence contract: write_override_complete fires BEFORE diff_failed
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=self._failing_run,
+            )
+        except BmadSubprocessError:
+            pass
+        actions = [e["action"] for e in events]
+        self.assertIn("write_override_complete", actions)
+        self.assertIn("diff_failed", actions)
+        self.assertLess(
+            actions.index("write_override_complete"),
+            actions.index("diff_failed"),
+        )
+        # R2-BH-R2-2: propose_diff_review must NOT appear
+        self.assertNotIn("propose_diff_review", actions)
+
+    def test_file_written_before_diff_failed_emitted(self) -> None:
+        # R1-L-3: file must be on disk (write_text succeeded before _run fired)
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=lambda _: None,
+                run_fn=self._failing_run,
+            )
+        except BmadSubprocessError:
+            pass
+        self.assertTrue(Path(target).exists())
+
+    def test_stderr_excerpt_truncated_at_500(self) -> None:
+        # M-1: stderr longer than 500 chars must be truncated to exactly 500
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=self._failing_run_long_stderr,
+            )
+        except BmadSubprocessError:
+            pass
+        fail_evt = next(e for e in events if e.get("action") == "diff_failed")
+        self.assertEqual(len(fail_evt["stderr_excerpt"]), 500)
+
+    def test_stderr_none_produces_empty_string(self) -> None:
+        # M-2: CalledProcessError with stderr=None must yield stderr_excerpt=""
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=self._failing_run_no_stderr,
+            )
+        except BmadSubprocessError:
+            pass
+        fail_evt = next(e for e in events if e.get("action") == "diff_failed")
+        self.assertEqual(fail_evt["stderr_excerpt"], "")
 
 
 if __name__ == "__main__":

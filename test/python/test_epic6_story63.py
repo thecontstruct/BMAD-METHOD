@@ -22,7 +22,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from bmad_customize.routing import route_intent
+from bmad_customize._errors import BmadSubprocessError
+from bmad_customize.routing import _match_prose, route_intent
 from harness.mock_compiler import MockCompiler
 from harness.skill_test_runner import run_handler_with_mock
 
@@ -254,6 +255,95 @@ class TestFullSkillWarning(unittest.TestCase):
         with patch("subprocess.run") as mock_run:
             self._run()
             mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# AC-1 (7.9): _match_prose empty-name wildcard guard
+# ---------------------------------------------------------------------------
+
+
+class TestMatchProseEmptyName(unittest.TestCase):
+    """_match_prose must skip fragments whose normalized name is empty."""
+
+    def test_empty_name_not_matched(self) -> None:
+        # "fragments/.template.md" → name="" → must NOT wildcard-match any intent
+        frags = [{"src": "fragments/.template.md"}]
+        result = _match_prose(frags, ["icon", "change", "update"], "mock-module/skill-a")
+        self.assertEqual(result, [])
+
+    def test_normal_fragment_still_matches_after_guard(self) -> None:
+        # Regression: valid fragment still resolves after empty-name guard is added
+        frags = [{"src": "fragments/preflight.template.md"}]
+        result = _match_prose(frags, ["preflight"], "mock-module/skill-a")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["fragment_name"], "preflight")
+
+    def test_mixed_fragments_empty_skipped(self) -> None:
+        # Both a degenerate and a valid fragment present: only valid one matches
+        frags = [
+            {"src": "fragments/.template.md"},
+            {"src": "fragments/preflight.template.md"},
+        ]
+        result = _match_prose(frags, ["preflight"], "mock-module/skill-a")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["fragment_name"], "preflight")
+
+    def test_dot_only_name_not_matched(self) -> None:
+        # R1-ECH-1: ".template.md" (no "fragments/" prefix) → name="." after suffix strip
+        # "." passes bare `if not name:` but must be caught by extended guard
+        frags = [{"src": ".template.md"}]
+        result = _match_prose(frags, ["icon", "change", "update"], "mock-module/skill-a")
+        self.assertEqual(result, [])
+
+
+# ---------------------------------------------------------------------------
+# AC-2 (7.9): _match_prose slash-in-name path-separator guard (OQ-A=A)
+# ---------------------------------------------------------------------------
+
+
+class TestMatchProseSlashInName(unittest.TestCase):
+    """_match_prose must strip nested-path slashes from fragment names."""
+
+    def test_nested_fragment_name_is_basename_only(self) -> None:
+        frags = [{"src": "fragments/sub/nested.template.md"}]
+        result = _match_prose(frags, ["nested"], "mock-module/skill-a")
+        self.assertEqual(len(result), 1)
+        self.assertNotIn("/", result[0]["fragment_name"])
+        self.assertEqual(result[0]["fragment_name"], "nested")
+
+    def test_nested_fragment_target_file_no_nested_path(self) -> None:
+        frags = [{"src": "fragments/sub/nested.template.md"}]
+        result = _match_prose(frags, ["nested"], "mock-module/skill-a")
+        self.assertEqual(len(result), 1)
+        # R2-ECH-R2-3: basename of target_file must equal "nested.template.md" exactly
+        self.assertEqual(result[0]["target_file"].rsplit("/", 1)[-1], "nested.template.md")
+
+    def test_non_nested_fragment_unaffected(self) -> None:
+        # Regression: flat fragment path unchanged by basename extraction
+        frags = [{"src": "fragments/preflight.template.md"}]
+        result = _match_prose(frags, ["preflight"], "mock-module/skill-a")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["fragment_name"], "preflight")
+
+    def test_nested_dot_template_not_matched(self) -> None:
+        # R1-ECH-2: "fragments/sub/.template.md" → after suffix strip → "sub/" → basename → ""
+        # Must NOT wildcard-match (proves guard fires after basename extraction)
+        frags = [{"src": "fragments/sub/.template.md"}]
+        result = _match_prose(frags, ["icon", "change", "update"], "mock-module/skill-a")
+        self.assertEqual(result, [])
+
+    def test_collision_raises_error_with_both_srcs(self) -> None:
+        # DN-7.9-2=B: two fragments with same basename from different subdirs → raise
+        frags = [
+            {"src": "fragments/sub-a/widget.template.md"},
+            {"src": "fragments/sub-b/widget.template.md"},
+        ]
+        with self.assertRaises(BmadSubprocessError) as ctx:
+            _match_prose(frags, ["widget"], "mock-module/skill-a")
+        msg = str(ctx.exception)
+        self.assertIn("widget", msg)
+        self.assertIn("fragments/sub-a/widget.template.md", msg)
+        self.assertIn("fragments/sub-b/widget.template.md", msg)
 
 
 if __name__ == "__main__":

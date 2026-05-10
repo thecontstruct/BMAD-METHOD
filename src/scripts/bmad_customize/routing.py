@@ -119,13 +119,23 @@ def _match_prose(
     skill_id: str,
 ) -> list[dict[str, Any]]:
     matched: list[dict[str, Any]] = []
+    seen_basenames: dict[str, str] = {}  # basename → first src (collision detection)
     for frag in fragments:
         src = frag.get("src", "")
         name = src
-        if name.startswith("fragments/"):
+        if name.startswith("fragments/"):  # discover.py guarantees bare relative src paths
             name = name[len("fragments/"):]
         if name.endswith(".template.md"):
             name = name[: -len(".template.md")]
+        name = name.split("/")[-1]                # AC-2 (OQ-A=A): basename before guard
+        if not name or not name.strip("."):        # AC-1: skip empty or dot-only names
+            continue
+        if name in seen_basenames:                 # DN-7.9-2=B: collision → fail early
+            raise BmadSubprocessError(
+                f"_match_prose: fragment basename collision: '{name}' produced by"
+                f" '{src}' and '{seen_basenames[name]}'"
+            )
+        seen_basenames[name] = src
         name_tokens = re.split(r"[-_]", name)
         if any(tok in nt or nt in tok for tok in tokens for nt in name_tokens):
             matched.append({

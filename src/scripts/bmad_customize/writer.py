@@ -116,14 +116,18 @@ def write_override(
       5. Invoke compile.py with positional skill_canonical + --install-dir + --diff.
       6. Emit propose_diff_review carrying the raw stdout as diff_text.
 
-    On subprocess.CalledProcessError or any subprocess failure, the
-    exception propagates; propose_diff_review is NOT emitted. Recovery
-    (e.g. calling revert_override) is the LLM shell's responsibility.
+    On subprocess.CalledProcessError from the --diff invocation, diff_failed is
+    emitted before re-raising BmadSubprocessError; propose_diff_review is NOT
+    emitted. Other subprocess exceptions (FileNotFoundError, TimeoutExpired, OSError)
+    propagate uncaught with NO diff_failed event. Recovery (e.g. calling
+    revert_override) is the LLM shell's responsibility.
 
     If emit_fn raises on the write_override_complete event, write_text has already
     succeeded — the file is on disk. The caller holds target_file a-priori and is
     responsible for calling revert_override(target_file, pre_write_content, emit_fn)
-    in its exception handler to clean up.
+    in its exception handler to clean up. If emit_fn raises on the diff_failed event,
+    CalledProcessError context is lost and BmadSubprocessError is not raised — the
+    caller's exception handler sees the emit_fn exception (same shell responsibility).
     """
     target_path = Path(target_file)
     try:
@@ -154,6 +158,12 @@ def write_override(
             check=True,
         )
     except subprocess.CalledProcessError as exc:
+        emit_fn({
+            "action": "diff_failed",
+            "skill_id": skill_id,
+            "returncode": exc.returncode,
+            "stderr_excerpt": str(exc.stderr or "")[:500],
+        })
         raise BmadSubprocessError(
             f"write_override: bmad compile --diff failed (rc={exc.returncode}): {exc.stderr}"
         ) from exc
