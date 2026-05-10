@@ -57,18 +57,33 @@ def _compile_one_skill(
     dir_name = dirpath.name
     skill_id = f"{module}/{dir_name}"
 
+    # AC-3 L530: guard against filesystem-root paths where dirpath.parent.name
+    # is "" (e.g. Path("/skill_only").parent == Path("/")).
+    if not module:
+        return [{
+            "schema_version": 1,
+            "kind": "error",
+            "skill": dir_name,
+            "status": "error",
+            "code": "BATCH_ENTRY_INVALID",
+            "file": str(dirpath),
+            "line": None,
+            "col": None,
+            "message": (
+                f"_compile_one_skill: skill_dir has no parent module component "
+                f"(filesystem-root path?): {dirpath}"
+            ),
+            "hint": None,
+        }]
+
     # Hash-skip dispatch (AC-3, --batch only). install_dir == scenario_root for
     # both --install-phase and --batch (each batch entry's install_dir is the
     # _bmad install root, which is what lazy_compile.py treats as scenario_root).
     #
-    # ECH-1 (R1): `_lc._needs_recompile` calls `drift.py` helpers that perform
-    # raw filesystem reads on tracked-input paths. If a tracked input is deleted
-    # between the lockfile read and the hash check (TOCTOU), `OSError` /
-    # `FileNotFoundError` propagates and would terminate _run_batch before the
-    # summary event is emitted (JS caller sees "no summary event"). Treat any
-    # exception during the hash check conservatively as "needs recompile" — the
-    # engine call below will surface a CompilerError event if the missing input
-    # is genuinely required.
+    # AC-3 L528: exception handler narrowed — expected TOCTOU filesystem events
+    # (OSError, FileNotFoundError, PermissionError) silently recompile.
+    # Programming errors (KeyError, AttributeError on malformed lockfile entries)
+    # emit a kind:"warning" diagnostic before recompiling defensively.
     if hash_skip:
         lockfile_path = install_dir / "_config" / "bmad.lock"
         try:
@@ -76,16 +91,22 @@ def _compile_one_skill(
             should_skip = (
                 entry is not None and not _lc._needs_recompile(entry, install_dir)
             )
-        except Exception:  # noqa: BLE001 — TOCTOU/IO defense, fall through to compile
-            # R1 ECH-1: broad except is intentional. Narrowing to (OSError,
-            # FileNotFoundError, PermissionError) would let programming errors
-            # (e.g. KeyError on a structurally-malformed lockfile entry)
-            # propagate out of _compile_one_skill, terminating _run_batch's
-            # loop before the summary event is emitted — breaking the JS
-            # caller's "no summary event" parser. F3 from R2 acknowledges
-            # silent-recompile is safer for correctness even at the cost of
-            # diagnostic clarity. A warning-event-on-non-OSError refinement
-            # is logged to deferred-work.md.
+        except (OSError, FileNotFoundError, PermissionError):
+            # Expected TOCTOU: silently recompile.
+            should_skip = False
+        except Exception as exc:
+            # Programming error (e.g. KeyError, AttributeError on structurally
+            # malformed lockfile entry) — emit diagnostic then recompile.
+            events.append({
+                "schema_version": 1,
+                "kind": "warning",
+                "code": "HASH_SKIP_DIAGNOSTIC",
+                "skill": skill_id,
+                "message": (
+                    f"lockfile entry for {skill_id!r} may be corrupt; "
+                    f"recompiling defensively ({type(exc).__name__}: {exc})"
+                ),
+            })
             should_skip = False
         if should_skip:
             events.append({
@@ -258,6 +279,9 @@ def _run_install_phase(install_dir: Path) -> int:
     return 0 if errors == 0 else 1
 
 
+_KNOWN_BATCH_KEYS: frozenset[str] = frozenset({"skill_dir", "install_dir"})
+
+
 def _run_batch(batch_file: Path) -> int:
     """Read JSON skill list from batch_file, compile each with hash-skip, emit NDJSON.
 
@@ -410,6 +434,39 @@ def _run_batch(batch_file: Path) -> int:
 
         skill_path = skill_path.resolve()
         install_path = install_path.resolve()
+
+        # AC-2 L526: verify install_dir exists as a directory before invoking
+        # the engine. Produces a directed BATCH_ENTRY_INVALID rather than a
+        # generic INTERNAL_ERROR from the engine on a missing directory.
+        if not install_path.is_dir():
+            _emit({
+                "schema_version": 1,
+                "kind": "error",
+                "skill": None,
+                "status": "error",
+                "code": "BATCH_ENTRY_INVALID",
+                "file": str(batch_file),
+                "line": None,
+                "col": None,
+                "message": (
+                    f"install_dir does not exist or is not a directory: {install_path}"
+                ),
+                "hint": None,
+            })
+            error_count += 1
+            continue
+
+        # AC-4 L532: warn on unknown batch entry keys (forward-compat tolerance).
+        # Fires only for entries that passed all guards above — entries that
+        # failed an earlier guard have already `continue`d without this warning.
+        for k in sorted(set(entry.keys()) - _KNOWN_BATCH_KEYS):
+            _emit({
+                "schema_version": 1,
+                "kind": "warning",
+                "code": "UNKNOWN_BATCH_KEY",
+                "skill": None,
+                "message": f"unknown key {k!r} in batch entry {idx}; runtime did not honor it",
+            })
 
         dedup_key = (str(skill_path), str(install_path))
         if dedup_key in seen:

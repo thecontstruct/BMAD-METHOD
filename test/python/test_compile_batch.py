@@ -35,6 +35,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _COMPILE_PY = _PROJECT_ROOT / "src" / "scripts" / "compile.py"
 _BMAD_QUICK_DEV = _PROJECT_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev"
 
+# In-process import for _compile_one_skill (AC-3 tests: cannot test via subprocess
+# because unittest.mock.patch does not cross the subprocess boundary).
+_SCRIPTS_DIR = str(_PROJECT_ROOT / "src" / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from compile import _compile_one_skill  # noqa: E402 — must follow sys.path setup
+
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -531,6 +538,177 @@ class TestBatchPerf(unittest.TestCase):
             # Wide-margin advisory: re-install should still complete (<10s on
             # any reasonable machine; this catches catastrophic regression).
             self.assertLess(reinstall_time, 10.0)
+
+
+# ---------------------------------------------------------------------------
+# TestRunBatchInstallDirValidation (AC-2 / L526)
+# ---------------------------------------------------------------------------
+
+
+class TestRunBatchInstallDirValidation(unittest.TestCase):
+    """_run_batch rejects missing install_dir with BATCH_ENTRY_INVALID."""
+
+    def test_missing_install_dir_emits_batch_entry_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            install = tmp_path / "_bmad"
+            install.mkdir()
+            skill_dir = _make_skill(install, "mod", "sk")
+            nonexistent_install = tmp_path / "no_such_dir"
+            batch = _make_batch_file(tmp_path, [
+                {"skill_dir": str(skill_dir), "install_dir": str(nonexistent_install)}
+            ])
+
+            code, events, _ = _run_batch(batch)
+            self.assertEqual(code, 1)
+            error_events = [e for e in events if e["kind"] == "error"]
+            self.assertEqual(len(error_events), 1)
+            self.assertEqual(error_events[0]["code"], "BATCH_ENTRY_INVALID")
+            self.assertIn("does not exist or is not a directory", error_events[0]["message"])
+            self.assertIn(str(nonexistent_install), error_events[0]["message"])
+
+    def test_missing_install_dir_continues_to_next_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            install = tmp_path / "_bmad"
+            install.mkdir()
+            skill_bad = _make_skill(install, "mod", "sk-bad")
+            skill_ok = _make_skill(install, "mod", "sk-ok")
+            nonexistent = tmp_path / "no_such_dir"
+            batch = _make_batch_file(tmp_path, [
+                {"skill_dir": str(skill_bad), "install_dir": str(nonexistent)},
+                {"skill_dir": str(skill_ok), "install_dir": str(install)},
+            ])
+
+            code, events, _ = _run_batch(batch)
+            # One error (bad install_dir) + one successful skill → exit 1
+            self.assertEqual(code, 1)
+            skill_events = [e for e in events if e["kind"] == "skill" and e.get("status") == "ok"]
+            self.assertEqual(len(skill_events), 1, "second entry (valid install_dir) compiled ok")
+            self.assertEqual(skill_events[0]["skill"], "mod/sk-ok")
+
+
+# ---------------------------------------------------------------------------
+# TestCompileOneSkillHashSkipDiagnostics (AC-3 / L528 + L530)
+# ---------------------------------------------------------------------------
+
+
+class TestCompileOneSkillHashSkipDiagnostics(unittest.TestCase):
+    """_compile_one_skill warning on non-OSError hash-skip exception + root guard."""
+
+    def test_oserror_in_hash_skip_silent_recompile(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            install = tmp_path / "_bmad"
+            install.mkdir()
+            skill_dir = _make_skill(install, "mod", "sk")
+
+            with patch(
+                "bmad_compile.lazy_compile._find_lockfile_entry",
+                side_effect=OSError("simulated TOCTOU"),
+            ):
+                events = _compile_one_skill(skill_dir, install, hash_skip=True)
+
+            # No warning emitted — OSError is silent recompile path
+            warning_events = [e for e in events if e["kind"] == "warning"]
+            self.assertFalse(
+                any(e.get("code") == "HASH_SKIP_DIAGNOSTIC" for e in warning_events),
+                "OSError must not emit HASH_SKIP_DIAGNOSTIC warning",
+            )
+            # Compile still runs (skill or error event present)
+            outcome_events = [e for e in events if e["kind"] in ("skill", "error")]
+            self.assertGreater(len(outcome_events), 0, "compile still ran after OSError")
+
+    def test_programming_error_in_hash_skip_emits_warning(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            install = tmp_path / "_bmad"
+            install.mkdir()
+            skill_dir = _make_skill(install, "mod", "sk")
+
+            with patch(
+                "bmad_compile.lazy_compile._find_lockfile_entry",
+                side_effect=KeyError("corrupt_key"),
+            ):
+                events = _compile_one_skill(skill_dir, install, hash_skip=True)
+
+            warning_events = [e for e in events if e["kind"] == "warning"]
+            diag = [e for e in warning_events if e.get("code") == "HASH_SKIP_DIAGNOSTIC"]
+            self.assertEqual(len(diag), 1, "exactly one HASH_SKIP_DIAGNOSTIC warning emitted")
+            self.assertIn("may be corrupt", diag[0]["message"])
+            self.assertEqual(diag[0]["skill"], "mod/sk")
+            # Compile still runs after warning
+            outcome_events = [e for e in events if e["kind"] in ("skill", "error")]
+            self.assertGreater(len(outcome_events), 0, "compile still ran after KeyError")
+
+    def test_filesystem_root_skill_dir_emits_batch_entry_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            install = tmp_path / "_bmad"
+            install.mkdir()
+            # Path("/skill_only").parent.name == "" on both POSIX and Windows
+            root_child = Path("/skill_only")
+            events = _compile_one_skill(root_child, install, hash_skip=False)
+            error_events = [e for e in events if e["kind"] == "error"]
+            self.assertEqual(len(error_events), 1)
+            self.assertEqual(error_events[0]["code"], "BATCH_ENTRY_INVALID")
+            self.assertIn("skill_dir has no parent module component", error_events[0]["message"])
+
+
+# ---------------------------------------------------------------------------
+# TestRunBatchUnknownKeyWarning (AC-4 / L532)
+# ---------------------------------------------------------------------------
+
+
+class TestRunBatchUnknownKeyWarning(unittest.TestCase):
+    """_run_batch emits warning for unknown batch entry keys."""
+
+    def test_known_keys_only_no_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            install = tmp_path / "_bmad"
+            install.mkdir()
+            skill_dir = _make_skill(install, "mod", "sk")
+            batch = _make_batch_file(tmp_path, [
+                {"skill_dir": str(skill_dir), "install_dir": str(install)}
+            ])
+
+            code, events, _ = _run_batch(batch)
+            self.assertEqual(code, 0)
+            unknown_key_warnings = [
+                e for e in events
+                if e["kind"] == "warning" and "unknown key" in e.get("message", "")
+            ]
+            self.assertEqual(len(unknown_key_warnings), 0, "no unknown-key warnings for known keys")
+
+    def test_unknown_key_emits_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            install = tmp_path / "_bmad"
+            install.mkdir()
+            skill_dir = _make_skill(install, "mod", "sk")
+            batch = _make_batch_file(tmp_path, [
+                {
+                    "skill_dir": str(skill_dir),
+                    "install_dir": str(install),
+                    "target_ide": "cursor",
+                }
+            ])
+
+            code, events, _ = _run_batch(batch)
+            self.assertEqual(code, 0, "unknown key does not cause failure")
+            unknown_key_warnings = [
+                e for e in events
+                if e["kind"] == "warning" and "unknown key" in e.get("message", "")
+            ]
+            self.assertEqual(len(unknown_key_warnings), 1)
+            self.assertIn("target_ide", unknown_key_warnings[0]["message"])
+            self.assertEqual(unknown_key_warnings[0].get("code"), "UNKNOWN_BATCH_KEY")
+            # Skill still compiled despite unknown key
+            skill_events = [e for e in events if e["kind"] == "skill" and e.get("status") == "ok"]
+            self.assertEqual(len(skill_events), 1, "skill compiled successfully")
 
 
 if __name__ == "__main__":

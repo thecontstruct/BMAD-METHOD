@@ -23,6 +23,7 @@ const os = require('node:os');
 const {
   runBatchInstall,
   enumerateMigratedSkills,
+  BatchInstallError,
 } = require('../tools/installer/compiler/invoke-python');
 
 const colors = {
@@ -276,6 +277,193 @@ async function main() {
     const paths = { bmadDir: '/anywhere' };
     const skills = await enumerateMigratedSkills(paths, ['flaky-mod'], officialModules);
     assert(Array.isArray(skills) && skills.length === 0, 'returns empty array on throw');
+  });
+
+  // ---------------------------------------------------------------------------
+  // (e) AC-1 / L520: BatchInstallError carries partial writtenFiles manifest
+  // ---------------------------------------------------------------------------
+  console.log('\n--- BatchInstallError: partial-success manifest ---');
+
+  await runTest('BatchInstallError carries writtenFiles of skills compiled before error', async () => {
+    const { projectRoot, bmadDir } = await _setupInstallWithCompiler();
+    try {
+      // skill-a compiles successfully; broken triggers an error event.
+      const skillA = path.join(bmadDir, 'mod1', 'skill-a');
+      await _writeFile(path.join(skillA, 'skill-a.template.md'), 'Hello skill-a');
+      const broken = path.join(bmadDir, 'mod1', 'broken');
+      await _writeFile(path.join(broken, 'broken.template.md'), '{{undefined_var}}');
+      await fs.mkdir(path.join(bmadDir, 'custom'), { recursive: true });
+
+      let caughtErr = null;
+      try {
+        await runBatchInstall({
+          skills: [
+            { skillDir: skillA, installDir: bmadDir },
+            { skillDir: broken, installDir: bmadDir },
+          ],
+          bmadDir,
+          projectRoot,
+        });
+      } catch (error) {
+        caughtErr = error;
+      }
+
+      assert(caughtErr !== null, 'runBatchInstall throws on error');
+      assert(caughtErr instanceof BatchInstallError, 'thrown error is instanceof BatchInstallError');
+      assert(Array.isArray(caughtErr.writtenFiles), 'err.writtenFiles is an array');
+      assert(
+        caughtErr.writtenFiles.length > 0,
+        `err.writtenFiles contains skill-a output (got ${caughtErr.writtenFiles.length} entries)`,
+      );
+      assert(
+        caughtErr.writtenFiles.some((f) => String(f).includes('skill-a')),
+        'skill-a path appears in writtenFiles',
+      );
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  await runTest('writtenFiles is empty when the first skill fails', async () => {
+    const { projectRoot, bmadDir } = await _setupInstallWithCompiler();
+    try {
+      const broken = path.join(bmadDir, 'mod1', 'broken');
+      await _writeFile(path.join(broken, 'broken.template.md'), '{{undefined_var}}');
+      await fs.mkdir(path.join(bmadDir, 'custom'), { recursive: true });
+
+      let caughtErr = null;
+      try {
+        await runBatchInstall({
+          skills: [{ skillDir: broken, installDir: bmadDir }],
+          bmadDir,
+          projectRoot,
+        });
+      } catch (error) {
+        caughtErr = error;
+      }
+
+      assert(caughtErr instanceof BatchInstallError, 'thrown error is instanceof BatchInstallError');
+      assert(
+        caughtErr.writtenFiles.length === 0,
+        `writtenFiles empty when first skill fails (got ${caughtErr.writtenFiles.length})`,
+      );
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  await runTest('success path still returns writtenFiles array normally', async () => {
+    const { projectRoot, bmadDir } = await _setupInstallWithCompiler();
+    try {
+      const skillDir = path.join(bmadDir, 'mod1', 'sk1');
+      await _writeFile(path.join(skillDir, 'sk1.template.md'), 'Hello');
+      await fs.mkdir(path.join(bmadDir, 'custom'), { recursive: true });
+
+      const result = await runBatchInstall({
+        skills: [{ skillDir, installDir: bmadDir }],
+        bmadDir,
+        projectRoot,
+      });
+      assert(Array.isArray(result.writtenFiles) && result.writtenFiles.length > 0, 'success writtenFiles populated');
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // (f) AC-5 / L534: cleanup diagnostic + L522 String() coercion
+  // ---------------------------------------------------------------------------
+  console.log('\n--- AC-5: cleanup diagnostic and String() coercion ---');
+
+  await runTest('console.warn fires when unlink fails with non-ENOENT error', async () => {
+    const { projectRoot, bmadDir } = await _setupInstallWithCompiler();
+    try {
+      const skillDir = path.join(bmadDir, 'mod1', 'sk1');
+      await _writeFile(path.join(skillDir, 'sk1.template.md'), 'Hello');
+      await fs.mkdir(path.join(bmadDir, 'custom'), { recursive: true });
+
+      const fsPromises = require('node:fs/promises');
+      const origUnlink = fsPromises.unlink;
+      const captured = [];
+      const origWarn = console.warn;
+      console.warn = (...args) => captured.push(args);
+      fsPromises.unlink = () =>
+        Promise.reject(Object.assign(new Error('disk full'), { code: 'ENOSPC' }));
+      try {
+        await runBatchInstall({
+          skills: [{ skillDir, installDir: bmadDir }],
+          bmadDir,
+          projectRoot,
+        });
+      } catch {
+        // May succeed or fail — we're testing the finally path only.
+      } finally {
+        fsPromises.unlink = origUnlink;
+        console.warn = origWarn;
+      }
+
+      assert(
+        captured.length > 0 && String(captured[0][0]).includes('bmad: failed to clean up'),
+        `console.warn called with cleanup message (captured ${captured.length} warn calls)`,
+      );
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  await runTest('console.warn NOT called when unlink fails with ENOENT (silent swallow)', async () => {
+    const { projectRoot, bmadDir } = await _setupInstallWithCompiler();
+    try {
+      const skillDir = path.join(bmadDir, 'mod1', 'sk-enoent');
+      await _writeFile(path.join(skillDir, 'sk-enoent.template.md'), 'Hello');
+
+      const fsPromises = require('node:fs/promises');
+      const origUnlink = fsPromises.unlink;
+      const origWarn = console.warn;
+      const captured = [];
+      console.warn = (...args) => captured.push(args);
+      fsPromises.unlink = () =>
+        Promise.reject(Object.assign(new Error('already gone'), { code: 'ENOENT' }));
+      try {
+        await runBatchInstall({
+          skills: [{ skillDir, installDir: bmadDir }],
+          bmadDir,
+          projectRoot,
+        });
+      } catch {
+        // May succeed or fail — we're testing the finally path only.
+      } finally {
+        fsPromises.unlink = origUnlink;
+        console.warn = origWarn;
+      }
+
+      const cleanupWarns = captured.filter((args) => String(args[0]).includes('bmad: failed to clean up'));
+      assert(
+        cleanupWarns.length === 0,
+        `console.warn must NOT fire for ENOENT unlink (got ${cleanupWarns.length} cleanup warn calls)`,
+      );
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  await runTest('_collectSkillsInTree results contain plain strings', async () => {
+    const tmpDir = await _makeTempDir();
+    try {
+      const moduleSrc = path.join(tmpDir, 'module-src');
+      await _writeFile(path.join(moduleSrc, 'skill-a', 'skill-a.template.md'), 'a');
+
+      const paths = { bmadDir: '/install/dir' };
+      const officialModules = _makeFakeOfficialModules({ mod: moduleSrc });
+      const skills = await enumerateMigratedSkills(paths, ['mod'], officialModules);
+
+      assert(
+        skills.length > 0 && skills.every((s) => typeof s.skillDir === 'string'),
+        'all skillDir entries are plain strings (String() coercion contract)',
+      );
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   // ---------------------------------------------------------------------------

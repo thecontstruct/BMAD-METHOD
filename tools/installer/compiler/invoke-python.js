@@ -239,7 +239,7 @@ async function _collectSkillsInTree(dirPath, depth, maxDepth, results) {
   const fileNames = entries.filter((e) => e.isFile()).map((e) => e.name);
   const dirName = path.basename(dirPath);
   if (_isSkillDir(dirName, fileNames)) {
-    results.push(dirPath);
+    results.push(String(dirPath));
     return; // do not recurse into a skill dir
   }
 
@@ -289,6 +289,23 @@ async function enumerateMigratedSkills(paths, modules, officialModules) {
 }
 
 /**
+ * Error thrown by `runBatchInstall` when compilation fails after one or more
+ * skills were successfully written. The `writtenFiles` property carries the
+ * partial manifest of skill files written before the failure.
+ *
+ * Callers that only need "did it succeed?" continue to use try/catch unchanged.
+ * Callers that need the partial manifest check:
+ *   `err instanceof BatchInstallError && err.writtenFiles`
+ */
+class BatchInstallError extends Error {
+  constructor(message, { writtenFiles = [] } = {}) {
+    super(message);
+    this.name = 'BatchInstallError';
+    this.writtenFiles = writtenFiles;
+  }
+}
+
+/**
  * Run `compile.py --batch <skills.json>` and parse the newline-delimited JSON stdout.
  *
  * Writes a temp `skills.json` describing every batch entry, spawns python3 once
@@ -301,6 +318,8 @@ async function enumerateMigratedSkills(paths, modules, officialModules) {
  * @param {string} opts.projectRoot - cwd for the Python subprocess
  * @param {Function} [opts.message] - Progress callback, called with each skill name
  * @returns {Promise<{compiled: number, writtenFiles: string[], lockfilePath: string|null}>}
+ * @throws {BatchInstallError} when a per-skill error event is emitted or exit code is non-zero.
+ *   `err.writtenFiles` carries all skill paths written before the failure.
  */
 async function runBatchInstall({ skills, bmadDir, projectRoot, message }) {
   const compilePy = path.join(bmadDir, 'scripts', 'compile.py');
@@ -350,18 +369,28 @@ async function runBatchInstall({ skills, bmadDir, projectRoot, message }) {
       if (event.kind === 'error' && !firstError) firstError = event;
     }
 
+    // Accumulate writtenFiles BEFORE the error check — events[] is already
+    // complete at this point. This ensures the partial manifest is preserved
+    // regardless of whether a subsequent error throws (AC-1 / L520).
+    const writtenFiles = [];
+    for (const event of events) {
+      if (event.kind === 'skill' && Array.isArray(event.written)) {
+        for (const f of event.written) writtenFiles.push(f);
+      }
+    }
+
     if (result.code !== 0 || firstError) {
       let msg = _formatError(firstError, '--batch');
       if (result.signal) msg += ` (process killed by signal ${result.signal})`;
       if (result.stderr.trim()) msg += `\n\nstderr:\n${result.stderr.trim()}`;
-      throw new Error(msg);
+      throw new BatchInstallError(msg, { writtenFiles });
     }
 
     const summary = events.toReversed().find((e) => e.kind === 'summary');
     if (!summary) {
       let msg = 'compile.py --batch did not emit a summary event';
       if (result.stderr.trim()) msg += `\n\nstderr:\n${result.stderr.trim()}`;
-      throw new Error(msg);
+      throw new BatchInstallError(msg, { writtenFiles });
     }
 
     // R2 F6: rare path — process exits 0 but a signal was received (Windows
@@ -372,19 +401,17 @@ async function runBatchInstall({ skills, bmadDir, projectRoot, message }) {
       console.warn(`bmad: compile.py --batch received signal ${result.signal} (exit code 0; summary emitted)`);
     }
 
-    const writtenFiles = [];
-    for (const event of events) {
-      if (event.kind === 'skill' && Array.isArray(event.written)) {
-        for (const f of event.written) writtenFiles.push(f);
-      }
-    }
     return {
       compiled: summary.compiled,
       writtenFiles,
       lockfilePath: summary.lockfile_path ?? null,
     };
   } finally {
-    await fs.unlink(tmpFile).catch(() => {});
+    await fs.unlink(tmpFile).catch((error) => {
+      if (error.code !== 'ENOENT') {
+        console.warn(`bmad: failed to clean up batch temp file ${tmpFile}: ${error.message}`);
+      }
+    });
   }
 }
 
@@ -575,6 +602,7 @@ module.exports = {
   enumerateMigratedSkills,
   runInstallPhase,
   runBatchInstall,
+  BatchInstallError,
   runUpgradeDryRun,
   runUpgradeYes,
   // Story 7.3 (Model 3 distribution matrix; OQ-1=A, DN-4=G3, DN-5=H1).
