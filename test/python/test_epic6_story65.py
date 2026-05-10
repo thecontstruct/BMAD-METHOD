@@ -638,5 +638,187 @@ class TestWriteOverrideDiffFailed(unittest.TestCase):
         self.assertEqual(fail_evt["stderr_excerpt"], "")
 
 
+# ---------------------------------------------------------------------------
+# AC-1 (7.10): check=True kwarg forwarded to _run (L668)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideCheckTruePassed(unittest.TestCase):
+    """write_override must forward check=True to the _run callable."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._check_kwarg_seen: bool = False
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _check_asserting_run(
+        self, args: list[str], *a: Any, **kw: Any
+    ) -> "subprocess.CompletedProcess[str]":
+        self._check_kwarg_seen = kw.get("check") is True
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=args, stderr="check=True path verified"
+        )
+
+    def test_check_true_kwarg_forwarded_to_run(self) -> None:
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=lambda _: None,
+                run_fn=self._check_asserting_run,
+            )
+        except BmadSubprocessError:
+            pass
+        self.assertTrue(
+            self._check_kwarg_seen,
+            "write_override must forward check=True to _run; kwarg was absent or False",
+        )
+
+    def test_check_true_path_exercises_diff_failed_handler(self) -> None:
+        # When check=True fires (non-zero returncode), diff_failed must be emitted
+        target = str(Path(self._tmp.name) / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        try:
+            write_override(
+                plane="toml",
+                target_file=target,
+                accepted_content='agent.icon = "🎯"\n',
+                skill_id="mock-module/skill-a",
+                install_dir=".",
+                compile_py=_COMPILE_PY,
+                emit_fn=events.append,
+                run_fn=self._check_asserting_run,
+            )
+        except BmadSubprocessError:
+            pass
+        self.assertEqual(
+            sum(1 for e in events if e.get("action") == "diff_failed"), 1
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC-2 (7.10): filesystem state byte-identical to accepted_content at diff time (L670)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideFilesystemStateAtDiff(unittest.TestCase):
+    """Filesystem state is byte-identical to accepted_content at --diff invocation."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._target = str(Path(self._tmp.name) / "_bmad" / "custom" / "skill-a.user.toml")
+        self._file_exists_at_diff: bool = False
+        self._file_content_at_diff: str | None = None
+        self._custom_files_at_diff: list[Path] = []
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _snapshot_run(
+        self, args: list[str], *a: Any, **kw: Any
+    ) -> "subprocess.CompletedProcess[str]":
+        assert "--diff" in args, f"_snapshot_run called for unexpected command: {args}"
+        target = Path(self._target)
+        self._file_exists_at_diff = target.exists()
+        if self._file_exists_at_diff:
+            self._file_content_at_diff = target.read_text(encoding="utf-8")
+        custom_dir = Path(self._tmp.name) / "_bmad" / "custom"
+        self._custom_files_at_diff = [p for p in custom_dir.rglob("*") if p.is_file()]
+        return subprocess.CompletedProcess(
+            args=args, returncode=0, stdout="--- diff ---\n+++ change\n"
+        )
+
+    def _run_write(self) -> None:
+        write_override(
+            plane="toml",
+            target_file=self._target,
+            accepted_content='agent.icon = "🎯"\n',
+            skill_id="mock-module/skill-a",
+            install_dir=".",
+            compile_py=_COMPILE_PY,
+            emit_fn=lambda _: None,
+            run_fn=self._snapshot_run,
+        )
+
+    def test_target_file_exists_at_diff_invocation(self) -> None:
+        self._run_write()
+        self.assertTrue(
+            self._file_exists_at_diff,
+            "target_file must exist on disk when --diff _run is called",
+        )
+
+    def test_target_file_content_byte_identical_at_diff_invocation(self) -> None:
+        self._run_write()
+        self.assertEqual(self._file_content_at_diff, 'agent.icon = "🎯"\n')
+
+    def test_no_extra_files_under_custom_at_diff_invocation(self) -> None:
+        self._run_write()
+        extra = [p for p in self._custom_files_at_diff if p != Path(self._target)]
+        self.assertEqual(
+            extra, [],
+            f"write_override created unexpected files before --diff call: {extra}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC-3 (7.10): write_override creates parents; revert_override does not (L672)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOverrideMkdirAsymmetry(unittest.TestCase):
+    """write_override creates parents; revert_override does not — intentional contract."""
+
+    def setUp(self) -> None:
+        self.mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        self.mock.register("--diff", "diff-icon-change.txt")
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_write_override_creates_nested_parent_dirs(self) -> None:
+        # Confirms parents=True behaviour: 3 levels deep, no pre-existing dirs
+        target = str(Path(self._tmp.name) / "a" / "b" / "c" / "skill-a.user.toml")
+        run_handler_with_mock(
+            write_override,
+            self.mock,
+            plane="toml",
+            target_file=target,
+            accepted_content='agent.icon = "🎯"\n',
+            skill_id="mock-module/skill-a",
+            install_dir=".",
+            compile_py=_COMPILE_PY,
+        )
+        self.assertTrue((Path(self._tmp.name) / "a" / "b" / "c").is_dir())
+        self.assertTrue(Path(target).exists())
+
+    def test_revert_override_delete_noops_when_parent_missing(self) -> None:
+        # revert_override delete branch: exists() guard silently no-ops on missing parent
+        target = str(Path(self._tmp.name) / "missing_parent" / "skill-a.user.toml")
+        events: list[dict[str, Any]] = []
+        # No FileNotFoundError — exists() returns False → unlink skipped → revert_complete fires
+        revert_override(target, pre_write_content=None, emit_fn=events.append)
+        self.assertFalse(Path(target).parent.exists())
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[-1]["action"], "revert_complete")
+        self.assertIs(events[-1]["deleted"], True)
+
+    def test_revert_override_restore_raises_when_parent_missing(self) -> None:
+        """Intentional contract: revert_override restore branch assumes the parent dir
+        exists because write_override always creates it before the LLM shell invokes
+        revert_override. Raw FileNotFoundError is correct behaviour (OQ-A=A, Phil 2026-05-09);
+        no BmadSubprocessError wrap is needed or desired."""
+        target = str(Path(self._tmp.name) / "missing_parent" / "skill-a.user.toml")
+        with self.assertRaises(FileNotFoundError):
+            revert_override(target, pre_write_content="prior content\n", emit_fn=lambda _: None)
+
+
 if __name__ == "__main__":
     unittest.main()

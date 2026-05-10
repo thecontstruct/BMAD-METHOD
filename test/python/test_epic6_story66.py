@@ -77,6 +77,11 @@ class TestProseDrift(unittest.TestCase):
         self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
         self.assertIs(events[1]["requires_confirmation"], True)
 
+    def test_exactly_one_mock_call_per_triage(self) -> None:
+        self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(len(self.mock.calls), 1)
+
 
 # ---------------------------------------------------------------------------
 # AC-2: TOML default-value drift (field-level review)
@@ -115,6 +120,11 @@ class TestTomlDefaultDrift(unittest.TestCase):
         self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
         self.assertIs(events[1]["requires_confirmation"], True)
 
+    def test_exactly_one_mock_call_per_triage(self) -> None:
+        self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(len(self.mock.calls), 1)
+
 
 # ---------------------------------------------------------------------------
 # AC-3: TOML orphan drift (override applies to removed field)
@@ -151,6 +161,11 @@ class TestTomlOrphan(unittest.TestCase):
         self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
         self.assertIs(events[1]["requires_confirmation"], True)
 
+    def test_exactly_one_mock_call_per_triage(self) -> None:
+        self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(len(self.mock.calls), 1)
+
 
 # ---------------------------------------------------------------------------
 # AC-4: TOML new-default informational (no requires_confirmation)
@@ -183,6 +198,11 @@ class TestTomlNewDefault(unittest.TestCase):
         events = self._run()
         self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
         self.assertNotIn("requires_confirmation", events[1])
+
+    def test_exactly_one_mock_call_per_triage(self) -> None:
+        self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(len(self.mock.calls), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +241,11 @@ class TestGlobDrift(unittest.TestCase):
         events = self._run()
         self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
         self.assertNotIn("requires_confirmation", events[1])
+
+    def test_exactly_one_mock_call_per_triage(self) -> None:
+        self._run()
+        self.assertGreater(len(self.mock.calls), 0, _GUARD_MSG)
+        self.assertEqual(len(self.mock.calls), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +301,80 @@ class TestDriftTriageContract(unittest.TestCase):
         self.assertEqual(events[0]["total_orphans"], 0)
         self.assertEqual(events[0]["total_new_defaults"], 0)
         self.assertEqual(events[0]["total_glob_changes"], 0)
+
+
+# ---------------------------------------------------------------------------
+# AC-5 + OQ-C (7.10): summary-vs-emit-count cross-validation (L702) + _UPGRADE_PY (L693)
+# ---------------------------------------------------------------------------
+
+
+class TestDriftTriageSummaryConsistency(unittest.TestCase):
+    """drift_triage_start count fields must match actual emitted per-drift events."""
+
+    def test_upgrade_py_path_exists(self) -> None:
+        """_UPGRADE_PY must resolve to a real filesystem path — closes L693."""
+        self.assertTrue(
+            Path(_UPGRADE_PY).exists(),
+            f"_UPGRADE_PY does not resolve to a real path: {_UPGRADE_PY}",
+        )
+
+    @staticmethod
+    def _count_events(events: list[dict[str, Any]], action: str) -> int:
+        return sum(1 for e in events if e.get("action") == action)
+
+    def test_prose_drift_triage_start_matches_emitted_events(self) -> None:
+        mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        mock.register("--dry-run --json", "dry-run-prose-drift.json")
+        events = run_handler_with_mock(drift_triage, mock, upgrade_py=_UPGRADE_PY)
+        start_evt = events[0]
+        self.assertEqual(start_evt["action"], "drift_triage_start")
+        self.assertEqual(
+            start_evt["total_prose_changes"],
+            self._count_events(events, "propose_prose_drift"),
+        )
+
+    def test_toml_default_drift_triage_start_matches_emitted_events(self) -> None:
+        mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        mock.register("--dry-run --json", "dry-run-toml-default-drift.json")
+        events = run_handler_with_mock(drift_triage, mock, upgrade_py=_UPGRADE_PY)
+        start_evt = events[0]
+        self.assertEqual(start_evt["action"], "drift_triage_start")
+        self.assertEqual(
+            start_evt["total_toml_changes"],
+            self._count_events(events, "propose_toml_default_drift"),
+        )
+
+    def test_no_drift_all_counts_zero_in_triage_start(self) -> None:
+        mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        mock.register("--dry-run --json", "dry-run-no-drift.json")
+        events = run_handler_with_mock(drift_triage, mock, upgrade_py=_UPGRADE_PY)
+        start_evt = events[0]
+        self.assertEqual(start_evt["action"], "drift_triage_start")
+        self.assertEqual(start_evt["total_prose_changes"], 0)
+        self.assertEqual(start_evt["total_toml_changes"], 0)
+        self.assertEqual(start_evt["total_orphans"], 0)
+        self.assertEqual(start_evt["total_new_defaults"], 0)
+        self.assertEqual(start_evt["total_glob_changes"], 0)
+        self.assertEqual(start_evt["total_provenance_shifts"], 0)
+        per_drift_actions = {
+            "propose_prose_drift", "propose_toml_default_drift", "propose_toml_orphan",
+            "propose_toml_new_default", "propose_glob_drift", "propose_variable_provenance_shift",
+        }
+        self.assertFalse(
+            any(e["action"] in per_drift_actions for e in events),
+            "no-drift fixture must not emit per-drift events",
+        )
+
+    def test_provenance_shift_triage_start_matches_emitted_events(self) -> None:
+        mock = MockCompiler(fixtures_root=_FIXTURES_ROOT)
+        mock.register("--dry-run --json", "dry-run-provenance-shift.json")
+        events = run_handler_with_mock(drift_triage, mock, upgrade_py=_UPGRADE_PY)
+        start_evt = events[0]
+        self.assertEqual(start_evt["action"], "drift_triage_start")
+        self.assertEqual(
+            start_evt["total_provenance_shifts"],
+            self._count_events(events, "propose_variable_provenance_shift"),
+        )
 
 
 if __name__ == "__main__":
