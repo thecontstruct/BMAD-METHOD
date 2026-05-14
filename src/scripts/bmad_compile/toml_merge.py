@@ -262,8 +262,12 @@ def load_toml_file(path: str) -> dict[str, Any]:
         # AC-8 TOCTOU recovery: file removed between is_file and read_bytes.
         return {}
     try:
-        # AC-8: utf-8-sig transparently strips an optional UTF-8 BOM.
-        return tomllib.loads(content_bytes.decode("utf-8-sig"))
+        # AC-8: utf-8-sig strips one leading BOM. Story 7.13 AC-B: strip any
+        # additional leading BOMs (some editors write multiple BOMs).
+        text = content_bytes.decode("utf-8-sig")
+        while text.startswith("﻿"):
+            text = text[1:]
+        return tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         _msg = str(exc)
         _line_m = re.search(r'line (\d+)', _msg)

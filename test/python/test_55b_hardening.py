@@ -794,19 +794,19 @@ class TestVariantCandidateTOCTOU(unittest.TestCase):
             self.assertTrue(str(result).endswith("f.cursor.template.md"))
 
     def test_variant_candidate_dir_disappears_returns_none(self) -> None:
-        # Patch list_dir_sorted to raise OSError; assert _variant_candidate returns None.
+        # Patch list_dir_sorted to raise FileNotFoundError; assert _variant_candidate returns None.
         import unittest.mock as _mock
         with tempfile.TemporaryDirectory() as tmp:
             t = Path(tmp)
             _write(t / "core" / "my-skill" / "fragments" / "f.template.md", "Y\n")
             ctx = self._make_context(t, target_ide="cursor")
             base = bmad_io.to_posix(t / "core" / "my-skill" / "fragments" / "f.template.md")
-            with _mock.patch.object(bmad_io, "list_dir_sorted", side_effect=OSError("simulated TOCTOU")):
+            with _mock.patch.object(bmad_io, "list_dir_sorted", side_effect=FileNotFoundError("simulated TOCTOU")):
                 result = bmad_resolver._variant_candidate(ctx, base, "f.template.md")
                 self.assertIsNone(result)
 
     def test_variant_candidate_entry_disappears_skipped(self) -> None:
-        # Make is_file raise OSError for one specific entry — that entry skipped.
+        # Make is_file raise FileNotFoundError for one specific entry — that entry skipped.
         import unittest.mock as _mock
         with tempfile.TemporaryDirectory() as tmp:
             t = Path(tmp)
@@ -818,7 +818,7 @@ class TestVariantCandidateTOCTOU(unittest.TestCase):
 
             def flaky_is_file(p: str) -> bool:
                 if "f.cursor" in str(p):
-                    raise OSError("simulated entry-disappear TOCTOU")
+                    raise FileNotFoundError("simulated entry-disappear TOCTOU")
                 return real_is_file(p)
 
             with _mock.patch.object(bmad_io, "is_file", side_effect=flaky_is_file):

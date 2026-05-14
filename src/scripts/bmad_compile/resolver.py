@@ -58,22 +58,20 @@ from .io import PurePosixPath
 
 
 def _canonicalize_for_cycle(path: PurePosixPath) -> str:
-    """Story 5.5b AC-12: lexical-only canonicalization for cycle detection.
+    """Story 7.13 AC-A: filesystem-level canonicalization for cycle detection.
 
-    Returns ``os.path.normcase(os.path.abspath(str(path)))``. This is a
-    PURE lexical operation — no filesystem access — chosen for determinism
-    (matches the Story 1.2 R5 ``commonpath`` pattern used by
-    ``ensure_within_root``). ``os.path.normcase`` is identity on
-    Linux/POSIX (no native case folding) and lower-cases on Windows. On
-    macOS the case-insensitivity is a filesystem-level concern that
-    ``os.path.normcase`` does not handle directly — we accept the
-    Linux/macOS gap as a deferred concern (see deferred-work). The
-    primary defect this closes is Windows case-variant cycle escape:
-    ``Fragments/a.template.md`` followed by ``fragments/A.template.md``
-    on the same filesystem produced different ``PurePosixPath`` strings
-    and the cycle slipped past detection.
+    Returns ``os.path.normcase(os.path.realpath(str(path)))``.
+    ``os.path.realpath`` resolves symlinks and on macOS APFS performs
+    case-canonicalization via the filesystem, closing the gap left by the
+    earlier lexical-only ``os.path.abspath``. ``os.path.normcase`` is
+    identity on Linux/macOS and lower-cases on Windows, covering the
+    Windows case-variant cycle escape: ``Fragments/a.template.md`` followed
+    by ``fragments/A.template.md`` on the same Windows filesystem produced
+    different ``PurePosixPath`` strings and the cycle slipped past detection.
+    ``os.path.realpath`` does not raise for non-existent paths — it resolves
+    as far as possible and returns an absolute path for the remainder.
     """
-    return os.path.normcase(os.path.abspath(str(path)))  # pragma: allow-raw-io
+    return os.path.normcase(os.path.realpath(str(path)))  # pragma: allow-raw-io
 
 # Story 4.4 R1 P2: a "runtime variable reference" inside a `file:` glob
 # pattern is a `{name}` placeholder — a paired pair of braces with content
@@ -1055,10 +1053,11 @@ def _variant_candidate(
     stem = leaf[: -len(_TEMPLATE_SUFFIX)]
     try:
         entries = io.list_dir_sorted(str(parent))
-    except OSError:
-        # AC-11: TOCTOU between is_dir and list_dir_sorted — directory
-        # disappeared (race with concurrent install or upgrade). Treat
-        # as "no variants found" rather than crashing.
+    except (FileNotFoundError, PermissionError, NotADirectoryError):
+        # AC-11 / Story 7.13 AC-C: TOCTOU between is_dir and list_dir_sorted —
+        # directory disappeared or became inaccessible. Other OSError subtypes
+        # propagate so unexpected I/O failures surface rather than being
+        # silently swallowed.
         return None
     matches: list[PurePosixPath] = []
     for entry in entries:
@@ -1075,7 +1074,7 @@ def _variant_candidate(
                 # list_dir_sorted and is_file. Silently skip on OSError.
                 try:
                     _is_file = io.is_file(str(entry))
-                except OSError:
+                except (FileNotFoundError, PermissionError, NotADirectoryError):
                     _is_file = False
                 if _is_file:
                     try:

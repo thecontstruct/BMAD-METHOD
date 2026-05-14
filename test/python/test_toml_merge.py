@@ -191,5 +191,39 @@ class TestLoadTomlFile(unittest.TestCase):
             self.assertEqual(cm.exception.line, 3)
 
 
+class TestLoadTomlFileMultiBom(unittest.TestCase):
+    """Story 7.13 AC-B: load_toml_file strips all leading UTF-8 BOMs tolerantly."""
+
+    _BOM = "﻿".encode("utf-8")  # b'\xef\xbb\xbf'
+
+    def test_single_bom_regression_guard(self) -> None:
+        """Single-BOM files must still parse (regression guard for AC-8)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "single.toml")
+            Path(path).write_bytes(self._BOM + b'count = 42\n')
+            self.assertEqual(load_toml_file(path), {"count": 42})
+
+    def test_double_bom_parsed_correctly(self) -> None:
+        """Two consecutive BOMs at the start must be stripped before TOML parse."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "double.toml")
+            Path(path).write_bytes(self._BOM + self._BOM + b'name = "test"\n')
+            self.assertEqual(load_toml_file(path), {"name": "test"})
+
+    def test_triple_bom_parsed_correctly(self) -> None:
+        """Three consecutive BOMs at the start must all be stripped."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "triple.toml")
+            Path(path).write_bytes(self._BOM * 3 + b'flag = true\n')
+            self.assertEqual(load_toml_file(path), {"flag": True})
+
+    def test_double_bom_only_returns_empty(self) -> None:
+        """Two BOMs with no TOML content → empty dict (same as empty file)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "bom_only.toml")
+            Path(path).write_bytes(self._BOM + self._BOM)
+            self.assertEqual(load_toml_file(path), {})
+
+
 if __name__ == "__main__":
     unittest.main()

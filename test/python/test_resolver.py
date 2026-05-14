@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -1222,6 +1223,110 @@ class TestVariableResolution(unittest.TestCase):
             result,
             '<<include path="fragments/a.template.md" a="2" z="1">>',
         )
+
+
+class TestCanonicalizeCycleRealpath(unittest.TestCase):
+    """Story 7.13 AC-A: _canonicalize_for_cycle uses os.path.realpath."""
+
+    def test_canonicalize_returns_normcase_realpath(self) -> None:
+        """Result matches os.path.normcase(os.path.realpath(path)) directly."""
+        from src.scripts.bmad_compile.resolver import _canonicalize_for_cycle
+        p = PurePosixPath("/some/path/to/fragment.template.md")
+        result = _canonicalize_for_cycle(p)
+        expected = os.path.normcase(os.path.realpath("/some/path/to/fragment.template.md"))
+        self.assertEqual(result, expected)
+
+    def test_canonicalize_uses_realpath_not_abspath(self) -> None:
+        """_canonicalize_for_cycle calls os.path.realpath, not os.path.abspath."""
+        from src.scripts.bmad_compile.resolver import _canonicalize_for_cycle
+        with mock.patch("os.path.realpath", wraps=os.path.realpath) as mock_realpath, \
+             mock.patch("os.path.abspath") as mock_abspath:
+            _canonicalize_for_cycle(PurePosixPath("/test/path"))
+            mock_realpath.assert_called_once()
+            mock_abspath.assert_not_called()
+
+    def test_canonicalize_symlink_matches_target(self) -> None:
+        """Symlink path and real target path produce the same canonical key.
+
+        This is the core fix: os.path.realpath resolves symlinks so two
+        PurePosixPath strings pointing at the same inode canonicalize
+        identically, and cycle detection fires correctly.
+        """
+        from src.scripts.bmad_compile.resolver import _canonicalize_for_cycle
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                target = root / "real_file.template.md"
+                target.write_text("content", encoding="utf-8")
+                link = root / "link_file.template.md"
+                link.symlink_to(target)
+                canon_real = _canonicalize_for_cycle(PurePosixPath(target.as_posix()))
+                canon_link = _canonicalize_for_cycle(PurePosixPath(link.as_posix()))
+                self.assertEqual(canon_link, canon_real)
+        except OSError:
+            self.skipTest("symlink creation not available on this platform/environment")
+
+
+class TestVariantCandidateTOCTOU(unittest.TestCase):
+    """Story 7.13 AC-C: _variant_candidate TOCTOU narrowed to specific OSError subtypes."""
+
+    def _make_ctx_and_base(self, tmp: str) -> tuple[ResolveContext, PurePosixPath]:
+        root = Path(tmp)
+        skill = root / "core" / "skill1"
+        frags = skill / "fragments"
+        frags.mkdir(parents=True, exist_ok=True)
+        ctx = _context(root, target_ide="cursor")
+        base = PurePosixPath((frags / "menu.template.md").as_posix())
+        return ctx, base
+
+    def test_file_not_found_during_list_dir_returns_none(self) -> None:
+        from src.scripts.bmad_compile.resolver import _variant_candidate
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx, base = self._make_ctx_and_base(tmp)
+            with mock.patch("src.scripts.bmad_compile.resolver.io.list_dir_sorted",
+                            side_effect=FileNotFoundError("gone")), \
+                 mock.patch("src.scripts.bmad_compile.resolver.io.is_dir",
+                            return_value=True):
+                result = _variant_candidate(ctx, base, "menu.template.md")
+        self.assertIsNone(result)
+
+    def test_permission_error_during_list_dir_returns_none(self) -> None:
+        from src.scripts.bmad_compile.resolver import _variant_candidate
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx, base = self._make_ctx_and_base(tmp)
+            with mock.patch("src.scripts.bmad_compile.resolver.io.list_dir_sorted",
+                            side_effect=PermissionError("denied")), \
+                 mock.patch("src.scripts.bmad_compile.resolver.io.is_dir",
+                            return_value=True):
+                result = _variant_candidate(ctx, base, "menu.template.md")
+        self.assertIsNone(result)
+
+    def test_not_a_directory_error_during_list_dir_returns_none(self) -> None:
+        from src.scripts.bmad_compile.resolver import _variant_candidate
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx, base = self._make_ctx_and_base(tmp)
+            with mock.patch("src.scripts.bmad_compile.resolver.io.list_dir_sorted",
+                            side_effect=NotADirectoryError("not a dir")), \
+                 mock.patch("src.scripts.bmad_compile.resolver.io.is_dir",
+                            return_value=True):
+                result = _variant_candidate(ctx, base, "menu.template.md")
+        self.assertIsNone(result)
+
+    def test_generic_oserror_during_list_dir_propagates(self) -> None:
+        """A bare OSError (not a covered subclass) must propagate, not be swallowed.
+
+        This proves the TOCTOU catch is genuinely narrowed, not a broad OSError
+        catch in disguise.
+        """
+        from src.scripts.bmad_compile.resolver import _variant_candidate
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx, base = self._make_ctx_and_base(tmp)
+            with mock.patch("src.scripts.bmad_compile.resolver.io.list_dir_sorted",
+                            side_effect=OSError("unexpected I/O error")), \
+                 mock.patch("src.scripts.bmad_compile.resolver.io.is_dir",
+                            return_value=True):
+                with self.assertRaises(OSError):
+                    _variant_candidate(ctx, base, "menu.template.md")
 
 
 if __name__ == "__main__":
