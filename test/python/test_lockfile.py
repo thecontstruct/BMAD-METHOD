@@ -489,26 +489,38 @@ def _serialize_lockfile(data: dict) -> str:
     return json.dumps(data, sort_keys=True, indent=2) + "\n"
 
 
-def _reconstruct(final_lockfile: dict, upgrades_back: int = 1) -> dict:
-    """Reconstruct lockfile state N upgrades back.
+def _reconstruct(data: dict, n: int = 1) -> dict:
+    """Rewind lockfile data by n compile generations.
 
-    Only override-tier fragments carry lineage; base-tier fragments are skipped.
+    For each generation, walks fragments[*] and variables[*] in every skill
+    entry. Only variables with toml_layer in ("user", "team") and non-empty
+    lineage are rewound — dormant carry-forward entries (toml_layer "defaults"
+    or absent) are skipped because they hold only audit history, not a
+    restorable active-override state. toml_layer is not in lineage entries and
+    is not restored (test scenarios must keep toml_layer stable across all
+    compiles).
     """
-    result = copy.deepcopy(final_lockfile)
-    for entry in result.get("entries", []):
-        for frag in entry.get("fragments", []):
-            if frag.get("resolved_from") not in ("user-module-fragment", "user-override"):
-                continue
-            lineage = frag.get("lineage", [])
-            if len(lineage) < upgrades_back:
-                raise ValueError(
-                    f"Not enough lineage entries: have {len(lineage)}, need {upgrades_back}"
-                )
-            target = lineage[-upgrades_back]
-            frag["base_hash"] = target["base_hash"]
-            frag["hash"] = target["override_hash"]
-            frag["lineage"] = lineage[:-upgrades_back]
-    return result
+    data = copy.deepcopy(data)
+    for _ in range(n):
+        for entry in data.get("entries", []):
+            # Rewind fragments
+            for frag in entry.get("fragments", []):
+                lin = frag.get("lineage")
+                if lin:
+                    frag["base_hash"] = lin[-1]["base_hash"]
+                    frag["hash"] = lin[-1]["override_hash"]
+                    frag["lineage"] = lin[:-1]
+            # Rewind variables
+            for var in entry.get("variables", []):
+                lin = var.get("lineage")
+                if not lin:
+                    continue  # untracked or empty — nothing to rewind
+                if var.get("toml_layer") not in ("user", "team"):
+                    continue  # dormant carry-forward entry — skip
+                var["value_hash"] = lin[-1]["override_value_hash"]
+                var["base_value_hash"] = lin[-1]["base_value_hash"]
+                var["lineage"] = lin[:-1]
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -941,6 +953,345 @@ class TestLineageReconstruction(unittest.TestCase):
             self.assertEqual(var["lineage"][1]["base_value_hash"], bvh_d2)
             self.assertEqual(var["lineage"][1]["override_value_hash"], user_val_hash)
             self.assertEqual(var["base_value_hash"], io.hash_text("FinalDefaultPM"))
+
+
+# ---------------------------------------------------------------------------
+# TestTeamLayerLineage (Task 6: Tests 1.1, 1.2)
+# ---------------------------------------------------------------------------
+
+class TestTeamLayerLineage(unittest.TestCase):
+
+    def test_team_layer_variable_gets_lineage_initialized(self) -> None:
+        """Test 1.1: team-layer variable gets base_value_hash + lineage: [] on first compile."""
+        scope = VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": "DefaultPM"}}),
+                ("team", {"agent": {"name": "TeamPM"}}),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=scope)
+            data = json.loads(io.read_template(lf))
+            var = next(v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertIn("base_value_hash", var)
+            self.assertEqual(var["base_value_hash"], io.hash_text("DefaultPM"))
+            self.assertIn("lineage", var)
+            self.assertEqual(var["lineage"], [])
+
+    def test_team_layer_lineage_carry_forward_on_defaults_change(self) -> None:
+        """Test 1.2: two compiles with different defaults hashes; lineage entry appended."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            scope_v1 = VariableScope.build(
+                toml_layers=[
+                    ("defaults", {"agent": {"name": "DefaultPM"}}),
+                    ("team", {"agent": {"name": "TeamPM"}}),
+                ]
+            )
+            old_bvh = io.hash_text("DefaultPM")
+            old_override_hash = scope_v1._table["self.agent.name"].value_hash
+            _call_write(lf, root, var_scope=scope_v1)
+
+            scope_v2 = VariableScope.build(
+                toml_layers=[
+                    ("defaults", {"agent": {"name": "NewDefaultPM"}}),
+                    ("team", {"agent": {"name": "TeamPM"}}),
+                ]
+            )
+            _call_write(lf, root, var_scope=scope_v2)
+
+            data = json.loads(io.read_template(lf))
+            var = next(v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertEqual(len(var["lineage"]), 1)
+            entry = var["lineage"][0]
+            self.assertEqual(entry["base_value_hash"], old_bvh)
+            self.assertEqual(entry["bmad_version"], "1.0.0")
+            self.assertEqual(entry["override_value_hash"], old_override_hash)
+
+
+# ---------------------------------------------------------------------------
+# TestDormantLineageCarryForward (Task 7: Tests 2.1–2.5)
+# ---------------------------------------------------------------------------
+
+class TestDormantLineageCarryForward(unittest.TestCase):
+
+    def _user_scope(self, defaults_val: str, user_val: str) -> VariableScope:
+        return VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": defaults_val}}),
+                ("user", {"agent": {"name": user_val}}),
+            ]
+        )
+
+    def _defaults_scope(self, defaults_val: str) -> VariableScope:
+        return VariableScope.build(
+            toml_layers=[("defaults", {"agent": {"name": defaults_val}})]
+        )
+
+    def test_override_removal_preserves_dormant_lineage(self) -> None:
+        """Test 2.1: user removes override; variable reverts to defaults-only; lineage still present."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=self._user_scope("DefaultPM", "MyPM"))
+            _call_write(lf, root, var_scope=self._defaults_scope("DefaultPM"))
+            data = json.loads(io.read_template(lf))
+            var = next(v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertIn("lineage", var)
+            self.assertEqual(var["lineage"], [])
+
+    def test_dormant_lineage_survives_second_compile(self) -> None:
+        """Test 2.2: two compiles after override removal; lineage still present after both."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=self._user_scope("DefaultPM", "MyPM"))
+            scope_def = self._defaults_scope("DefaultPM")
+            _call_write(lf, root, var_scope=scope_def)
+            _call_write(lf, root, var_scope=scope_def)
+            data = json.loads(io.read_template(lf))
+            var = next(v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertIn("lineage", var)
+
+    def test_override_removal_then_restore_correct_lineage(self) -> None:
+        """Test 2.3: BH-R2-2 — defaults change, then remove override, then re-add; no {base_value_hash: null} entry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            # Compile 1: user override with D1
+            _call_write(lf, root, var_scope=self._user_scope("DefaultPM", "MyPM"))
+            # Compile 2: defaults change to D2, override still present
+            _call_write(lf, root, var_scope=self._user_scope("NewDefaultPM", "MyPM"))
+            # Compile 3: override removed — dormant entry carries lineage + preserves base_value_hash
+            _call_write(lf, root, var_scope=self._defaults_scope("NewDefaultPM"))
+            # Compile 4: override restored — must NOT produce {base_value_hash: null}
+            _call_write(lf, root, var_scope=self._user_scope("NewDefaultPM", "MyPM"))
+            data = json.loads(io.read_template(lf))
+            var = next(v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertGreaterEqual(
+                len(var.get("lineage", [])), 1,
+                "lineage should have at least one entry from the defaults upgrade in compile 2",
+            )
+            for entry in var.get("lineage", []):
+                self.assertIsNotNone(
+                    entry.get("base_value_hash"),
+                    "spurious {base_value_hash: null} entry found in lineage",
+                )
+
+    def test_variable_with_no_prior_lineage_not_affected(self) -> None:
+        """Test 2.4: non-TOML variable (no prior lineage); no lineage key after second pass."""
+        table = {
+            "myvar": ResolvedValue(
+                value="val", source="bmad-config", value_hash=io.hash_text("val")
+            ),
+        }
+        scope = VariableScope(table)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=scope)
+            _call_write(lf, root, var_scope=scope)
+            data = json.loads(io.read_template(lf))
+            var = next(v for v in data["entries"][0]["variables"] if v["name"] == "myvar")
+            self.assertNotIn("lineage", var)
+
+    def test_toml_to_non_toml_transition_preserves_dormant_lineage(self) -> None:
+        """Test 2.5: variable was user-TOML (has lineage), source changes to non-TOML; dormant lineage carried forward."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            # Compile 1: user-TOML override
+            _call_write(lf, root, var_scope=self._user_scope("DefaultPM", "MyPM"))
+            # Compile 2: source switches to bmad-config (non-TOML)
+            non_toml_scope = VariableScope({"self.agent.name": ResolvedValue(
+                value="MyPM", source="bmad-config", value_hash=io.hash_text("MyPM")
+            )})
+            _call_write(lf, root, var_scope=non_toml_scope)
+            data = json.loads(io.read_template(lf))
+            var = next(v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertIn("lineage", var)
+
+
+# ---------------------------------------------------------------------------
+# TestMigrationSuppression (Task 8: Tests 3.1–3.3)
+# ---------------------------------------------------------------------------
+
+class TestMigrationSuppression(unittest.TestCase):
+
+    def _user_scope(self, defaults_val: str, user_val: str) -> VariableScope:
+        return VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": defaults_val}}),
+                ("user", {"agent": {"name": user_val}}),
+            ]
+        )
+
+    def _strip_lineage_fields(self, lf: str) -> None:
+        """Strip base_value_hash + lineage from all variable entries (simulate pre-5.3 lockfile)."""
+        data = json.loads(Path(lf).read_text(encoding="utf-8"))
+        for e in data["entries"]:
+            for v in e.get("variables", []):
+                v.pop("base_value_hash", None)
+                v.pop("lineage", None)
+        Path(lf).write_text(json.dumps(data), encoding="utf-8")
+
+    def test_pre_53_lockfile_no_base_value_hash_no_spurious_entry(self) -> None:
+        """Test 3.1: first compile against pre-5.3 entry (no base_value_hash, no lineage); lineage: []."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            scope = self._user_scope("DefaultPM", "MyPM")
+            _call_write(lf, root, var_scope=scope)
+            self._strip_lineage_fields(lf)
+            _call_write(lf, root, var_scope=scope)
+            result = json.loads(io.read_template(lf))
+            var = next(v for v in result["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertEqual(var["lineage"], [], "expected clean start, not spurious null entry")
+
+    def test_pre_53_with_changed_defaults_gets_clean_start(self) -> None:
+        """Test 3.2: pre-5.3 entry + changed defaults; lineage: [] (migration suppressed)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=self._user_scope("DefaultPM", "MyPM"))
+            self._strip_lineage_fields(lf)
+            _call_write(lf, root, var_scope=self._user_scope("DifferentDefaultPM", "MyPM"))
+            result = json.loads(io.read_template(lf))
+            var = next(v for v in result["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertEqual(var["lineage"], [], "migration suppressed even when defaults changed")
+
+    def test_guard_does_not_fire_when_old_lin_nonempty(self) -> None:
+        """Test 3.3: _old_bvh is None but _old_var_lin non-empty; lineage entry IS appended."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            scope = self._user_scope("DefaultPM", "MyPM")
+            _call_write(lf, root, var_scope=scope)
+            # Manually set base_value_hash=absent but lineage=[{...}] non-empty
+            data = json.loads(Path(lf).read_text(encoding="utf-8"))
+            for e in data["entries"]:
+                for v in e.get("variables", []):
+                    if v["name"] == "self.agent.name":
+                        v.pop("base_value_hash", None)
+                        v["lineage"] = [{"base_value_hash": None, "bmad_version": "1.0.0", "override_value_hash": "abc"}]
+            Path(lf).write_text(json.dumps(data), encoding="utf-8")
+            # Recompile with changed defaults — bvh comparison fires
+            _call_write(lf, root, var_scope=self._user_scope("DifferentDefaultPM", "MyPM"))
+            result = json.loads(io.read_template(lf))
+            var = next(v for v in result["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            # Guard did NOT fire — lineage entry appended (now 2 entries)
+            self.assertEqual(len(var["lineage"]), 2)
+
+
+# ---------------------------------------------------------------------------
+# TestVariableLineageReconstruction (Task 9: Tests 4.1–4.4)
+# ---------------------------------------------------------------------------
+
+class TestVariableLineageReconstruction(unittest.TestCase):
+
+    def _make_scope(self, defaults_val: str, user_val: str) -> VariableScope:
+        return VariableScope.build(
+            toml_layers=[
+                ("defaults", {"agent": {"name": defaults_val}}),
+                ("user", {"agent": {"name": user_val}}),
+            ]
+        )
+
+    def test_reconstruct_variable_lineage_3_compile(self) -> None:
+        """Test 4.1: 3 compiles with changing defaults; _reconstruct(data, n=1) restores to 2-compile state."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            scope1 = self._make_scope("D1", "U1")
+            scope2 = self._make_scope("D2", "U1")
+            scope3 = self._make_scope("D3", "U1")
+
+            _call_write(lf, root, var_scope=scope1)
+            snapshot1 = json.loads(io.read_template(lf))
+            _call_write(lf, root, var_scope=scope2)
+            snapshot2 = json.loads(io.read_template(lf))
+            _call_write(lf, root, var_scope=scope3)
+            snapshot3 = json.loads(io.read_template(lf))
+
+            self.assertEqual(
+                _serialize_lockfile(_reconstruct(snapshot3, 1)),
+                _serialize_lockfile(snapshot2),
+            )
+            self.assertEqual(
+                _serialize_lockfile(_reconstruct(snapshot3, 2)),
+                _serialize_lockfile(snapshot1),
+            )
+
+    def test_reconstruct_skips_dormant_variables(self) -> None:
+        """Test 4.2: dormant variable (toml_layer='defaults') with non-empty lineage is skipped by _reconstruct."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            # Compile 1: user override active — lineage: []
+            _call_write(lf, root, var_scope=self._make_scope("D1", "U1"))
+            # Compile 2: defaults change — lineage accumulates 1 entry while override is active
+            _call_write(lf, root, var_scope=self._make_scope("D2", "U1"))
+            # Compile 3: override removed — dormant with toml_layer="defaults" and non-empty lineage
+            _call_write(lf, root, var_scope=VariableScope.build(
+                toml_layers=[("defaults", {"agent": {"name": "D2"}})]
+            ))
+            data = json.loads(io.read_template(lf))
+            original_var = next(
+                v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name"
+            )
+            # Verify the dormant state: toml_layer="defaults" and non-empty lineage
+            self.assertEqual(original_var.get("toml_layer"), "defaults")
+            self.assertGreater(len(original_var.get("lineage", [])), 0)
+            original_lineage = list(original_var.get("lineage", []))
+            original_value_hash = original_var.get("value_hash")
+
+            rewound = _reconstruct(data, 1)
+            rvar = next(v for v in rewound["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            # _reconstruct skipped it via toml_layer guard — lineage and value_hash unchanged
+            self.assertEqual(rvar.get("lineage"), original_lineage)
+            self.assertEqual(rvar.get("value_hash"), original_value_hash)
+
+    def test_reconstruct_skips_empty_lineage(self) -> None:
+        """Test 4.3: variable with lineage: []; _reconstruct leaves it unmodified (no IndexError)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            _call_write(lf, root, var_scope=self._make_scope("DefaultPM", "MyPM"))
+            data = json.loads(io.read_template(lf))
+            var_before = next(v for v in data["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertEqual(var_before["lineage"], [])
+            original_bvh = var_before["base_value_hash"]
+            original_vh = var_before["value_hash"]
+
+            # Must not raise IndexError
+            rewound = _reconstruct(data, 1)
+            rvar = next(v for v in rewound["entries"][0]["variables"] if v["name"] == "self.agent.name")
+            self.assertEqual(rvar["base_value_hash"], original_bvh)
+            self.assertEqual(rvar["value_hash"], original_vh)
+            self.assertEqual(rvar["lineage"], [])
+
+    def test_reconstruct_n2_rewinds_two_generations(self) -> None:
+        """Test 4.4: 3 compiles; _reconstruct(data, n=2) restores to 1-compile state."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = PurePosixPath(io.to_posix(tmp))
+            lf = str(root / "bmad.lock")
+            scope1 = self._make_scope("D1", "U1")
+            scope2 = self._make_scope("D2", "U1")
+            scope3 = self._make_scope("D3", "U1")
+
+            _call_write(lf, root, var_scope=scope1)
+            snapshot1 = json.loads(io.read_template(lf))
+            _call_write(lf, root, var_scope=scope2)
+            _call_write(lf, root, var_scope=scope3)
+            snapshot3 = json.loads(io.read_template(lf))
+
+            self.assertEqual(
+                _serialize_lockfile(_reconstruct(snapshot3, 2)),
+                _serialize_lockfile(snapshot1),
+            )
 
 
 if __name__ == "__main__":

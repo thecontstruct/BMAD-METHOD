@@ -68,6 +68,14 @@ def read_lockfile_version(path: str) -> int | None:
     `LockfileVersionMismatchError`. Migration: re-run `bmad install` to
     regenerate the lockfile. Missing `version` field still returns 0
     (graceful path preserved for fresh installs).
+
+    Story 7.14 AC-5: this function is NOT inside the advisory lock that wraps
+    ``_do_write_skill_entry``. A concurrent reader calling this function while
+    a writer holds the lock may observe stale state (the pre-write lockfile).
+    This is acceptable for v1: the ``version`` field is 1 and does not change
+    between writes within v1 schema. A future v1\u2192v2 schema migration MUST move
+    this read inside the lock. See deferred-work.md: [lockfile concurrency, v2
+    migration \u2014 read_lockfile_version inside lock].
     """
     if not io.is_file(path):
         return None
@@ -246,7 +254,7 @@ def _build_skill_entry(
             var_entry["source_path"] = _normalize_path(rv.source_path, scenario_root)
         if rv.toml_layer is not None:
             var_entry["toml_layer"] = rv.toml_layer
-        if rv.source == "toml" and rv.toml_layer == "user" and rv.base_value_hash is not None:
+        if rv.source == "toml" and rv.toml_layer in ("user", "team") and rv.base_value_hash is not None:
             # Story 5.3: record defaults-layer hash and initialize empty lineage.
             # write_skill_entry() carries forward lineage entries on subsequent compiles.
             var_entry["base_value_hash"] = rv.base_value_hash
@@ -353,7 +361,13 @@ def _do_write_skill_entry(
     target_ide: str | None,
     cache: resolver.CompileCache,
 ) -> None:
-    """Internal: the original RMW body, now called inside the AC-2 lock."""
+    """Internal: the original RMW body, now called inside the AC-2 lock.
+
+    AC-6: fragment and variable lineage arrays are strictly append-only with
+    no max-length enforcement. Lineage entries accumulate indefinitely across
+    upgrades. Pruning/compaction is deferred — see deferred-work.md:
+    [lineage, Story 5.x — pruning].
+    """
     existing: dict[str, Any] = {}
     if io.is_file(lockfile_path):
         try:
@@ -428,15 +442,43 @@ def _do_write_skill_entry(
         _old_var_lin: list[dict[str, Any]] = _raw_var_lin if isinstance(_raw_var_lin, list) else []
         _old_bvh = _old_var.get("base_value_hash")
         if _old_bvh != _var.get("base_value_hash"):
-            # Defaults layer changed — append lineage entry recording pre-upgrade state.
-            _var["lineage"] = _old_var_lin + [{
-                "base_value_hash": _old_bvh,
-                "bmad_version": old_bmad_version,
-                "override_value_hash": _old_var.get("value_hash"),
-            }]
+            # AC-3: Suppress migration artifact. On first compile against a
+            # pre-5.3 lockfile, the old entry has no base_value_hash (_old_bvh is
+            # None) and no prior lineage. Appending {base_value_hash: null, ...}
+            # would create a spurious "baseline was unknown" entry — not caused by
+            # an actual upgrade. Suppress only when both conditions hold.
+            if _old_bvh is None and not _old_var_lin:
+                _var["lineage"] = []  # migration compile: start clean
+            else:
+                _var["lineage"] = _old_var_lin + [{
+                    "base_value_hash": _old_bvh,
+                    "bmad_version": old_bmad_version,
+                    "override_value_hash": _old_var.get("value_hash"),
+                }]
         else:
             # No defaults change — carry old lineage forward unchanged.
             _var["lineage"] = _old_var_lin
+
+    # AC-2: Second pass — carry dormant lineage for variables that lost their
+    # active override (toml_layer fell back to "defaults" or source changed).
+    # Must run AFTER the carry-forward loop so it only touches variables that
+    # were NOT handled above (i.e., those that don't have "lineage" in the new
+    # entry after the first pass).
+    for _var in new_entry["variables"]:
+        if "lineage" in _var:
+            continue  # already handled by carry-forward loop
+        _old_var = old_var_by_name.get(_var["name"])
+        if _old_var is None:
+            continue  # first compile for this variable — nothing to carry
+        _old_dormant = _old_var.get("lineage")
+        if not isinstance(_old_dormant, list):
+            continue  # lineage key absent, null, or malformed — nothing to carry
+        _var["lineage"] = list(_old_dormant)
+        # Preserve base_value_hash so a future re-override compile sees a
+        # non-None _old_bvh and does not produce a spurious {base_value_hash: null}
+        # lineage entry (BH-R2-2 scenario: override removed then re-added).
+        if _old_var.get("base_value_hash") is not None:
+            _var["base_value_hash"] = _old_var["base_value_hash"]
 
     raw_entries = existing.get("entries", [])
     # Defensive: a corrupted lockfile with entries=null/int/str dict-parses
