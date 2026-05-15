@@ -12,6 +12,7 @@ const { BMAD_FOLDER_NAME } = require('../ide/shared/path-utils');
 const { InstallPaths } = require('./install-paths');
 const { ExternalModuleManager } = require('../modules/external-manager');
 const { resolveModuleVersion } = require('../modules/version-resolver');
+const { MODULE_HELP_CSV_HEADER } = require('../modules/module-help-schema');
 
 const { ExistingInstall } = require('./existing-install');
 const { warnPreNativeSkillsLegacy } = require('./legacy-warnings');
@@ -309,6 +310,19 @@ class Installer {
           preservedModules: modulesForCsvPreserve,
           moduleConfigs,
         });
+
+        // Apply post-install --set TOML patches. Runs after writeCentralConfig
+        // (inside generateManifests above) so the patch operates on the
+        // freshly written `_bmad/config.toml` / `_bmad/config.user.toml`.
+        // See `tools/installer/set-overrides.js` for routing rules.
+        if (config.setOverrides && Object.keys(config.setOverrides).length > 0) {
+          const { applySetOverrides } = require('../set-overrides');
+          const applied = await applySetOverrides(config.setOverrides, paths.bmadDir);
+          if (applied.length > 0) {
+            const summary = applied.map((a) => `${a.module}.${a.key} → ${a.file}`).join(', ');
+            await prompts.log.info(`Applied --set overrides: ${summary}`);
+          }
+        }
 
         message('Generating help catalog...');
         await this.mergeModuleHelpCatalogs(paths.bmadDir, manifestGen.agents);
@@ -929,7 +943,7 @@ class Installer {
    */
   async mergeModuleHelpCatalogs(bmadDir, _agentEntries = []) {
     const allRows = [];
-    const headerRow = 'module,skill,display-name,menu-code,description,action,args,phase,after,before,required,output-location,outputs';
+    const headerRow = MODULE_HELP_CSV_HEADER;
     const COLUMN_COUNT = 13;
     const PHASE_INDEX = 7;
 
@@ -962,9 +976,19 @@ class Installer {
           const content = await fs.readFile(helpFilePath, 'utf8');
           const lines = content.split('\n').filter((line) => line.trim() && !line.startsWith('#'));
 
+          let headerWarned = false;
           for (const line of lines) {
-            // Skip header row
+            // Header row: warn on drift from canonical schema, then skip.
+            // Data rows are loaded positionally regardless, so the warning
+            // is advisory — the maintainer should rename their columns.
             if (line.startsWith('module,')) {
+              if (!headerWarned && line.trim() !== headerRow) {
+                await prompts.log.warn(
+                  `  ${moduleName}/module-help.csv header does not match canonical schema. ` +
+                    `Expected: ${headerRow} | Found: ${line.trim()} | Data loaded positionally.`,
+                );
+                headerWarned = true;
+              }
               continue;
             }
 
@@ -1283,6 +1307,10 @@ class Installer {
       ides: configuredIdes,
       coreConfig: quickModules.collectedConfig.core,
       moduleConfigs: quickModules.collectedConfig,
+      // Forward `--set` overrides so the post-install patch step
+      // (`applySetOverrides`) runs at the end of quick-update too. The
+      // installer.install path applies them after writeCentralConfig.
+      setOverrides: config.setOverrides || {},
       actionType: 'install',
       _quickUpdate: true,
       _preserveModules: skippedModules,
