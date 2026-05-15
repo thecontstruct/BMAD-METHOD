@@ -253,7 +253,22 @@ def acquire_lock(lock_path: PathLike, timeout_seconds: float = 300.0) -> int:  #
       close fd and re-raise.
 
     Poll interval: 0.1s. File descriptor opened O_RDWR|O_CREAT mode 0o600.
+
+    Per-process flock semantics (POSIX): fcntl.flock uses per-process (not
+    per-fd) granularity on Linux/macOS — a second call from the same PID with
+    the same underlying inode is silently re-granted. This means acquire_lock
+    does NOT serialize concurrent callers within the same process. Production
+    callers of lazy_compile.main() are always separate subprocesses (invoked
+    via ``python -m bmad_compile.lazy_compile``), so intra-process races
+    cannot occur in the current architecture.
+    # TODO: intra-process thread safety — if a future caller invokes main()
+    # directly from a multi-threaded context, layer a threading.Lock keyed by
+    # lock_path inside acquire_lock.
     """
+    if timeout_seconds is None or timeout_seconds < 0:
+        raise ValueError(
+            f"timeout_seconds must be float >= 0, got {timeout_seconds!r}"
+        )
     import os as _os  # pragma: allow-raw-io
     import time as _time  # pragma: allow-raw-io
     path_str = str(_fs(lock_path))

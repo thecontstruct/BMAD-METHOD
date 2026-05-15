@@ -296,6 +296,34 @@ class TestLockPrimitives(unittest.TestCase):
             p.kill()
             p.wait()
 
+    def test_none_timeout_raises_value_error(self) -> None:
+        """acquire_lock(path, None) raises ValueError (OQ-C=1)."""
+        with self.assertRaises(ValueError) as cm:
+            bio.acquire_lock(self.lock_path, None)  # type: ignore[arg-type]
+        self.assertIn("timeout_seconds must be float >= 0", str(cm.exception))
+
+    def test_negative_timeout_raises_value_error(self) -> None:
+        """acquire_lock(path, -1) raises ValueError immediately."""
+        with self.assertRaises(ValueError) as cm:
+            bio.acquire_lock(self.lock_path, -1)
+        self.assertIn("timeout_seconds must be float >= 0", str(cm.exception))
+
+    def test_negative_timeout_no_fd_created(self) -> None:
+        """Guard fires before O_CREAT — no lock file created on negative timeout."""
+        with self.assertRaises(ValueError):
+            bio.acquire_lock(self.lock_path, -1)
+        self.assertFalse(os.path.exists(self.lock_path))
+
+    def test_zero_timeout_raises_lock_timeout_error_on_contention(self) -> None:
+        """Zero timeout is valid (try-once) — raises LockTimeoutError under contention."""
+        p = self._hold_lock_subprocess(self.lock_path)
+        try:
+            with self.assertRaises(bio.LockTimeoutError):
+                bio.acquire_lock(self.lock_path, 0.0)
+        finally:
+            p.kill()
+            p.wait()
+
 
 if __name__ == "__main__":
     unittest.main()

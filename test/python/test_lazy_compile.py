@@ -6,8 +6,10 @@ first-compile (no lockfile), and exit codes.
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -541,6 +543,108 @@ class TestMissingInputs(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertIn("MISSING_FRAGMENT", result.stderr)
+
+    def test_negative_timeout_via_cli_exits_1_no_traceback(self) -> None:
+        """--lock-timeout-seconds -1 → exit 1, no raw traceback in stderr (DN-R2-1)."""
+        _make_minimal_skill(self.project_root)
+        result = _run_guard(
+            self.project_root, "my-skill",
+            extra_args=["--lock-timeout-seconds", "-1"],
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_missing_skill_dir_exits_1_with_diagnostic(self) -> None:
+        """skill_dir deleted after compile → is_dir() check → exit 1, 'Skill directory missing'."""
+        skill_dir = _make_minimal_skill(self.project_root)
+        _compile_skill(self.project_root)
+        # Corrupt hash to force slow path.
+        entry = _read_lockfile_entry(self.project_root, "my-skill")
+        assert entry is not None
+        entry["fragments"][0]["hash"] = "00" * 32
+        _write_lockfile(self.project_root, [entry])
+        # Delete the skill directory to trigger AC-2 guard.
+        shutil.rmtree(str(skill_dir))
+        result = _run_guard(self.project_root, "my-skill")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Skill directory missing", result.stderr)
+
+    def test_not_a_directory_exits_1(self) -> None:
+        """skill_dir replaced by a file → is_dir() returns False → exit 1, diagnostic."""
+        skill_dir = _make_minimal_skill(self.project_root)
+        _compile_skill(self.project_root)
+        # Corrupt hash to force slow path.
+        entry = _read_lockfile_entry(self.project_root, "my-skill")
+        assert entry is not None
+        entry["fragments"][0]["hash"] = "00" * 32
+        _write_lockfile(self.project_root, [entry])
+        # Replace skill directory with a plain file.
+        shutil.rmtree(str(skill_dir))
+        skill_dir.touch()
+        result = _run_guard(self.project_root, "my-skill")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Skill directory missing", result.stderr)
+
+    def test_path_shift_during_lock_acquisition_exits_1(self) -> None:
+        """TOCTOU: skill_dir differs between pre-lock and post-lock read → exit 1."""
+        _make_minimal_skill(self.project_root)
+        _compile_skill(self.project_root)
+        # Corrupt hash to force slow path.
+        entry = _read_lockfile_entry(self.project_root, "my-skill")
+        assert entry is not None
+        entry["fragments"][0]["hash"] = "00" * 32
+        _write_lockfile(self.project_root, [entry])
+
+        scenario_root = self.project_root / "_bmad"
+        original_skill_dir = scenario_root / "mymodule" / "my-skill"
+        different_skill_dir = scenario_root / "mymodule" / "shifted-skill"
+        install_dir = scenario_root
+
+        # _reconstruct_paths is called 3 times in main():
+        #   1. via _reconstruct_skill_md_path (before fast/slow branch)
+        #   2. directly in the slow path (sets skill_dir)
+        #   3. AC-3 post-lock re-validation
+        # The shift is injected on the 3rd call.
+        stderr_capture = io.StringIO()
+        with patch(
+            "src.scripts.bmad_compile.lazy_compile._reconstruct_paths",
+            side_effect=[
+                (original_skill_dir, install_dir),
+                (original_skill_dir, install_dir),
+                (different_skill_dir, install_dir),
+            ],
+        ):
+            with patch("sys.stderr", stderr_capture):
+                code = _call_main(self.project_root, "my-skill")
+
+        self.assertEqual(code, 1)
+        self.assertIn("Skill structure changed", stderr_capture.getvalue())
+
+    def test_no_path_shift_continues_normally(self) -> None:
+        """TOCTOU: skill_dir identical pre- and post-lock → compile succeeds, exit 0."""
+        _make_minimal_skill(self.project_root)
+        _compile_skill(self.project_root)
+        # Corrupt hash to force slow path.
+        entry = _read_lockfile_entry(self.project_root, "my-skill")
+        assert entry is not None
+        entry["fragments"][0]["hash"] = "00" * 32
+        _write_lockfile(self.project_root, [entry])
+
+        scenario_root = self.project_root / "_bmad"
+        real_skill_dir = scenario_root / "mymodule" / "my-skill"
+        real_install_dir = scenario_root
+        same_return = (real_skill_dir, real_install_dir)
+
+        # Three calls: _reconstruct_skill_md_path, slow-path direct, AC-3 post-lock.
+        with patch(
+            "src.scripts.bmad_compile.lazy_compile._reconstruct_paths",
+            side_effect=[same_return, same_return, same_return],
+        ):
+            code = _call_main(self.project_root, "my-skill")
+
+        self.assertEqual(code, 0)
 
 
 # ---------------------------------------------------------------------------

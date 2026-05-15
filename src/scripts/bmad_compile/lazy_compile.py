@@ -227,6 +227,14 @@ def main(argv: list[str] | None = None) -> int:
     lockfile_path = project_root / "_bmad" / "_config" / "bmad.lock"
     scenario_root = project_root / "_bmad"
 
+    if args.lock_timeout_seconds < 0:
+        sys.stderr.write(
+            f"MISSING_FRAGMENT: ?:?:?: "
+            f"Invalid lock timeout: timeout_seconds must be >= 0, "
+            f"got {args.lock_timeout_seconds}\n"
+        )
+        return 1
+
     entry = _find_lockfile_entry(lockfile_path, args.skill)
     skill_md_path = _reconstruct_skill_md_path(entry, scenario_root, args.skill)
 
@@ -247,6 +255,13 @@ def main(argv: list[str] | None = None) -> int:
         skill_dir, install_dir = _reconstruct_paths(entry, scenario_root, args.skill)
     except RuntimeError as exc:
         sys.stderr.write(f"MISSING_FRAGMENT: {scenario_root}:?:?: {exc}\n")
+        return 1
+
+    if not io.is_dir(str(skill_dir)):
+        sys.stderr.write(
+            f"MISSING_FRAGMENT: {skill_dir}:?:?: "
+            f"Skill directory missing: {skill_dir}\n"
+        )
         return 1
 
     lock_path = str(skill_dir / ".compiling.lock")
@@ -273,6 +288,20 @@ def main(argv: list[str] | None = None) -> int:
         # updated it while we waited. Use fresh_entry (not `entry`) to avoid
         # shadowing the outer variable that was used for _reconstruct_paths above.
         fresh_entry = _find_lockfile_entry(lockfile_path, args.skill)
+        # AC-3: Re-validate paths from post-lock lockfile state.
+        try:
+            _post_lock_skill_dir, _ = _reconstruct_paths(
+                fresh_entry, scenario_root, args.skill
+            )
+        except RuntimeError:
+            _post_lock_skill_dir = None  # skill disappeared from disk
+        if _post_lock_skill_dir != skill_dir:
+            sys.stderr.write(
+                f"MISSING_FRAGMENT: {lock_path}:?:?: "
+                f"Skill structure changed during lock acquisition: "
+                f"pre-lock path {skill_dir}, post-lock path {_post_lock_skill_dir}\n"
+            )
+            return 1
         # skill_dir is already known from above; pass it directly to avoid a
         # redundant _reconstruct_paths call.
         fresh_skill_md_path = _reconstruct_skill_md_path(
