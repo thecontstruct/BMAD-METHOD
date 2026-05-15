@@ -294,6 +294,7 @@ class TestVariableResolutionFixtures(unittest.TestCase):
 
     def tearDown(self) -> None:
         (COMPILE_FIXTURES / "variable-resolution" / "_bmad" / "_config" / ".bmad.lock.lock").unlink(missing_ok=True)
+        (COMPILE_FIXTURES / "variable-resolution" / "_bmad" / "_config" / "bmad.lock").unlink(missing_ok=True)
 
     def _scenario_skill(self, scenario: str, skill_name: str) -> Path:
         return COMPILE_FIXTURES / scenario / "core" / skill_name
@@ -449,6 +450,7 @@ class TestLockfileIntegration(unittest.TestCase):
         # Defensive: remove any stale lockfile from a killed prior run so
         # test_lockfile_not_written_on_compile_error cannot false-fail.
         self._lockfile.unlink(missing_ok=True)
+        (COMPILE_FIXTURES / "variable-resolution" / "_bmad" / "_config" / ".bmad.lock.lock").unlink(missing_ok=True)
 
     def tearDown(self) -> None:
         self._lockfile.unlink(missing_ok=True)

@@ -22,6 +22,7 @@ _TEST_DIR = Path(__file__).resolve().parent.parent
 if str(_TEST_DIR) not in sys.path:
     sys.path.insert(0, str(_TEST_DIR))
 
+# (same isolation constraint as above)
 # Add src/scripts to path for schema directory constant (mirrors test_upgrade_dry_run.py).
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
