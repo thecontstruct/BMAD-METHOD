@@ -12,6 +12,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# Process-global sys.path mutation — acceptable for current single-process unittest runner.
+# The idempotency guards (`if ... not in sys.path`) prevent double-insertion on re-import
+# but do not undo the mutation on teardown. If the project ever adopts parallel/isolated
+# test execution (e.g. pytest-xdist), convert to importlib-based imports or a conftest.py
+# sys.path fixture.  # noqa: sys.path-global
 # Add test/ directory to path so `from harness.X import ...` resolves.
 _TEST_DIR = Path(__file__).resolve().parent.parent
 if str(_TEST_DIR) not in sys.path:

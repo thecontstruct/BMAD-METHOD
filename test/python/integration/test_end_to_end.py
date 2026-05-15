@@ -39,6 +39,10 @@ def _run_cli(skill: Path, install_dir: Path) -> subprocess.CompletedProcess:
 class TestMinimalFixture(unittest.TestCase):
     """AC 8: byte-identical passthrough + idempotent re-run."""
 
+    def tearDown(self) -> None:
+        # FIXTURES / "minimal" → scenario_root = FIXTURES.parent = test/fixtures/
+        (FIXTURES.parent / "_bmad" / "_config" / ".bmad.lock.lock").unlink(missing_ok=True)
+
     def test_exit_zero_and_skill_md_matches_expected(self) -> None:
         fixture = FIXTURES / "minimal"
         expected_bytes = (fixture / "expected.md").read_bytes()
@@ -156,6 +160,9 @@ class TestCliArgumentValidation(unittest.TestCase):
 
 class TestCompileFixtures(unittest.TestCase):
     """Story 1.2 parametrized scenarios — `<<include>>` pipeline end-to-end."""
+
+    def tearDown(self) -> None:
+        (COMPILE_FIXTURES / "include-chain" / "_bmad" / "_config" / ".bmad.lock.lock").unlink(missing_ok=True)
 
     def _scenario_skill(self, scenario: str) -> Path:
         return (
@@ -285,6 +292,9 @@ class TestCompileFixtures(unittest.TestCase):
 class TestVariableResolutionFixtures(unittest.TestCase):
     """Story 1.3 — compile-time variable interpolation end-to-end."""
 
+    def tearDown(self) -> None:
+        (COMPILE_FIXTURES / "variable-resolution" / "_bmad" / "_config" / ".bmad.lock.lock").unlink(missing_ok=True)
+
     def _scenario_skill(self, scenario: str, skill_name: str) -> Path:
         return COMPILE_FIXTURES / scenario / "core" / skill_name
 
@@ -346,6 +356,9 @@ def _run_cli_tools(skill: Path, install_dir: Path, tools: str | None = None) -> 
 
 class TestVariantSelectionFixtures(unittest.TestCase):
     """Story 1.4 — IDE variant selection end-to-end (AC 1, 2, 3, 9)."""
+
+    def tearDown(self) -> None:
+        (COMPILE_FIXTURES / "variant-selection" / "_bmad" / "_config" / ".bmad.lock.lock").unlink(missing_ok=True)
 
     def _expected(self, name: str) -> bytes:
         return (VARIANT_FIXTURES / "expected" / name).read_bytes()
@@ -439,6 +452,7 @@ class TestLockfileIntegration(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._lockfile.unlink(missing_ok=True)
+        (COMPILE_FIXTURES / "variable-resolution" / "_bmad" / "_config" / ".bmad.lock.lock").unlink(missing_ok=True)
 
     def _var_res_skill(self) -> Path:
         return COMPILE_FIXTURES / "variable-resolution" / "core" / "var-resolution-skill"

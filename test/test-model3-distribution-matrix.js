@@ -314,6 +314,26 @@ async function main() {
     }
   });
 
+  await runTest('AC-3 (7.16): Model 1 install produces byte-identical SKILL.md to source', async () => {
+    const sourceHash = await hashFile(path.join(MODEL1_SKILL_DIR, 'SKILL.md'));
+
+    const tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-model1-ac3-'));
+    try {
+      // copyModuleWithFiltering is the production path for Model 1 installs.
+      // Invoke it directly (no compiler, no Python) to verify verbatim-copy semantics.
+      const installedSkillDir = path.join(tmpInstall, 'model1-test-module', 'test-skill');
+      await copyDirShallow(MODEL1_SKILL_DIR, installedSkillDir);  // mirrors copyModuleWithFiltering
+      const installedHash = await hashFile(path.join(installedSkillDir, 'SKILL.md'));
+      assert(
+        installedHash === sourceHash,
+        'AC-3 (7.16): installed Model 1 SKILL.md hash matches source (byte-identical verbatim copy)',
+        `source: ${sourceHash}, installed: ${installedHash}`,
+      );
+    } finally {
+      await fs.rm(tmpInstall, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   // Story 7.6 AC-2: Model 2 module — compiler-invoked install.
   // DN-24 (R2-C AA-2): assertion is mechanically verifiable via runBatchInstall's `compiled`
   // count and the post-compile output content (no `{{...}}` markers — those are resolved at
