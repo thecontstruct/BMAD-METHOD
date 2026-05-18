@@ -322,7 +322,7 @@ async function main() {
       // copyModuleWithFiltering is the production path for Model 1 installs.
       // Invoke it directly (no compiler, no Python) to verify verbatim-copy semantics.
       const installedSkillDir = path.join(tmpInstall, 'model1-test-module', 'test-skill');
-      await copyDirShallow(MODEL1_SKILL_DIR, installedSkillDir);  // mirrors copyModuleWithFiltering
+      await copyDirShallow(MODEL1_SKILL_DIR, installedSkillDir); // mirrors copyModuleWithFiltering
       const installedHash = await hashFile(path.join(installedSkillDir, 'SKILL.md'));
       assert(
         installedHash === sourceHash,

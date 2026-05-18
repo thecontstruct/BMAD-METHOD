@@ -20,11 +20,7 @@ const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const os = require('node:os');
 
-const {
-  runBatchInstall,
-  enumerateMigratedSkills,
-  BatchInstallError,
-} = require('../tools/installer/compiler/invoke-python');
+const { runBatchInstall, enumerateMigratedSkills, BatchInstallError } = require('../tools/installer/compiler/invoke-python');
 
 const colors = {
   reset: '[0m',
@@ -111,14 +107,8 @@ async function _setupInstallWithCompiler() {
   const srcScripts = path.join(__dirname, '..', 'src', 'scripts');
   const dstScripts = path.join(bmadDir, 'scripts');
   await fs.mkdir(dstScripts, { recursive: true });
-  await fs.copyFile(
-    path.join(srcScripts, 'compile.py'),
-    path.join(dstScripts, 'compile.py'),
-  );
-  await _copyRecursive(
-    path.join(srcScripts, 'bmad_compile'),
-    path.join(dstScripts, 'bmad_compile'),
-  );
+  await fs.copyFile(path.join(srcScripts, 'compile.py'), path.join(dstScripts, 'compile.py'));
+  await _copyRecursive(path.join(srcScripts, 'bmad_compile'), path.join(dstScripts, 'bmad_compile'));
   return { projectRoot: tmpDir, bmadDir };
 }
 
@@ -142,10 +132,7 @@ async function main() {
       });
 
       assert(result.compiled === 1, 'summary.compiled === 1');
-      assert(
-        Array.isArray(result.writtenFiles) && result.writtenFiles.length === 1,
-        'one writtenFile recorded',
-      );
+      assert(Array.isArray(result.writtenFiles) && result.writtenFiles.length === 1, 'one writtenFile recorded');
       assert(
         typeof result.lockfilePath === 'string' && result.lockfilePath.endsWith('bmad.lock'),
         'lockfilePath is a string ending in bmad.lock',
@@ -165,17 +152,13 @@ async function main() {
       await _writeFile(path.join(skillDir, 'sk1.template.md'), 'Hello batch');
       await fs.mkdir(path.join(bmadDir, 'custom'), { recursive: true });
 
-      const before = (await fs.readdir(os.tmpdir())).filter((n) =>
-        n.startsWith('bmad-batch-'),
-      );
+      const before = (await fs.readdir(os.tmpdir())).filter((n) => n.startsWith('bmad-batch-'));
       await runBatchInstall({
         skills: [{ skillDir, installDir: bmadDir }],
         bmadDir,
         projectRoot,
       });
-      const after = (await fs.readdir(os.tmpdir())).filter((n) =>
-        n.startsWith('bmad-batch-'),
-      );
+      const after = (await fs.readdir(os.tmpdir())).filter((n) => n.startsWith('bmad-batch-'));
       assert(after.length === before.length, 'temp skills.json files cleaned up');
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
@@ -311,10 +294,7 @@ async function main() {
       assert(caughtErr !== null, 'runBatchInstall throws on error');
       assert(caughtErr instanceof BatchInstallError, 'thrown error is instanceof BatchInstallError');
       assert(Array.isArray(caughtErr.writtenFiles), 'err.writtenFiles is an array');
-      assert(
-        caughtErr.writtenFiles.length > 0,
-        `err.writtenFiles contains skill-a output (got ${caughtErr.writtenFiles.length} entries)`,
-      );
+      assert(caughtErr.writtenFiles.length > 0, `err.writtenFiles contains skill-a output (got ${caughtErr.writtenFiles.length} entries)`);
       assert(
         caughtErr.writtenFiles.some((f) => String(f).includes('skill-a')),
         'skill-a path appears in writtenFiles',
@@ -343,10 +323,7 @@ async function main() {
       }
 
       assert(caughtErr instanceof BatchInstallError, 'thrown error is instanceof BatchInstallError');
-      assert(
-        caughtErr.writtenFiles.length === 0,
-        `writtenFiles empty when first skill fails (got ${caughtErr.writtenFiles.length})`,
-      );
+      assert(caughtErr.writtenFiles.length === 0, `writtenFiles empty when first skill fails (got ${caughtErr.writtenFiles.length})`);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
@@ -387,8 +364,7 @@ async function main() {
       const captured = [];
       const origWarn = console.warn;
       console.warn = (...args) => captured.push(args);
-      fsPromises.unlink = () =>
-        Promise.reject(Object.assign(new Error('disk full'), { code: 'ENOSPC' }));
+      fsPromises.unlink = () => Promise.reject(Object.assign(new Error('disk full'), { code: 'ENOSPC' }));
       try {
         await runBatchInstall({
           skills: [{ skillDir, installDir: bmadDir }],
@@ -422,8 +398,7 @@ async function main() {
       const origWarn = console.warn;
       const captured = [];
       console.warn = (...args) => captured.push(args);
-      fsPromises.unlink = () =>
-        Promise.reject(Object.assign(new Error('already gone'), { code: 'ENOENT' }));
+      fsPromises.unlink = () => Promise.reject(Object.assign(new Error('already gone'), { code: 'ENOENT' }));
       try {
         await runBatchInstall({
           skills: [{ skillDir, installDir: bmadDir }],
@@ -438,10 +413,7 @@ async function main() {
       }
 
       const cleanupWarns = captured.filter((args) => String(args[0]).includes('bmad: failed to clean up'));
-      assert(
-        cleanupWarns.length === 0,
-        `console.warn must NOT fire for ENOENT unlink (got ${cleanupWarns.length} cleanup warn calls)`,
-      );
+      assert(cleanupWarns.length === 0, `console.warn must NOT fire for ENOENT unlink (got ${cleanupWarns.length} cleanup warn calls)`);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }

@@ -21,10 +21,10 @@ const os = require('node:os');
 const { runUpgradeDryRun, runUpgradeYes } = require('../tools/installer/compiler/invoke-python');
 
 const colors = {
-  reset: '\x1b[0m',
-  green: '\x1b[32m',
-  red: '\x1b[31m',
-  dim: '\x1b[2m',
+  reset: '\u001B[0m',
+  green: '\u001B[32m',
+  red: '\u001B[31m',
+  dim: '\u001B[2m',
 };
 
 let passed = 0;
@@ -96,17 +96,18 @@ async function main() {
       };
       const reportJson = path.join(tmpDir, 'drift.json');
       await _writeFile(reportJson, JSON.stringify(driftReport));
-      await _writeFile(
-        upgradePy,
-        `import sys\nwith open(${JSON.stringify(reportJson)}) as f:\n    print(f.read())\nsys.exit(0)\n`,
-      );
+      await _writeFile(upgradePy, `import sys\nwith open(${JSON.stringify(reportJson)}) as f:\n    print(f.read())\nsys.exit(0)\n`);
 
       const report = await runUpgradeDryRun({ upgradePy, projectRoot: tmpDir });
 
       assert(typeof report === 'object' && report !== null, 'returns an object');
       assert(report.schema_version === 1, 'schema_version is 1');
       assert(Array.isArray(report.drift), 'drift is an array');
-      assert(report.summary.total_skills_with_drift === 1, 'total_skills_with_drift is 1', `got: ${report.summary.total_skills_with_drift}`);
+      assert(
+        report.summary.total_skills_with_drift === 1,
+        'total_skills_with_drift is 1',
+        `got: ${report.summary.total_skills_with_drift}`,
+      );
       assert(report.summary.prose_fragment_changes === 1, 'prose_fragment_changes is 1');
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
@@ -138,14 +139,15 @@ async function main() {
       };
       const reportJson = path.join(tmpDir, 'drift.json');
       await _writeFile(reportJson, JSON.stringify(zeroDriftReport));
-      await _writeFile(
-        upgradePy,
-        `import sys\nwith open(${JSON.stringify(reportJson)}) as f:\n    print(f.read())\nsys.exit(0)\n`,
-      );
+      await _writeFile(upgradePy, `import sys\nwith open(${JSON.stringify(reportJson)}) as f:\n    print(f.read())\nsys.exit(0)\n`);
 
       const report = await runUpgradeDryRun({ upgradePy, projectRoot: tmpDir });
 
-      assert(report.summary.total_skills_with_drift === 0, 'total_skills_with_drift is 0 (no routing triggered)', `got: ${report.summary.total_skills_with_drift}`);
+      assert(
+        report.summary.total_skills_with_drift === 0,
+        'total_skills_with_drift is 0 (no routing triggered)',
+        `got: ${report.summary.total_skills_with_drift}`,
+      );
       assert(Array.isArray(report.drift) && report.drift.length === 0, 'drift list is empty');
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
@@ -168,7 +170,11 @@ async function main() {
       }
 
       assert(threw, 'runUpgradeDryRun throws when upgrade.py exits 1');
-      assert(errMsg.toLowerCase().includes('dry-run failed') || errMsg.includes('upgrade.py'), 'error message is descriptive', `got: ${errMsg}`);
+      assert(
+        errMsg.toLowerCase().includes('dry-run failed') || errMsg.includes('upgrade.py'),
+        'error message is descriptive',
+        `got: ${errMsg}`,
+      );
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }

@@ -12,6 +12,7 @@ const { BMAD_FOLDER_NAME } = require('../ide/shared/path-utils');
 const { InstallPaths } = require('./install-paths');
 const { ExternalModuleManager } = require('../modules/external-manager');
 const { resolveModuleVersion } = require('../modules/version-resolver');
+const { MODULE_HELP_CSV_HEADER } = require('../modules/module-help-schema');
 
 const { ExistingInstall } = require('./existing-install');
 const { warnPreNativeSkillsLegacy } = require('./legacy-warnings');
@@ -297,8 +298,6 @@ class Installer {
           // R2 BH-6: enumerateMigratedSkills already walks the source tree;
           // the prior hasMigratedSkillsInScope preflight here was a redundant
           // second walk. Use the count of enumerated skills as the skip signal.
-          // (The hasMigratedSkillsInScope call at line 48 still gates the
-          // Python-version check; it stays.)
           const skills = await compilerHelper.enumerateMigratedSkills(paths, allModules, officialModules);
           if (skills.length === 0) {
             addResult('Compile migrated skills', 'skip', 'no migrated skills');
@@ -384,6 +383,19 @@ class Installer {
           preservedModules: modulesForCsvPreserve,
           moduleConfigs,
         });
+
+        // Apply post-install --set TOML patches. Runs after writeCentralConfig
+        // (inside generateManifests above) so the patch operates on the
+        // freshly written `_bmad/config.toml` / `_bmad/config.user.toml`.
+        // See `tools/installer/set-overrides.js` for routing rules.
+        if (config.setOverrides && Object.keys(config.setOverrides).length > 0) {
+          const { applySetOverrides } = require('../set-overrides');
+          const applied = await applySetOverrides(config.setOverrides, paths.bmadDir);
+          if (applied.length > 0) {
+            const summary = applied.map((a) => `${a.module}.${a.key} → ${a.file}`).join(', ');
+            await prompts.log.info(`Applied --set overrides: ${summary}`);
+          }
+        }
 
         message('Generating help catalog...');
         await this.mergeModuleHelpCatalogs(paths.bmadDir, manifestGen.agents);
@@ -701,13 +713,7 @@ class Installer {
       const moduleInfo = sourcePath ? await officialModules.getModuleInfo(sourcePath, moduleName, '') : null;
       const displayName = moduleInfo?.name || moduleName;
 
-      const externalResolution = officialModules.externalModuleManager.getResolution(moduleName);
-      let communityResolution = null;
-      if (!externalResolution) {
-        const { CommunityModuleManager } = require('../modules/community-manager');
-        communityResolution = new CommunityModuleManager().getResolution(moduleName);
-      }
-      const resolution = externalResolution || communityResolution;
+      const resolution = officialModules.externalModuleManager.getResolution(moduleName);
       const cachedResolution = CustomModuleManager._resolutionCache.get(moduleName);
       const versionInfo = await resolveModuleVersion(moduleName, {
         moduleSourcePath: sourcePath,
@@ -998,29 +1004,15 @@ class Installer {
   /**
    * Merge all module-help.csv files into a single bmad-help.csv.
    * Scans all installed modules for module-help.csv and merges them.
-   * Enriches agent info from the in-memory agent list produced by ManifestGenerator.
-   * Output is written to _bmad/_config/bmad-help.csv.
+   * Output preserves the source schema verbatim — see schema below.
    * @param {string} bmadDir - BMAD installation directory
-   * @param {Array<Object>} agentEntries - Agents collected from module.yaml (code, name, title, icon, module, ...)
+   * @param {Array<Object>} _agentEntries - Unused; retained for call-site compatibility
    */
-  async mergeModuleHelpCatalogs(bmadDir, agentEntries = []) {
+  async mergeModuleHelpCatalogs(bmadDir, _agentEntries = []) {
     const allRows = [];
-    const headerRow =
-      'module,phase,name,code,sequence,workflow-file,command,required,agent-name,agent-command,agent-display-name,agent-title,options,description,output-location,outputs';
-
-    // Build agent lookup from the in-memory list (agent code → command + display fields).
-    const agentInfo = new Map();
-    for (const agent of agentEntries) {
-      if (!agent || !agent.code) continue;
-      const agentCommand = agent.module ? `bmad:${agent.module}:agent:${agent.code}` : `bmad:agent:${agent.code}`;
-      const displayName = agent.name || agent.code;
-      const titleCombined = agent.icon && agent.title ? `${agent.icon} ${agent.title}` : agent.title || agent.code;
-      agentInfo.set(agent.code, {
-        command: agentCommand,
-        displayName,
-        title: titleCombined,
-      });
-    }
+    const headerRow = MODULE_HELP_CSV_HEADER;
+    const COLUMN_COUNT = 13;
+    const PHASE_INDEX = 7;
 
     // Get all installed module directories
     const entries = await fs.readdir(bmadDir, { withFileTypes: true });
@@ -1051,72 +1043,37 @@ class Installer {
           const content = await fs.readFile(helpFilePath, 'utf8');
           const lines = content.split('\n').filter((line) => line.trim() && !line.startsWith('#'));
 
+          let headerWarned = false;
           for (const line of lines) {
-            // Skip header row
+            // Header row: warn on drift from canonical schema, then skip.
+            // Data rows are loaded positionally regardless, so the warning
+            // is advisory — the maintainer should rename their columns.
             if (line.startsWith('module,')) {
+              if (!headerWarned && line.trim() !== headerRow) {
+                await prompts.log.warn(
+                  `  ${moduleName}/module-help.csv header does not match canonical schema. ` +
+                    `Expected: ${headerRow} | Found: ${line.trim()} | Data loaded positionally.`,
+                );
+                headerWarned = true;
+              }
               continue;
             }
 
             // Parse the line - handle quoted fields with commas
             const columns = this.parseCSVLine(line);
-            if (columns.length >= 12) {
-              // Map old schema to new schema
-              // Old: module,phase,name,code,sequence,workflow-file,command,required,agent,options,description,output-location,outputs
-              // New: module,phase,name,code,sequence,workflow-file,command,required,agent-name,agent-command,agent-display-name,agent-title,options,description,output-location,outputs
+            if (columns.length < COLUMN_COUNT - 1) continue;
 
-              const [
-                module,
-                phase,
-                name,
-                code,
-                sequence,
-                workflowFile,
-                command,
-                required,
-                agentName,
-                options,
-                description,
-                outputLocation,
-                outputs,
-              ] = columns;
+            // Pad short rows; truncate over-long rows
+            const padded = columns.slice(0, COLUMN_COUNT);
+            while (padded.length < COLUMN_COUNT) padded.push('');
 
-              // Pass through _meta rows as-is (module metadata, not a skill)
-              if (phase === '_meta') {
-                const finalModule = (!module || module.trim() === '') && moduleName !== 'core' ? moduleName : module || '';
-                const metaRow = [finalModule, '_meta', '', '', '', '', '', 'false', '', '', '', '', '', '', outputLocation || '', ''];
-                allRows.push(metaRow.map((c) => this.escapeCSVField(c)).join(','));
-                continue;
-              }
-
-              // If module column is empty, set it to this module's name (except for core which stays empty for universal tools)
-              const finalModule = (!module || module.trim() === '') && moduleName !== 'core' ? moduleName : module || '';
-
-              // Lookup agent info
-              const cleanAgentName = agentName ? agentName.trim() : '';
-              const agentData = agentInfo.get(cleanAgentName) || { command: '', displayName: '', title: '' };
-
-              // Build new row with agent info
-              const newRow = [
-                finalModule,
-                phase || '',
-                name || '',
-                code || '',
-                sequence || '',
-                workflowFile || '',
-                command || '',
-                required || 'false',
-                cleanAgentName,
-                agentData.command,
-                agentData.displayName,
-                agentData.title,
-                options || '',
-                description || '',
-                outputLocation || '',
-                outputs || '',
-              ];
-
-              allRows.push(newRow.map((c) => this.escapeCSVField(c)).join(','));
+            // If module column is empty, fill with this module's name
+            // (core stays empty so its rows render as universal tools)
+            if ((!padded[0] || padded[0].trim() === '') && moduleName !== 'core') {
+              padded[0] = moduleName;
             }
+
+            allRows.push(padded.map((c) => this.escapeCSVField(c)).join(','));
           }
 
           if (process.env.BMAD_VERBOSE_INSTALL === 'true') {
@@ -1128,44 +1085,34 @@ class Installer {
       }
     }
 
-    // Sort by module, then phase, then sequence
-    allRows.sort((a, b) => {
-      const colsA = this.parseCSVLine(a);
-      const colsB = this.parseCSVLine(b);
+    // Sort by module, then phase. Stable sort preserves authored order within a phase.
+    const decorated = allRows.map((row, index) => ({ row, index, cols: this.parseCSVLine(row) }));
+    decorated.sort((a, b) => {
+      const moduleA = (a.cols[0] || '').toLowerCase();
+      const moduleB = (b.cols[0] || '').toLowerCase();
+      if (moduleA !== moduleB) return moduleA.localeCompare(moduleB);
 
-      // Module comparison (empty module/universal tools come first)
-      const moduleA = (colsA[0] || '').toLowerCase();
-      const moduleB = (colsB[0] || '').toLowerCase();
-      if (moduleA !== moduleB) {
-        return moduleA.localeCompare(moduleB);
-      }
+      const phaseA = a.cols[PHASE_INDEX] || '';
+      const phaseB = b.cols[PHASE_INDEX] || '';
+      if (phaseA !== phaseB) return phaseA.localeCompare(phaseB);
 
-      // Phase comparison
-      const phaseA = colsA[1] || '';
-      const phaseB = colsB[1] || '';
-      if (phaseA !== phaseB) {
-        return phaseA.localeCompare(phaseB);
-      }
-
-      // Sequence comparison
-      const seqA = parseInt(colsA[4] || '0', 10);
-      const seqB = parseInt(colsB[4] || '0', 10);
-      return seqA - seqB;
+      return a.index - b.index;
     });
+    const sortedRows = decorated.map((d) => d.row);
 
     // Write merged catalog
     const outputDir = path.join(bmadDir, '_config');
     await fs.ensureDir(outputDir);
     const outputPath = path.join(outputDir, 'bmad-help.csv');
 
-    const mergedContent = [headerRow, ...allRows].join('\n');
+    const mergedContent = [headerRow, ...sortedRows].join('\n');
     await fs.writeFile(outputPath, mergedContent, 'utf8');
 
     // Track the installed file
     this.installedFiles.add(outputPath);
 
     if (process.env.BMAD_VERBOSE_INSTALL === 'true') {
-      await prompts.log.message(`  Generated bmad-help.csv: ${allRows.length} workflows`);
+      await prompts.log.message(`  Generated bmad-help.csv: ${sortedRows.length} workflows`);
     }
   }
 
@@ -1298,21 +1245,6 @@ class Installer {
       }
     }
 
-    // Add installed community modules to available modules
-    const { CommunityModuleManager } = require('../modules/community-manager');
-    const communityMgr = new CommunityModuleManager();
-    const communityModules = await communityMgr.listAll();
-    for (const communityModule of communityModules) {
-      if (installedModules.includes(communityModule.code) && !availableModules.some((m) => m.id === communityModule.code)) {
-        availableModules.push({
-          id: communityModule.code,
-          name: communityModule.displayName,
-          isExternal: true,
-          fromCommunity: true,
-        });
-      }
-    }
-
     // Add installed custom modules to available modules
     const { CustomModuleManager } = require('../modules/custom-module-manager');
     const customMgr = new CustomModuleManager();
@@ -1427,6 +1359,10 @@ class Installer {
       ides: configuredIdes,
       coreConfig: quickModules.collectedConfig.core,
       moduleConfigs: quickModules.collectedConfig,
+      // Forward `--set` overrides so the post-install patch step
+      // (`applySetOverrides`) runs at the end of quick-update too. The
+      // installer.install path applies them after writeCentralConfig.
+      setOverrides: config.setOverrides || {},
       actionType: 'install',
       _quickUpdate: true,
       _preserveModules: skippedModules,

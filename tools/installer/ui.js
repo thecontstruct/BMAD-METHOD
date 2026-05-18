@@ -2,6 +2,7 @@ const path = require('node:path');
 const os = require('node:os');
 const semver = require('semver');
 const fs = require('./fs-native');
+const installerPackageJson = require('../../package.json');
 const { CLIUtils } = require('./cli-utils');
 const { ExternalModuleManager } = require('./modules/external-manager');
 const { resolveModuleVersion } = require('./modules/version-resolver');
@@ -15,6 +16,7 @@ const {
 } = require('./modules/channel-plan');
 const channelResolver = require('./modules/channel-resolver');
 const prompts = require('./prompts');
+const { parseSetEntries } = require('./set-overrides');
 
 const manifest = new Manifest();
 
@@ -128,6 +130,24 @@ class UI {
       await prompts.log.warn(warning);
     }
 
+    // When the user launched the installer from a prerelease (npx bmad-method@next),
+    // mirror that intent for external modules: seed the global channel to 'next' so
+    // the module picker's version labels resolve from main HEAD (matching what
+    // actually gets installed) and the interactive channel gate skips — the user
+    // already declared "next" intent by typing @next. Explicit channel flags
+    // override this seed.
+    if (
+      semver.prerelease(installerPackageJson.version) !== null &&
+      !channelOptions.global &&
+      channelOptions.nextSet.size === 0 &&
+      channelOptions.pins.size === 0
+    ) {
+      channelOptions.global = 'next';
+      await prompts.log.info(
+        'Launched from a prerelease — installing all external modules from main HEAD (next channel). Pass --all-stable or --pin to override.',
+      );
+    }
+
     // Get directory from options or prompt
     let confirmedDirectory;
     if (options.directory) {
@@ -181,12 +201,15 @@ class UI {
         actionType = options.action;
         await prompts.log.info(`Using action from command-line: ${actionType}`);
       } else if (options.yes) {
-        // Default to quick-update if available, otherwise first available choice
+        // Default to quick-update if available, unless flags that require the
+        // full update path are present (e.g. --custom-source which re-clones
+        // modules at a new version — quick-update skips that entirely).
         if (choices.length === 0) {
           throw new Error('No valid actions available for this installation');
         }
         const hasQuickUpdate = choices.some((c) => c.value === 'quick-update');
-        actionType = hasQuickUpdate ? 'quick-update' : choices[0].value;
+        const needsFullUpdate = !!options.customSource;
+        actionType = hasQuickUpdate && !needsFullUpdate ? 'quick-update' : (choices.find((c) => c.value === 'update') || choices[0]).value;
         await prompts.log.info(`Non-interactive mode (--yes): defaulting to ${actionType}`);
       } else {
         actionType = await prompts.select({
@@ -222,8 +245,11 @@ class UI {
             .map((m) => m.trim())
             .filter(Boolean);
           await prompts.log.info(`Using modules from command-line: ${selectedModules.join(', ')}`);
-        } else if (options.customSource) {
-          // Custom source without --modules: start with empty list (core added below)
+        } else if (options.customSource && !options.yes) {
+          // Custom source without --modules or --yes: start with empty list
+          // (only custom source modules + core will be installed).
+          // When --yes is also set, fall through to the --yes branch so all
+          // installed modules are included alongside the custom source modules.
           selectedModules = [];
         } else if (options.yes) {
           selectedModules = await this.getDefaultModules(installedModuleIds);
@@ -262,7 +288,7 @@ class UI {
         // Get tool selection
         const toolSelection = await this.promptToolSelection(confirmedDirectory, options);
 
-        const moduleConfigs = await this.collectModuleConfigs(confirmedDirectory, selectedModules, {
+        const { moduleConfigs, setOverrides } = await this.collectModuleConfigs(confirmedDirectory, selectedModules, {
           ...options,
           channelOptions,
         });
@@ -288,6 +314,7 @@ class UI {
           skipIde: toolSelection.skipIde,
           coreConfig: moduleConfigs.core || {},
           moduleConfigs: moduleConfigs,
+          setOverrides,
           skipPrompts: options.yes || false,
           channelOptions,
         };
@@ -332,12 +359,14 @@ class UI {
 
     // Interactive channel gate: "Ready to install (all stable)? [Y/n]"
     // Only shown for fresh installs with no channel flags and an external module
-    // selected. Non-interactive installs skip this and fall through to the
-    // registry default (stable) or whatever flags were supplied.
+    // selected. Skipped for prerelease launches because channelOptions.global
+    // was already seeded to 'next' upstream. Non-interactive installs skip this
+    // and fall through to the registry default (stable) or whatever flags were
+    // supplied.
     await this._interactiveChannelGate({ options, channelOptions, selectedModules });
 
     let toolSelection = await this.promptToolSelection(confirmedDirectory, options);
-    const moduleConfigs = await this.collectModuleConfigs(confirmedDirectory, selectedModules, {
+    const { moduleConfigs, setOverrides } = await this.collectModuleConfigs(confirmedDirectory, selectedModules, {
       ...options,
       channelOptions,
     });
@@ -363,6 +392,7 @@ class UI {
       skipIde: toolSelection.skipIde,
       coreConfig: moduleConfigs.core || {},
       moduleConfigs: moduleConfigs,
+      setOverrides,
       skipPrompts: options.yes || false,
       channelOptions,
     };
@@ -377,6 +407,37 @@ class UI {
    * @param {Object} options - Command-line options
    * @returns {Object} Tool configuration
    */
+  _parseToolsFlag(toolsArg, allKnownValues) {
+    const selectedIdes = toolsArg
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (selectedIdes.length === 0) {
+      const err = new Error(
+        '--tools was passed empty. Provide at least one tool ID (e.g. --tools claude-code) or run with --list-tools to see valid IDs.',
+      );
+      err.expected = true;
+      throw err;
+    }
+
+    const unknown = selectedIdes.filter((id) => !allKnownValues.has(id));
+    if (unknown.length > 0) {
+      const err = new Error(
+        [
+          `Unknown tool ID${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`,
+          '',
+          'Run with --list-tools to see all valid IDs.',
+          'Common: claude-code, cursor, copilot, windsurf, cline',
+        ].join('\n'),
+      );
+      err.expected = true;
+      throw err;
+    }
+
+    return selectedIdes;
+  }
+
   async promptToolSelection(projectDir, options = {}) {
     const { ExistingInstall } = require('./core/existing-install');
     const { Installer } = require('./core/installer');
@@ -411,15 +472,10 @@ class UI {
       const allTools = [...preferredIdes, ...otherIdes];
 
       // Non-interactive: handle --tools and --yes flags before interactive prompt
-      if (options.tools) {
-        if (options.tools.toLowerCase() === 'none') {
-          await prompts.log.info('Skipping tool configuration (--tools none)');
-          return { ides: [], skipIde: true };
-        }
-        const selectedIdes = options.tools
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean);
+      // Use !== undefined so an explicit --tools "" falls through to _parseToolsFlag and
+      // gets a specific "passed empty" error instead of being silently ignored.
+      if (options.tools !== undefined) {
+        const selectedIdes = this._parseToolsFlag(options.tools, allKnownValues);
         await prompts.log.info(`Using tools from command-line: ${selectedIdes.join(', ')}`);
         await this.displaySelectedTools(selectedIdes, preferredIdes, allTools);
         return { ides: selectedIdes, skipIde: false };
@@ -495,21 +551,13 @@ class UI {
 
     let selectedIdes = [];
 
-    // Check if tools are provided via command-line
-    if (options.tools) {
-      // Check for explicit "none" value to skip tool installation
-      if (options.tools.toLowerCase() === 'none') {
-        await prompts.log.info('Skipping tool configuration (--tools none)');
-        return { ides: [], skipIde: true };
-      } else {
-        selectedIdes = options.tools
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean);
-        await prompts.log.info(`Using tools from command-line: ${selectedIdes.join(', ')}`);
-        await this.displaySelectedTools(selectedIdes, preferredIdes, allTools);
-        return { ides: selectedIdes, skipIde: false };
-      }
+    // Check if tools are provided via command-line.
+    // Use !== undefined so an explicit --tools "" still hits _parseToolsFlag's empty-value error.
+    if (options.tools !== undefined) {
+      selectedIdes = this._parseToolsFlag(options.tools, allKnownValues);
+      await prompts.log.info(`Using tools from command-line: ${selectedIdes.join(', ')}`);
+      await this.displaySelectedTools(selectedIdes, preferredIdes, allTools);
+      return { ides: selectedIdes, skipIde: false };
     } else if (options.yes) {
       // If --yes flag is set, skip tool prompt and use previously configured tools or empty
       if (configuredIdes.length > 0) {
@@ -517,8 +565,18 @@ class UI {
         await this.displaySelectedTools(configuredIdes, preferredIdes, allTools);
         return { ides: configuredIdes, skipIde: false };
       } else {
-        await prompts.log.info('Skipping tool configuration (--yes flag, no previous tools)');
-        return { ides: [], skipIde: true };
+        const err = new Error(
+          [
+            '--tools is required for non-interactive install (--yes / -y) when no tools are previously configured.',
+            '',
+            'Common: claude-code, cursor, copilot, windsurf, cline',
+            'See all supported tools: bmad-method install --list-tools',
+            '',
+            'Example: bmad-method install --modules bmm --tools claude-code -y',
+          ].join('\n'),
+        );
+        err.expected = true;
+        throw err;
       }
     }
 
@@ -654,6 +712,33 @@ class UI {
    */
   async collectModuleConfigs(directory, modules, options = {}) {
     const { OfficialModules } = require('./modules/official-modules');
+
+    // Parse --set up front purely to surface user-error before the install
+    // burns time on the network / filesystem. The actual application happens
+    // in installer.install() as a post-write TOML patch — see
+    // `tools/installer/set-overrides.js`. We also warn about overrides
+    // targeting modules the user didn't include, since those will silently
+    // miss the file the patch step looks for.
+    let setOverrides = {};
+    try {
+      setOverrides = parseSetEntries(options.set || []);
+    } catch (error) {
+      // install.js validated already; rethrow as-is for the user.
+      throw error;
+    }
+    // Drop overrides for modules that aren't in the install set so the
+    // post-install patch step doesn't create orphan sections in config.toml
+    // for modules that were never installed.
+    const selectedModuleSet = new Set(['core', ...modules]);
+    for (const moduleCode of Object.keys(setOverrides)) {
+      if (!selectedModuleSet.has(moduleCode)) {
+        await prompts.log.warn(
+          `--set ${moduleCode}.* — module '${moduleCode}' is not in the install set; values will be ignored. Add it to --modules to apply.`,
+        );
+        delete setOverrides[moduleCode];
+      }
+    }
+
     const configCollector = new OfficialModules({ channelOptions: options.channelOptions });
 
     // Seed core config from CLI options if provided
@@ -703,6 +788,9 @@ class UI {
         const defaultUsername = safeUsername.charAt(0).toUpperCase() + safeUsername.slice(1);
         configCollector.collectedConfig.core = {
           user_name: defaultUsername,
+          // {directory_name} default per src/core-skills/module.yaml — matches what the
+          // interactive flow resolves via buildQuestion()'s {directory_name} placeholder.
+          project_name: path.basename(directory),
           communication_language: 'English',
           document_output_language: 'English',
           output_folder: '_bmad-output',
@@ -716,7 +804,7 @@ class UI {
       skipPrompts: options.yes || false,
     });
 
-    return configCollector.collectedConfig;
+    return { moduleConfigs: configCollector.collectedConfig, setOverrides };
   }
 
   /**
@@ -730,32 +818,18 @@ class UI {
     // Phase 1: Official modules
     const officialSelected = await this._selectOfficialModules(installedModuleIds, installedModuleVersions, channelOptions);
 
-    // Determine which installed modules are NOT official (community or custom).
-    // These must be preserved even if the user declines to browse community/custom.
-    const officialCodes = new Set(officialSelected);
+    // Identify installed modules that aren't official (previously installed
+    // community modules or custom-source modules). Preserve them on update;
+    // they can be managed via --custom-source, uninstall, or a dedicated installer.
     const externalManager = new ExternalModuleManager();
     const registryModules = await externalManager.listAvailable();
     const officialRegistryCodes = new Set(['core', 'bmm', ...registryModules.map((m) => m.code)]);
     const installedNonOfficial = [...installedModuleIds].filter((id) => !officialRegistryCodes.has(id));
 
-    // Phase 2: Community modules (category drill-down)
-    // Returns { codes, didBrowse } so we know if the user entered the flow
-    const communityResult = await this._browseCommunityModules(installedModuleIds);
-
-    // Phase 3: Custom URL modules
+    // Phase 2: Custom URL modules
     const customSelected = await this._addCustomUrlModules(installedModuleIds);
 
-    // Merge all selections
-    const allSelected = new Set([...officialSelected, ...communityResult.codes, ...customSelected]);
-
-    // Auto-include installed non-official modules that the user didn't get
-    // a chance to manage (they declined to browse). If they did browse,
-    // trust their selections - they could have deselected intentionally.
-    if (!communityResult.didBrowse) {
-      for (const code of installedNonOfficial) {
-        allSelected.add(code);
-      }
-    }
+    const allSelected = new Set([...officialSelected, ...customSelected, ...installedNonOfficial]);
 
     return [...allSelected];
   }
@@ -867,173 +941,13 @@ class UI {
   }
 
   /**
-   * Browse and select community modules using category drill-down.
-   * Featured/promoted modules appear at the top.
-   * @param {Set} installedModuleIds - Currently installed module IDs
-   * @returns {Object} { codes: string[], didBrowse: boolean }
-   */
-  async _browseCommunityModules(installedModuleIds = new Set()) {
-    const browseCommunity = await prompts.confirm({
-      message: 'Would you like to browse community modules?',
-      default: false,
-    });
-    if (!browseCommunity) return { codes: [], didBrowse: false };
-
-    const { CommunityModuleManager } = require('./modules/community-manager');
-    const communityMgr = new CommunityModuleManager();
-
-    const s = await prompts.spinner();
-    s.start('Loading community module catalog...');
-
-    let categories, featured, allCommunity;
-    try {
-      [categories, featured, allCommunity] = await Promise.all([
-        communityMgr.getCategoryList(),
-        communityMgr.listFeatured(),
-        communityMgr.listAll(),
-      ]);
-      s.stop(`Community catalog loaded (${allCommunity.length} modules)`);
-    } catch (error) {
-      s.error('Failed to load community catalog');
-      await prompts.log.warn(`  ${error.message}`);
-      return { codes: [], didBrowse: false };
-    }
-
-    if (allCommunity.length === 0) {
-      await prompts.log.info('No community modules are currently available.');
-      return { codes: [], didBrowse: false };
-    }
-
-    const selectedCodes = new Set();
-    let browsing = true;
-
-    while (browsing) {
-      const categoryChoices = [];
-
-      // Featured section at top
-      if (featured.length > 0) {
-        categoryChoices.push({
-          value: '__featured__',
-          label: `\u2605 Featured (${featured.length} module${featured.length === 1 ? '' : 's'})`,
-        });
-      }
-
-      // Categories with module counts
-      for (const cat of categories) {
-        categoryChoices.push({
-          value: cat.slug,
-          label: `${cat.name} (${cat.moduleCount} module${cat.moduleCount === 1 ? '' : 's'})`,
-        });
-      }
-
-      // Special actions at bottom
-      categoryChoices.push(
-        { value: '__all__', label: '\u25CE View all community modules' },
-        { value: '__search__', label: '\u25CE Search by keyword' },
-        { value: '__done__', label: '\u2713 Done browsing' },
-      );
-
-      const selectedCount = selectedCodes.size;
-      const categoryChoice = await prompts.select({
-        message: `Browse community modules${selectedCount > 0 ? ` (${selectedCount} selected)` : ''}:`,
-        choices: categoryChoices,
-      });
-
-      if (categoryChoice === '__done__') {
-        browsing = false;
-        continue;
-      }
-
-      let modulesToShow;
-      switch (categoryChoice) {
-        case '__featured__': {
-          modulesToShow = featured;
-
-          break;
-        }
-        case '__all__': {
-          modulesToShow = allCommunity;
-
-          break;
-        }
-        case '__search__': {
-          const query = await prompts.text({
-            message: 'Search community modules:',
-            placeholder: 'e.g., design, testing, game',
-          });
-          if (!query || query.trim() === '') continue;
-          modulesToShow = await communityMgr.searchByKeyword(query.trim());
-          if (modulesToShow.length === 0) {
-            await prompts.log.warn('No matching modules found.');
-            continue;
-          }
-
-          break;
-        }
-        default: {
-          modulesToShow = await communityMgr.listByCategory(categoryChoice);
-        }
-      }
-
-      // Build options for autocompleteMultiselect
-      const trustBadge = (tier) => {
-        if (tier === 'bmad-certified') return '\u2713';
-        if (tier === 'community-reviewed') return '\u25CB';
-        return '\u26A0';
-      };
-
-      const options = modulesToShow.map((mod) => {
-        const versionStr = mod.version ? ` (v${mod.version})` : '';
-        const badge = trustBadge(mod.trustTier);
-        return {
-          label: `${mod.displayName}${versionStr} [${badge}]`,
-          value: mod.code,
-          hint: mod.description,
-        };
-      });
-
-      // Pre-check modules that are already selected or installed
-      const initialValues = modulesToShow.filter((m) => selectedCodes.has(m.code) || installedModuleIds.has(m.code)).map((m) => m.code);
-
-      const selected = await prompts.autocompleteMultiselect({
-        message: 'Select community modules:',
-        options,
-        initialValues: initialValues.length > 0 ? initialValues : undefined,
-        required: false,
-        maxItems: Math.min(options.length, 10),
-      });
-
-      // Update accumulated selections: sync with what user selected in this view
-      const shownCodes = new Set(modulesToShow.map((m) => m.code));
-      for (const code of shownCodes) {
-        if (selected && selected.includes(code)) {
-          selectedCodes.add(code);
-        } else {
-          selectedCodes.delete(code);
-        }
-      }
-    }
-
-    if (selectedCodes.size > 0) {
-      const moduleLines = [];
-      for (const code of selectedCodes) {
-        const mod = await communityMgr.getModuleByCode(code);
-        moduleLines.push(`  \u2022 ${mod?.displayName || code}`);
-      }
-      await prompts.log.message('Selected community modules:\n' + moduleLines.join('\n'));
-    }
-
-    return { codes: [...selectedCodes], didBrowse: true };
-  }
-
-  /**
    * Prompt user to install modules from custom sources (Git URLs or local paths).
    * @param {Set} installedModuleIds - Currently installed module IDs
    * @returns {Array} Selected custom module code strings
    */
   async _addCustomUrlModules(installedModuleIds = new Set()) {
     const addCustom = await prompts.confirm({
-      message: 'Would you like to install from a custom source (Git URL or local path)?',
+      message: 'Do you want to install custom or community modules (Git URL or local path)?',
       default: false,
     });
     if (!addCustom) return [];
@@ -1348,7 +1262,7 @@ class UI {
    */
   async promptForDirectory() {
     // Use sync validation because @clack/prompts doesn't support async validate
-    const directory = await prompts.text({
+    const directory = await prompts.directory({
       message: 'Installation directory:',
       default: process.cwd(),
       placeholder: process.cwd(),
@@ -1783,7 +1697,9 @@ class UI {
    *
    * Skipped when:
    *   - running non-interactively (--yes)
-   *   - the user already passed channel flags (--channel / --pin / --next)
+   *   - the user already passed channel flags (--channel / --pin / --next), OR
+   *     the installer was launched from a prerelease (which seeds
+   *     channelOptions.global = 'next' upstream in promptInstall)
    *   - no externals/community modules are selected
    *
    * Mutates channelOptions.pins and channelOptions.nextSet to reflect picker choices.
@@ -1795,19 +1711,14 @@ class UI {
     const haveFlagIntent = channelOptions.global || channelOptions.nextSet.size > 0 || channelOptions.pins.size > 0;
     if (haveFlagIntent) return;
 
-    // Figure out which selected modules actually get a channel (externals +
-    // community modules). Bundled core/bmm and custom modules skip the picker.
+    // Figure out which selected modules actually get a channel (externals only).
+    // Bundled core/bmm and custom modules skip the picker.
     const externalManager = new ExternalModuleManager();
     const externals = await externalManager.listAvailable();
     const externalByCode = new Map(externals.map((m) => [m.code, m]));
 
-    const { CommunityModuleManager } = require('./modules/community-manager');
-    const communityMgr = new CommunityModuleManager();
-    const community = await communityMgr.listAll();
-    const communityByCode = new Map(community.map((m) => [m.code, m]));
-
     const channelSelectable = selectedModules.filter((code) => {
-      const info = externalByCode.get(code) || communityByCode.get(code);
+      const info = externalByCode.get(code);
       return info && !info.builtIn;
     });
     if (channelSelectable.length === 0) return;
@@ -1822,7 +1733,7 @@ class UI {
     const { fetchStableTags, parseGitHubRepo } = require('./modules/channel-resolver');
 
     for (const code of channelSelectable) {
-      const info = externalByCode.get(code) || communityByCode.get(code);
+      const info = externalByCode.get(code);
       const repoUrl = info.url;
 
       // Try to pre-resolve the top stable tag so we can surface it in the picker.
@@ -1897,11 +1808,6 @@ class UI {
     const externals = await externalManager.listAvailable();
     const externalByCode = new Map(externals.map((m) => [m.code, m]));
 
-    const { CommunityModuleManager } = require('./modules/community-manager');
-    const communityMgr = new CommunityModuleManager();
-    const community = await communityMgr.listAll();
-    const communityByCode = new Map(community.map((m) => [m.code, m]));
-
     const { fetchStableTags, classifyUpgrade, releaseNotesUrl } = require('./modules/channel-resolver');
     const { parseGitHubRepo } = require('./modules/channel-resolver');
 
@@ -1913,7 +1819,7 @@ class UI {
       const existingWithChannel = selectedModules.filter((code) => {
         const prev = existingByName.get(code);
         if (!prev) return false;
-        const info = externalByCode.get(code) || communityByCode.get(code);
+        const info = externalByCode.get(code);
         return info && !info.builtIn;
       });
       if (existingWithChannel.length > 0) {
@@ -1928,7 +1834,7 @@ class UI {
       const prev = existingByName.get(code);
       if (!prev) continue;
 
-      const info = externalByCode.get(code) || communityByCode.get(code);
+      const info = externalByCode.get(code);
       if (!info) continue;
       // Bundled modules (core/bmm) ship with the installer binary itself —
       // their version is stapled to the CLI version, not a git tag. Skip

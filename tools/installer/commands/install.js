@@ -18,7 +18,18 @@ module.exports = {
     ['--modules <modules>', 'Comma-separated list of module IDs to install (e.g., "bmm,bmb")'],
     [
       '--tools <tools>',
-      'Comma-separated list of tool/IDE IDs to configure (e.g., "claude-code,cursor"). Use "none" to skip tool configuration.',
+      'Comma-separated list of tool/IDE IDs to configure (e.g., "claude-code,cursor"). Required for fresh non-interactive (--yes) installs. Run with --list-tools to see all valid IDs.',
+    ],
+    ['--list-tools', 'Print all supported tool/IDE IDs (with target directories) and exit.'],
+    [
+      '--set <spec>',
+      'Set a module config option non-interactively. Spec format: <module>.<key>=<value> (e.g. bmm.project_knowledge=research). Repeatable. Run --list-options to see available keys.',
+      (value, prev) => [...(prev || []), value],
+      [],
+    ],
+    [
+      '--list-options [module]',
+      'List available --set keys for all locally-known official modules, or for a single module by code, then exit.',
     ],
     ['--action <type>', 'Action type for existing installations: install, update, or quick-update'],
     ['--user-name <name>', 'Name for agents to use (default: system username)'],
@@ -43,16 +54,56 @@ module.exports = {
   ],
   action: async (options) => {
     try {
+      if (options.listTools) {
+        const { formatPlatformList } = require('../ide/platform-codes');
+        process.stdout.write((await formatPlatformList()) + '\n');
+        process.exit(0);
+      }
+
+      if (options.listOptions !== undefined) {
+        const { formatOptionsList } = require('../list-options');
+        const moduleArg = options.listOptions === true ? null : options.listOptions;
+        const { text, ok } = await formatOptionsList(moduleArg);
+        const stream = ok ? process.stdout : process.stderr;
+        // process.exit() forces immediate termination and can truncate the
+        // buffered write when stdout/stderr is piped or captured by CI. Wait
+        // for the write to flush, then set process.exitCode and return so the
+        // event loop drains naturally. Non-zero exit when a single-module
+        // lookup misses so a CI typo like `--list-options bmn` doesn't look
+        // successful in scripts.
+        await new Promise((resolve, reject) => {
+          stream.write(text + '\n', (error) => (error ? reject(error) : resolve()));
+        });
+        process.exitCode = ok ? 0 : 1;
+        return;
+      }
+
       // Set debug flag as environment variable for all components
       if (options.debug) {
         process.env.BMAD_DEBUG_MANIFEST = 'true';
         await prompts.log.info('Debug mode enabled');
       }
 
+      // Validate --set syntax up-front so malformed entries fail fast,
+      // before we touch the network or filesystem. Parsed entries are
+      // re-derived inside ui.js where overrides are seeded.
+      if (options.set && options.set.length > 0) {
+        const { parseSetEntries } = require('../set-overrides');
+        try {
+          parseSetEntries(options.set);
+        } catch (error) {
+          await prompts.log.error(error.message);
+          process.exit(1);
+        }
+      }
+
       // AC 4/5: detect existing bmad.lock before prompting; route to upgrade if found.
       const projectRoot = options.directory ? path.resolve(options.directory) : process.cwd();
       const lockfilePath = path.join(projectRoot, '_bmad/_config/bmad.lock');
-      const lockfileExists = await fs.access(lockfilePath).then(() => true).catch(() => false);
+      const lockfileExists = await fs
+        .access(lockfilePath)
+        .then(() => true)
+        .catch(() => false);
 
       if (lockfileExists) {
         // Prefer installed upgrade.py; fall back to source path for dev environments.
@@ -66,9 +117,7 @@ module.exports = {
           await prompts.log.info('No drift detected. Proceeding with install...');
         } else {
           const { total_skills_with_drift: n, prose_fragment_changes: m, toml_default_changes: p, glob_changes: q } = driftReport.summary;
-          await prompts.log.warn(
-            `Drift detected in ${n} skill(s): ${m} prose fragment(s), ${p} TOML field(s), ${q} glob input(s).`
-          );
+          await prompts.log.warn(`Drift detected in ${n} skill(s): ${m} prose fragment(s), ${p} TOML field(s), ${q} glob input(s).`);
 
           let proceed = options.yes;
           if (!proceed) {
@@ -95,8 +144,13 @@ module.exports = {
         process.exit(0);
       }
 
-      // Handle quick update separately
+      // Handle quick update separately. --set is a post-install TOML patch so
+      // it works the same way for quick-update as for a regular install — the
+      // installer runs, then `applySetOverrides` patches the central config
+      // files. Pass the parsed overrides through.
       if (config.actionType === 'quick-update') {
+        const { parseSetEntries } = require('../set-overrides');
+        config.setOverrides = parseSetEntries(options.set || []);
         const result = await installer.quickUpdate(config);
         await prompts.log.success('Quick update complete!');
         await prompts.log.info(`Updated ${result.moduleCount} modules with preserved settings (${result.modules.join(', ')})`);
@@ -122,7 +176,7 @@ module.exports = {
         } else {
           await prompts.log.error(`Installation failed: ${error.message}`);
         }
-        if (error.stack) {
+        if (error.stack && !error.expected) {
           await prompts.log.message(error.stack);
         }
       } catch {

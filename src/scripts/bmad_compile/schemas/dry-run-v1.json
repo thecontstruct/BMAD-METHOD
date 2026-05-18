@@ -6,7 +6,7 @@
   "type": "object",
   "required": ["schema_version", "drift", "summary"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": { "type": "integer", "const": 1 },
     "drift": {
       "type": "array",
       "items": {
@@ -21,18 +21,18 @@
           "variable_provenance_shifts"
         ],
         "properties": {
-          "skill": {"type": "string"},
+          "skill": { "type": "string" },
           "prose_fragment_changes": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["path", "old_hash", "new_hash", "tier"],
               "properties": {
-                "path":               {"type": "string"},
-                "old_hash":           {"type": "string"},
-                "new_hash":           {"type": ["string", "null"]},
-                "user_override_hash": {"type": ["string", "null"]},
-                "tier":               {"type": "string"}
+                "path": { "type": "string" },
+                "old_hash": { "type": "string" },
+                "new_hash": { "type": ["string", "null"] },
+                "user_override_hash": { "type": ["string", "null"] },
+                "tier": { "type": "string" }
               }
             }
           },
@@ -42,10 +42,10 @@
               "type": "object",
               "required": ["key", "old_hash", "new_value"],
               "properties": {
-                "key":                 {"type": "string"},
-                "old_hash":            {"type": "string"},
-                "new_value":           {"type": "string"},
-                "user_override_value": {"type": ["string", "null"]}
+                "key": { "type": "string" },
+                "old_hash": { "type": "string" },
+                "new_value": { "type": "string" },
+                "user_override_value": { "type": ["string", "null"] }
               }
             }
           },
@@ -55,9 +55,9 @@
               "type": "object",
               "required": ["path", "override_hash", "reason"],
               "properties": {
-                "path":          {"type": "string"},
-                "override_hash": {"type": "string"},
-                "reason":        {"type": "string"}
+                "path": { "type": "string" },
+                "override_hash": { "type": "string" },
+                "reason": { "type": "string" }
               }
             }
           },
@@ -67,9 +67,9 @@
               "type": "object",
               "required": ["key", "new_value", "source"],
               "properties": {
-                "key":       {"type": "string"},
-                "new_value": {"type": "string"},
-                "source":    {"type": "string"}
+                "key": { "type": "string" },
+                "new_value": { "type": "string" },
+                "source": { "type": "string" }
               }
             }
           },
@@ -77,18 +77,14 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "toml_key", "pattern",
-                "old_match_set_hash", "new_match_set_hash",
-                "added_matches", "removed_matches"
-              ],
+              "required": ["toml_key", "pattern", "old_match_set_hash", "new_match_set_hash", "added_matches", "removed_matches"],
               "properties": {
-                "toml_key":           {"type": "string"},
-                "pattern":            {"type": "string"},
-                "old_match_set_hash": {"type": ["string", "null"]},
-                "new_match_set_hash": {"type": ["string", "null"]},
-                "added_matches":      {"type": "array", "items": {"type": "string"}},
-                "removed_matches":    {"type": "array", "items": {"type": "string"}}
+                "toml_key": { "type": "string" },
+                "pattern": { "type": "string" },
+                "old_match_set_hash": { "type": ["string", "null"] },
+                "new_match_set_hash": { "type": ["string", "null"] },
+                "added_matches": { "type": "array", "items": { "type": "string" } },
+                "removed_matches": { "type": "array", "items": { "type": "string" } }
               }
             }
           },
@@ -98,11 +94,11 @@
               "type": "object",
               "required": ["name", "old_source", "new_source"],
               "properties": {
-                "name":           {"type": "string"},
-                "old_source":     {"type": "string"},
-                "new_source":     {"type": "string"},
-                "old_toml_layer": {"type": ["string", "null"]},
-                "new_toml_layer": {"type": ["string", "null"]}
+                "name": { "type": "string" },
+                "old_source": { "type": "string" },
+                "new_source": { "type": "string" },
+                "old_toml_layer": { "type": ["string", "null"] },
+                "new_toml_layer": { "type": ["string", "null"] }
               }
             }
           }
@@ -121,13 +117,13 @@
         "variable_provenance_shifts"
       ],
       "properties": {
-        "total_skills_with_drift":  {"type": "integer"},
-        "prose_fragment_changes":   {"type": "integer"},
-        "toml_default_changes":     {"type": "integer"},
-        "orphaned_overrides":       {"type": "integer"},
-        "new_defaults":             {"type": "integer"},
-        "glob_changes":             {"type": "integer"},
-        "variable_provenance_shifts": {"type": "integer"}
+        "total_skills_with_drift": { "type": "integer" },
+        "prose_fragment_changes": { "type": "integer" },
+        "toml_default_changes": { "type": "integer" },
+        "orphaned_overrides": { "type": "integer" },
+        "new_defaults": { "type": "integer" },
+        "glob_changes": { "type": "integer" },
+        "variable_provenance_shifts": { "type": "integer" }
       }
     }
   }

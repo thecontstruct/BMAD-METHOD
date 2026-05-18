@@ -6,20 +6,20 @@
   "type": "object",
   "required": ["schema_version", "fragments", "variables", "toml_fields"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": { "type": "integer", "const": 1 },
     "fragments": {
       "type": "array",
       "items": {
         "type": "object",
         "required": ["src", "resolved_from", "hash"],
         "properties": {
-          "src":           {"type": "string"},
-          "resolved_from": {"type": "string"},
-          "hash":          {"type": "string"},
-          "base_hash":     {"type": "string"},
-          "override_hash": {"type": "string"},
-          "override_path": {"type": "string"},
-          "variant":       {"type": "string"}
+          "src": { "type": "string" },
+          "resolved_from": { "type": "string" },
+          "hash": { "type": "string" },
+          "base_hash": { "type": "string" },
+          "override_hash": { "type": "string" },
+          "override_path": { "type": "string" },
+          "variant": { "type": "string" }
         }
       }
     },
@@ -29,13 +29,13 @@
         "type": "object",
         "required": ["name", "source", "resolved_at", "value"],
         "properties": {
-          "name":               {"type": "string"},
-          "source":             {"type": "string"},
-          "resolved_at":        {"type": "string", "const": "compile-time"},
-          "value":              {"type": "string"},
-          "contributing_paths": {"type": "array", "items": {"type": "string"}},
-          "source_path":        {"type": "string"},
-          "toml_layer":         {"type": "string"}
+          "name": { "type": "string" },
+          "source": { "type": "string" },
+          "resolved_at": { "type": "string", "const": "compile-time" },
+          "value": { "type": "string" },
+          "contributing_paths": { "type": "array", "items": { "type": "string" } },
+          "source_path": { "type": "string" },
+          "toml_layer": { "type": "string" }
         }
       }
     },
@@ -45,7 +45,7 @@
         "type": "object",
         "required": ["path", "default_value", "current_value", "layers"],
         "properties": {
-          "path":          {"type": "string"},
+          "path": { "type": "string" },
           "default_value": {},
           "current_value": {},
           "layers": {
@@ -55,7 +55,7 @@
               "required": ["value", "hash"],
               "properties": {
                 "value": {},
-                "hash":  {"type": "string"}
+                "hash": { "type": "string" }
               }
             }
           }
@@ -68,20 +68,20 @@
         "type": "object",
         "required": ["toml_key", "pattern", "matches"],
         "properties": {
-          "toml_key":                  {"type": "string"},
-          "pattern":                   {"type": "string"},
-          "resolved_pattern":          {"type": ["string", "null"]},
-          "match_set_hash":            {"type": ["string", "null"]},
-          "toml_layer":                {"type": "string"},
-          "contributing_source_paths": {"type": "array", "items": {"type": "string"}},
+          "toml_key": { "type": "string" },
+          "pattern": { "type": "string" },
+          "resolved_pattern": { "type": ["string", "null"] },
+          "match_set_hash": { "type": ["string", "null"] },
+          "toml_layer": { "type": "string" },
+          "contributing_source_paths": { "type": "array", "items": { "type": "string" } },
           "matches": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["path", "hash"],
               "properties": {
-                "path": {"type": "string"},
-                "hash": {"type": "string"}
+                "path": { "type": "string" },
+                "hash": { "type": "string" }
               }
             }
           }

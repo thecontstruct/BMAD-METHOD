@@ -231,14 +231,6 @@ class OfficialModules {
       return externalSource;
     }
 
-    // Check community modules (pass channelOptions for --next/--pin overrides)
-    const { CommunityModuleManager } = require('./community-manager');
-    const communityMgr = new CommunityModuleManager();
-    const communitySource = await communityMgr.findModuleSource(moduleCode, options);
-    if (communitySource) {
-      return communitySource;
-    }
-
     // Check custom modules (from user-provided URLs, already cloned to cache)
     const { CustomModuleManager } = require('./custom-module-manager');
     const customMgr = new CustomModuleManager();
@@ -295,14 +287,9 @@ class OfficialModules {
     const manifestObj = new Manifest();
     const versionInfo = await manifestObj.getModuleVersionInfo(moduleName, bmadDir, sourcePath);
 
-    // Pick up channel resolution recorded by whichever manager did the clone.
-    const externalResolution = this.externalModuleManager.getResolution(moduleName);
-    let communityResolution = null;
-    if (!externalResolution) {
-      const { CommunityModuleManager } = require('./community-manager');
-      communityResolution = new CommunityModuleManager().getResolution(moduleName);
-    }
-    const resolution = externalResolution || communityResolution;
+    // Pick up channel resolution recorded by the external manager (the only
+    // manager that does pre-clone resolution now that community is retired).
+    const resolution = this.externalModuleManager.getResolution(moduleName);
 
     await manifestObj.addModule(bmadDir, moduleName, {
       version: resolution?.version || versionInfo.version,
@@ -311,8 +298,6 @@ class OfficialModules {
       repoUrl: versionInfo.repoUrl,
       channel: resolution?.channel,
       sha: resolution?.sha,
-      registryApprovedTag: communityResolution?.registryApprovedTag,
-      registryApprovedSha: communityResolution?.registryApprovedSha,
     });
 
     return { success: true, module: moduleName, path: targetPath, versionInfo };
@@ -360,10 +345,8 @@ class OfficialModules {
       await this.createModuleDirectories(resolved.code, bmadDir, options);
     }
 
-    // Update manifest. For custom modules, derive channel from the git ref:
-    //   cloneRef present → pinned at that ref
-    //   cloneRef absent  → next (main HEAD)
-    //   local path       → no channel concept
+    // Update manifest. For custom-source installs we derive channel from the
+    // cloneRef (present → pinned, absent → next; local paths have no channel).
     const { Manifest } = require('../core/manifest');
     const manifestObj = new Manifest();
 
@@ -386,10 +369,12 @@ class OfficialModules {
       success: true,
       module: resolved.code,
       path: targetPath,
-      // Match the manifestEntry.version expression above so downstream summary
-      // lines show the cloned ref (tag or 'main') instead of the on-disk
-      // package.json version for git-backed custom installs.
-      versionInfo: { version: resolved.cloneRef || (hasGitClone ? 'main' : resolved.version || '') },
+      // Mirror the manifestEntry.version precedence above so downstream summary
+      // lines show the same string we just wrote to disk (custom git-backed
+      // installs show the cloned ref or 'main').
+      versionInfo: {
+        version: resolved.cloneRef || (hasGitClone ? 'main' : resolved.version || ''),
+      },
     };
   }
 
@@ -879,7 +864,10 @@ class OfficialModules {
           try {
             const content = await fs.readFile(moduleConfigPath, 'utf8');
             const moduleConfig = yaml.parse(content);
-            if (moduleConfig) {
+            // Only keep plain object parses. A corrupt config.yaml that parses
+            // to a scalar or array would crash later code that does `key in cfg`
+            // / `Object.keys(cfg)`; treat it the same as a parse error.
+            if (moduleConfig && typeof moduleConfig === 'object' && !Array.isArray(moduleConfig)) {
               this._existingConfig[entry.name] = moduleConfig;
               foundAny = true;
             }
@@ -890,7 +878,56 @@ class OfficialModules {
       }
     }
 
+    if (foundAny) {
+      await this._hoistCoreKeysFromLegacyModuleConfigs();
+    }
+
     return foundAny;
+  }
+
+  /**
+   * Migrate prior answers when a key has moved from a non-core module to core
+   * (e.g. project_name moving from bmm to core in #2279). Without this, the
+   * partition logic in writeCentralConfig drops the value from the bmm bucket
+   * (because it's now a core key) without re-homing it under [core], so the
+   * user's prior answer silently disappears on the next install/quick-update.
+   */
+  async _hoistCoreKeysFromLegacyModuleConfigs() {
+    const coreSchemaPath = path.join(getSourcePath(), 'core-skills', 'module.yaml');
+    if (!(await fs.pathExists(coreSchemaPath))) return;
+
+    let coreSchema;
+    try {
+      coreSchema = yaml.parse(await fs.readFile(coreSchemaPath, 'utf8'));
+    } catch {
+      return;
+    }
+    if (!coreSchema || typeof coreSchema !== 'object') return;
+
+    const coreKeys = new Set(
+      Object.entries(coreSchema)
+        .filter(([, v]) => v && typeof v === 'object' && 'prompt' in v)
+        .map(([k]) => k),
+    );
+    if (coreKeys.size === 0) return;
+
+    // Belt-and-suspenders: loadExistingConfig already filters non-object parses,
+    // but anyone calling _hoistCoreKeysFromLegacyModuleConfigs in isolation (or
+    // future code paths populating _existingConfig directly) shouldn't be able
+    // to crash this with a scalar / array.
+    const existingCore = this._existingConfig.core;
+    this._existingConfig.core = existingCore && typeof existingCore === 'object' && !Array.isArray(existingCore) ? existingCore : {};
+
+    for (const [moduleName, cfg] of Object.entries(this._existingConfig)) {
+      if (moduleName === 'core' || !cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue;
+      for (const key of Object.keys(cfg)) {
+        if (!coreKeys.has(key)) continue;
+        if (!(key in this._existingConfig.core)) {
+          this._existingConfig.core[key] = cfg[key];
+        }
+        delete cfg[key];
+      }
+    }
   }
 
   /**
