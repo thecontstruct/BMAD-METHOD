@@ -48,7 +48,7 @@ Wraps the root template plus every fragment the resolver visited via `<<include 
 ```xml
 <Include src="bmad-help/bmad-help.template.md"
          resolved-from="base"
-         hash="cd7096b2ff55b2b87e12d6b9c4c9ea13dfca78c49299a09327c97107f9531da8">
+         hash="a766c6bd76bcfc4a49a683417440d39978a2e10bb5618dfd469fff03f96b4b4d"> *(Story 7.17 catalog-schema-migration boundary; formerly `cd7096b2…`)*
 ...fragment content...
 </Include>
 ```

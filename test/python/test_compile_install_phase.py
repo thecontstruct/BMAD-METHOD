@@ -2179,6 +2179,7 @@ class TestGlobExpansion(unittest.TestCase):
         # The bmad-help SKILL.md SHA must not change due to Story 4.4 — the
         # skill has no `file:` arrays in its customize.toml, so the only
         # additive surface (`glob_expansions`) stays empty and innocuous.
+        # Re-baselined at Story 7.17 (catalog-schema-migration boundary): new SHA reflects upstream preceded-by/followed-by adoption.
         sha_path = (
             Path(__file__).resolve().parent.parent.parent
             / "src" / "core-skills" / "bmad-help" / "SKILL.md"
@@ -2186,7 +2187,7 @@ class TestGlobExpansion(unittest.TestCase):
         actual = hashlib.sha256(sha_path.read_bytes()).hexdigest()
         self.assertEqual(
             actual,
-            "cd7096b2ff55b2b87e12d6b9c4c9ea13dfca78c49299a09327c97107f9531da8",
+            "a766c6bd76bcfc4a49a683417440d39978a2e10bb5618dfd469fff03f96b4b4d",
         )
 
     # ---------- Task 6.15: runtime-variable pattern deferred ----------
