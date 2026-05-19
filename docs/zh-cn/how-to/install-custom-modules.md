@@ -15,7 +15,7 @@ sidebar:
 - 从私有或自托管 Git 服务器安装模块
 
 :::note[前置条件]
-需要 [Node.js](https://nodejs.org) v20+ 和 `npx`（npm 自带）。自定义和社区模块可以在全新安装时选择，也可以添加到现有安装中。
+需要 [Node.js](https://nodejs.org) v20.12+ 和 `npx`（npm 自带）。自定义和社区模块可以在全新安装时选择，也可以添加到现有安装中。
 :::
 
 ## 社区模块
@@ -68,6 +68,7 @@ Would you like to install from a custom source (Git URL or local path)?
 | 输入类型 | 示例 |
 | -------- | ---- |
 | HTTPS URL（任意主机） | `https://github.com/org/repo` |
+| HTTP URL（任意主机） | `http://host/org/repo` |
 | 带子目录的 HTTPS URL | `https://github.com/org/repo/tree/main/my-module` |
 | SSH URL | `git@github.com:org/repo.git` |
 | 本地路径 | `/Users/me/projects/my-module` |

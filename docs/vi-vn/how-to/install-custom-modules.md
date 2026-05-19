@@ -15,7 +15,7 @@ Sử dụng trình cài đặt BMad để thêm module từ kho cộng đồng (
 - Cài module từ máy chủ Git riêng tư hoặc tự host
 
 :::note[Điều kiện tiên quyết]
-Yêu cầu [Node.js](https://nodejs.org) v20+ và `npx` đi kèm npm. Bạn có thể chọn module tùy chỉnh và module cộng đồng trong lúc cài mới, hoặc thêm chúng vào một bản cài hiện có.
+Yêu cầu [Node.js](https://nodejs.org) v20.12+ và `npx` đi kèm npm. Bạn có thể chọn module tùy chỉnh và module cộng đồng trong lúc cài mới, hoặc thêm chúng vào một bản cài hiện có.
 :::
 
 ## Module cộng đồng
@@ -68,6 +68,7 @@ Chọn **Yes**, rồi nhập nguồn:
 | Loại đầu vào | Ví dụ |
 | --------------------- | ------------------------------------------------- |
 | HTTPS URL trên bất kỳ host nào | `https://github.com/org/repo` |
+| HTTP URL trên bất kỳ host nào | `http://host/org/repo` |
 | HTTPS URL trỏ vào một thư mục con | `https://github.com/org/repo/tree/main/my-module` |
 | SSH URL | `git@github.com:org/repo.git` |
 | Đường dẫn cục bộ | `/Users/me/projects/my-module` |

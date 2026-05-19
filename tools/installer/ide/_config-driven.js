@@ -501,7 +501,7 @@ class ConfigDrivenIdeSetup {
 
     // Build removal set: previously installed skills + removals.txt entries
     let removalSet;
-    if (options.previousSkillIds && options.previousSkillIds.size > 0) {
+    if (options.previousSkillIds) {
       // Install/update flow: use pre-captured skill IDs (before manifest was overwritten)
       removalSet = new Set(options.previousSkillIds);
       if (resolvedBmadDir) {
