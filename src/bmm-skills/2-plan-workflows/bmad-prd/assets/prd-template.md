@@ -1,8 +1,4 @@
-# PRD Template — A Menu, Not a Skeleton
-
-This is a menu of sections the facilitator picks from based on what the product, the stakes, the audience, and the existing inputs actually need. Hobby projects use the essential spine and stop. Enterprise initiatives, regulated submissions, and consumer launches add clusters from the adapt-in menu below. **Never include a section just because it appears here.** Drop, reorder, rename, combine — whatever the PRD needs.
-
----
+# PRD Template
 
 ## Essential Spine *(almost always present)*
 
@@ -34,15 +30,30 @@ updated: {YYYY-MM-DD}
 [Who this is explicitly not for in v1.]
 
 ### 2.4 Key User Journeys
-*Named flows the product enables — one line each, numbered globally as UJ-1 through UJ-N for downstream traceability. Detailed flow design (steps, screens, edge flows) is the job of the UX workflow, not this PRD. Features in §4 may reference journeys by ID inline ("realizes UJ-3").*
+*Named-persona narratives the product enables. Numbered globally as UJ-1 through UJ-N. FRs reference journeys by ID inline ("realizes UJ-3"); SMs may also cross-reference. If a UX doc already exists, mirror its UJ IDs here and point to the source.*
 
-- **UJ-1** — [Named flow, one line: who does what, to what end.]
-- **UJ-2** — ...
+**Default shape:** a named scene with entry state, path, climax, and resolution. Each beat forces specificity the team would otherwise leave implicit — auth assumptions, screen order, what tells the user value landed. Read together as a short narrative; the example below shows the form.
 
-[For hobby/utility projects, 1-3 journeys may be enough. For complex multi-feature products (onboarding, checkout, multi-step approvals), expand. For libraries/CLIs with minimal flow, reduce to a single line or collapse into §2.2 JTBD.]
+- **UJ-1. {One-line title — persona doing the thing.}**
+  - **Persona + context:** one line, grounded enough to explain the *why*.
+  - **Entry state:** authenticated? which surface? coming from where?
+  - **Path:** 3-5 concrete beats — taps, screens, decisions.
+  - **Climax:** the moment value is delivered and how the user knows.
+  - **Resolution:** state they're left in, what's next.
+  - **Edge case** *(optional)*: one real failure mode and what the user does next.
+
+  *Written out, that becomes:*
+  > **UJ-3. Priya checks the trip damage before she's even home.**
+  > Priya, budgeting on a single income with a new baby, finishes a grocery run and gets in the car. Already authenticated via biometric on a previous session. She opens the app, taps the FAB camera, and scans the receipt. The app OCRs the total and shows a single-screen overlay: this trip $84.20, weekly cap $250, $172.10 remaining, three days left in the week. She closes the app and drives home. **Edge case:** if she scanned a receipt earlier today, the app asks whether this replaces or adds to that trip before counting it against the cap.
+
+- **UJ-2. ...**
+
+**Scope dial:**
+- **Lighter** — hobby/solo, library/CLI, or when the UJ is essentially a JTBD restated: a single sentence works (`{Persona}, {context}, {what they do and why}.`).
+- **Heavier** — auth, multi-device handoff, complex navigation, or anything feeding downstream UX/architecture: add a numbered Flow, an Edge cases list, and a capability → FR mapping (`The system must {capability}. → FR-N`).
 
 ## 3. Glossary
-*Downstream workflows and readers must use these terms exactly.*
+*Downstream workflows and readers must use these terms exactly. FRs, UJs, and SMs use Glossary terms verbatim; introducing a synonym anywhere in the PRD is a discipline violation. If §4 introduces a new domain noun, add it to the Glossary in the same pass.*
 
 - **Term** — Definition. Relationships to other Glossary terms. Cardinality where relevant.
 - **Term** — ...
@@ -53,11 +64,22 @@ updated: {YYYY-MM-DD}
 *Each subsection is a coherent feature: behavioral description first, FRs nested under it, optional feature-specific NFRs and notes. FRs are numbered globally (FR-1 through FR-N) so downstream artifacts have stable references even if features get reorganized. Reference user journeys by ID inline ("realizes UJ-2") where the chain matters.*
 
 ### 4.1 {Feature Name}
-**Description:** [Behavioral narrative — how this feature works, who uses it, the user experience, edge cases. Use Glossary terms exactly. Embed inline `[ASSUMPTION: ...]` tags where you inferred without confirmation.]
+**Description:** [Behavioral narrative — how this feature works, who uses it, the user experience, edge cases. Realizes UJ-X, UJ-Y. Use Glossary terms exactly. Embed inline `[ASSUMPTION: ...]` tags where you inferred without confirmation.]
 
 **Functional Requirements:**
-- **FR-1** — [Actor] can [capability] [under conditions / with measurement].
-- **FR-2** — ...
+
+#### FR-1: {Short capability name}
+
+[Actor] can [capability] [under conditions]. Realizes UJ-X.
+
+**Consequences (testable):**
+- {Specific testable condition, e.g. "System returns HTTP 429 when request rate exceeds 100/sec per merchant."}
+- {Another testable condition.}
+
+**Out of Scope:** *(optional — what this FR explicitly does NOT cover)*
+- {bound}
+
+#### FR-2: ...
 
 **Feature-specific NFRs:** *(only if any apply uniquely to this feature)*
 - Performance / security / accessibility / etc. specific to this feature.
@@ -80,14 +102,16 @@ updated: {YYYY-MM-DD}
 
 ## 7. Success Metrics
 
+*Each SM cross-references the FR(s) it validates. Counter-metrics counterbalance specific primary or secondary metrics.*
+
 **Primary**
-- Metric — definition, target.
+- **SM-1**: Metric — definition, target. Validates FR-X, FR-Y.
 
 **Secondary**
-- Metric — definition, target.
+- **SM-2**: Metric — definition, target. Validates FR-Z.
 
 **Counter-metrics (do not optimize)**
-- Metric — why this should *not* be optimized.
+- **SM-C1**: Metric — why this should *not* be optimized. Counterbalances SM-1.
 
 [Length scales with stakes. Hobby/utility PRD: a single sentence may be enough ("Success: I use this weekly and don't abandon it after a month"). Public launch / enterprise: full quantitative breakdown with measurement methods. Counter-metrics are as load-bearing as primary metrics — they prevent the architect from optimizing the wrong thing and the dev from gaming the wrong target.]
 
@@ -142,17 +166,3 @@ updated: {YYYY-MM-DD}
 ### Small-scope all-inclusive *(use when scope is 1-2 stories' worth and the user wants a single captured artifact — chosen during the Right-skill check in Discovery)*
 - **Stories** — story-level specs listed inline at the end of the doc. Each story: *"As a [persona], I can [action] [under conditions]. Acceptance: [testable criteria]."* Numbered Story-1, Story-2, ... for reference. Pair with very lean §1 Vision, §2 Target User (often just JTBD + one UJ), §3 Glossary (handful of terms), §4 Features (often a single feature), §6 MVP Scope (in/out very tight). The whole doc fits on a page or two and captures intent + implementable stories in one place. If the user doesn't want the captured artifact at all, `bmad-quick-dev` is the better path — this cluster is only for "I want a doc *and* the stories."
 
----
-
-## Notes for the facilitator
-
-- **The essential spine is the floor, not the ceiling.** A hobby PRD might keep all ten sections short. An enterprise PRD layers many clusters from the adapt-in menu.
-- **§3 Glossary before §4 Features.** Mechanics never introduce a new domain noun without adding it to the Glossary in the same pass. Persona, JTBD, and Journeys may use Glossary terms before §3 formally defines them — context is inferable; the Glossary is for downstream anchoring.
-- **§2.4 Key User Journeys are brief.** One line each. Numbered globally (UJ-1 through UJ-N) so architecture, epics, stories, and tickets can reference them by stable ID. Detailed flow design happens in the UX workflow — not here.
-- **§4 Features pattern at every scale.** Description → FRs nested → optional NFRs → optional notes. Hobby PRD: one short paragraph and three FRs per feature. Enterprise feature: multi-paragraph description, fifteen FRs, several feature-specific NFRs, open questions. Same shape, different depth.
-- **`[ASSUMPTION]`, `[NON-GOAL]`, `[v2 — out of MVP]`, `[NOTE FOR PM]` callouts are first-class.** They signal to downstream readers and the next session of work. Every `[ASSUMPTION]` lands in §9 Assumptions Index.
-- **When UX is *input* to the PRD** (journeys already designed elsewhere): §2.4 names the journeys by ID and points to the existing UX doc. Reference, do not duplicate.
-- **When UX is *output* of the PRD** (no UX work yet — downstream `bmad-create-ux-design` will produce it): §2.4 captures the PM's intent on which journeys exist; UX elaborates them into detailed flows downstream.
-- **§7 Success Metrics scales with stakes** but is always present. Counter-metrics matter as much as primary metrics — they shape what NOT to optimize.
-- **Small-scope all-inclusive option.** When scope is genuinely 1-2 stories and the user wants a single artifact instead of running a separate `bmad-create-story` workflow, add the adapt-in *Stories* cluster: lean §1-§6 plus inline §Stories at the end. The whole doc fits on a page or two. This is a valid PRD shape for tiny work — don't apologize for it.
-- **Adapt the section numbering.** The spine uses 0-9; adapt-in additions slot in wherever they read best (e.g., Aesthetic & Tone before §3 if branding is foundational, Compliance after §5 Non-Goals, Constraints & Guardrails between Features and Non-Goals, Stories at the very end after Assumptions Index).

@@ -43,23 +43,28 @@ on_complete = ""
 # to enforce a different structure (e.g. regulated-industry, internal-tool, investor-input).
 prd_template = "assets/prd-template.md"
 
-# Validation checklist used at the Validate intent and at Finalize step 3.
-# A subagent walks the checklist against prd.md and returns structured findings.
-# Override the path in team/user TOML to enforce an org-specific checklist
-# (regulated-industry compliance, investor-pitch standards, etc.).
-validation_checklist = "assets/prd-validation-checklist.md"
+# PRD quality rubric used at the Validate intent and at Finalize step 3.
+# A subagent walks the rubric against prd.md and writes a substantive review
+# organized by quality dimensions (decision-readiness, substance, strategic
+# coherence, etc.). Override the path in team/user TOML to enforce an
+# org-specific rubric (regulated-industry compliance, investor-pitch standards,
+# etc.). The filename "checklist" is retained for back-compat with override
+# files; the content is a judgment rubric, not a boolean checklist.
+validation_checklist_template = "assets/prd-validation-checklist.md"
 
-# HTML template used to render validation findings into a styled, scannable
-# report. The renderer (scripts/render-validation-html.py) substitutes
-# structured findings + summary stats into this template; the template is
-# fully overridable to match org branding. The default uses inline CSS, no
-# external dependencies, and native HTML <details> for collapse — no JS.
+# HTML skeleton the synthesis pass fills directly when consolidating reviewer
+# outputs into a validation report. No substitution engine — the parent LLM
+# reads every {doc_workspace}/review-*.md, fills the skeleton's TEMPLATE_*
+# placeholders, and writes the result. Fully overridable to match org branding.
+# Uses inline CSS, no external dependencies, and native HTML <details> for
+# collapse — no JS.
 validation_report_template = "assets/validation-report-template.html"
 
 # Run folder location. The PRD, optional addendum, decision log, and optional
-# validation report all land inside `{output_dir}/{output_folder_name}/`.
-output_dir = "{planning_artifacts}/prds"
-output_folder_name = "prd-{project_name}-{date}"
+# validation report all land inside `{prd_output_path}/{run_folder_pattern}/`.
+# Resume-check scans `{prd_output_path}` for prior unfinished runs.
+prd_output_path = "{planning_artifacts}/prds"
+run_folder_pattern = "prd-{project_name}-{date}"
 
 # Document standards applied to human-consumed docs at finalize. Each entry is
 # a `skill:`, `file:`, or plain-text directive; the parent LLM applies the
@@ -90,6 +95,11 @@ doc_standards = [
 # tool needs. If a named MCP tool is unavailable at runtime, the LLM falls
 # back to standard behavior and notes the gap. Empty by default.
 #
+# Lifecycle note: distinct from persistent_facts. persistent_facts are loaded
+# once at activation and kept in mind for the whole run; external_sources are
+# a registry consulted on demand and only when the conversation surfaces a
+# matching need.
+#
 # Examples (set in team/user override TOML):
 #   "When researching internal product context, consult corp:kb_search (database='product-docs') before web search."
 #   "For competitive landscape during Discovery, query corp:competitive_db with category={project_name}."
@@ -106,8 +116,32 @@ external_sources = []
 # status; local files always exist regardless. Fires automatically — users
 # can opt out in their prompt for a specific run. Empty by default.
 #
+# Lifecycle note: distinct from persistent_facts and external_sources.
+# Fired once at Finalize step 6, never during Discovery or drafting.
+#
 # Examples (set in team/user override TOML):
 #   "After finalize, upload prd.md and addendum.md to Confluence via corp:confluence_upload (space_key='PROD', parent_page='PRDs', label='prd', author={user_name})."
 #   "Mirror the PRD to Notion via notion:create_page (database_id='abc123', title='PRD: '+{project_name})."
 #   "When the PRD references a parent initiative, link via corp:jira_link on the epic key in frontmatter."
 external_handoffs = []
+
+# --- Finalize reviewers ---
+# Reviewers spawned at Finalize step 3 (and at the Validate intent) alongside
+# the structural checklist validator. The authoring skill assembles the gate
+# menu (validator + these reviewers + any ad-hoc reviewers it judges warranted
+# by the artifact content) and lets the user pick all, a subset, or skip. Gate
+# UX is stakes-calibrated: hobby/solo scope may run defaults quietly or skip;
+# higher stakes get the explicit menu.
+#
+# Entries follow the standard prefix convention (same as persistent_facts and
+# doc_standards):
+#   "skill:NAME"   invoke the named review skill as a subagent against prd.md
+#   "file:PATH"    load the file as a review prompt; spawn an adversarial
+#                  subagent applying that prompt to prd.md
+#   plain text     use the text directly as the subagent's review prompt
+#
+# Override TOML may append additional reviewers. Arrays append per BMad rules.
+#
+# Resolved on-demand by the authoring skill (not pulled at activation): only
+# when entering the Validate intent or assembling the gate at Finalize step 3.
+finalize_reviewers = []
