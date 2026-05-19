@@ -51,17 +51,26 @@ function makeFixture(fixtureFileName, fixtureContent) {
 
 // Case 1 — {{.word}} in template.md → TPL-01 HIGH
 function test_compile_time_sub_in_template_fires() {
-  const { tmpRoot, skillDir } = makeFixture(
-    'template.md',
-    'Line one.\n{{.command}} is forbidden.\nLine three.',
-  );
+  const { tmpRoot, skillDir } = makeFixture('template.md', 'Line one.\n{{.command}} is forbidden.\nLine three.');
   try {
     const findings = validateSkill(skillDir).filter((f) => f.rule === 'TPL-01');
     record('Case 1: findings.length === 1', findings.length === 1, `got ${findings.length}`);
-    record('Case 1: severity HIGH', findings.length > 0 && findings[0].severity === 'HIGH', findings[0] ? `got ${findings[0].severity}` : 'no finding');
+    record(
+      'Case 1: severity HIGH',
+      findings.length > 0 && findings[0].severity === 'HIGH',
+      findings[0] ? `got ${findings[0].severity}` : 'no finding',
+    );
     record('Case 1: line === 2', findings.length > 0 && findings[0].line === 2, findings[0] ? `got ${findings[0].line}` : 'no finding');
-    record('Case 1: file === template.md', findings.length > 0 && findings[0].file === 'template.md', findings[0] ? `got ${findings[0].file}` : 'no finding');
-    record('Case 1: detail includes {{.command}}', findings.length > 0 && findings[0].detail.includes('{{.command}}'), findings[0] ? `detail: ${findings[0].detail}` : 'no finding');
+    record(
+      'Case 1: file === template.md',
+      findings.length > 0 && findings[0].file === 'template.md',
+      findings[0] ? `got ${findings[0].file}` : 'no finding',
+    );
+    record(
+      'Case 1: detail includes {{.command}}',
+      findings.length > 0 && findings[0].detail.includes('{{.command}}'),
+      findings[0] ? `detail: ${findings[0].detail}` : 'no finding',
+    );
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -69,10 +78,7 @@ function test_compile_time_sub_in_template_fires() {
 
 // Case 2 — clean template.md → no TPL-01
 function test_clean_template_no_finding() {
-  const { tmpRoot, skillDir } = makeFixture(
-    'template.md',
-    'Line one.\n{self.description} is fine.\n{{user_name}} also fine.\nLine four.',
-  );
+  const { tmpRoot, skillDir } = makeFixture('template.md', 'Line one.\n{self.description} is fine.\n{{user_name}} also fine.\nLine four.');
   try {
     const findings = validateSkill(skillDir).filter((f) => f.rule === 'TPL-01');
     record('Case 2: clean template.md → no TPL-01', findings.length === 0, `got ${findings.length} finding(s)`);
@@ -83,10 +89,7 @@ function test_clean_template_no_finding() {
 
 // Case 3 — {{self.X}} in template.md → no TPL-01 (sigil-safe)
 function test_self_sigil_no_finding() {
-  const { tmpRoot, skillDir } = makeFixture(
-    'template.md',
-    '{{self.description}} is our runtime sigil.\n{{self.name}} is also safe.',
-  );
+  const { tmpRoot, skillDir } = makeFixture('template.md', '{{self.description}} is our runtime sigil.\n{{self.name}} is also safe.');
   try {
     const findings = validateSkill(skillDir).filter((f) => f.rule === 'TPL-01');
     record('Case 3: {{self.X}} → no TPL-01', findings.length === 0, `got ${findings.length} finding(s)`);
@@ -97,10 +100,7 @@ function test_self_sigil_no_finding() {
 
 // Case 4 — {{.var}} in non-template .md → no TPL-01
 function test_non_template_no_finding() {
-  const { tmpRoot, skillDir } = makeFixture(
-    'workflow.md',
-    '{{.command}} appears here.',
-  );
+  const { tmpRoot, skillDir } = makeFixture('workflow.md', '{{.command}} appears here.');
   try {
     const findings = validateSkill(skillDir).filter((f) => f.rule === 'TPL-01');
     record('Case 4: {{.var}} in non-template file → no TPL-01', findings.length === 0, `got ${findings.length} finding(s)`);
@@ -111,15 +111,20 @@ function test_non_template_no_finding() {
 
 // Case 5 — multiple violations across lines → one finding per violation line
 function test_multiple_violations() {
-  const { tmpRoot, skillDir } = makeFixture(
-    'template.md',
-    '{{.foo}} is bad.\nBetween.\n{{.bar}} also bad.',
-  );
+  const { tmpRoot, skillDir } = makeFixture('template.md', '{{.foo}} is bad.\nBetween.\n{{.bar}} also bad.');
   try {
     const findings = validateSkill(skillDir).filter((f) => f.rule === 'TPL-01');
     record('Case 5: two violations → 2 findings', findings.length === 2, `got ${findings.length}`);
-    record('Case 5: first finding line === 1', findings.length > 0 && findings[0].line === 1, findings[0] ? `got ${findings[0].line}` : 'no finding');
-    record('Case 5: second finding line === 3', findings.length > 1 && findings[1].line === 3, findings[1] ? `got ${findings[1].line}` : 'no finding');
+    record(
+      'Case 5: first finding line === 1',
+      findings.length > 0 && findings[0].line === 1,
+      findings[0] ? `got ${findings[0].line}` : 'no finding',
+    );
+    record(
+      'Case 5: second finding line === 3',
+      findings.length > 1 && findings[1].line === 3,
+      findings[1] ? `got ${findings[1].line}` : 'no finding',
+    );
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
