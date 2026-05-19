@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -39,12 +40,34 @@ from bmad_compile.drift import (
 # upgrade.py uses --project-root (parent of _bmad/) so the constant is correct.
 LOCKFILE_RELATIVE_PATH = "_bmad/_config/bmad.lock"
 
+_COMPONENT_PROBE_RE = re.compile(
+    r'<([A-Z][A-Za-z0-9]*)(?:\s[^/]*)?\s*/>',
+    re.MULTILINE,
+)
+
 # Test-only override: set to a Path to redirect compile.py resolution in tests.
 _COMPILE_PY_PATH: Path | None = None
 
 
 def _get_compile_py() -> Path:
     return _COMPILE_PY_PATH if _COMPILE_PY_PATH is not None else Path(__file__).parent / "compile.py"
+
+
+def _find_component_names_in_installed_template(
+    project_root: str, skill_id: str
+) -> list[str]:
+    """Return deduplicated component names found in skill's installed template, or []."""
+    bmad_dir = Path(project_root) / "_bmad"
+    if not bmad_dir.is_dir():
+        return []
+    matches = list(bmad_dir.rglob(f"{skill_id}.template.md"))
+    if not matches:
+        return []
+    try:
+        content = matches[0].read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return list(dict.fromkeys(_COMPONENT_PROBE_RE.findall(content)))
 
 
 def _fmt_hash(h: str | None) -> str:
@@ -316,6 +339,27 @@ def main(argv: list[str] | None = None) -> int:
     if drift_reports and not args.yes:
         print(_halt_on_drift_stderr(drift_reports), file=sys.stderr)
         return 3
+
+    _lockfile_version = lockfile_data.get("version", 1)
+    if isinstance(_lockfile_version, int) and _lockfile_version == 1:
+        for _entry in entries:  # `entries` already filtered by --skill if applicable
+            _sid = _entry.get("skill", "")
+            if not _sid:
+                continue
+            _new_names = _find_component_names_in_installed_template(
+                args.project_root, _sid
+            )
+            if _new_names:
+                print(
+                    json.dumps({
+                        "kind": "lockfile_schema_migration",
+                        "old_version": 1,
+                        "new_version": 2,
+                        "skill_id": _sid,
+                        "new_component_names": sorted(_new_names),
+                    }),
+                    flush=True,
+                )
 
     return _run_compile_install_phase(args.project_root)
 

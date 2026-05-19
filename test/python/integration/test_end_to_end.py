@@ -466,7 +466,7 @@ class TestLockfileIntegration(unittest.TestCase):
         self.assertTrue(self._lockfile.is_file(), "bmad.lock must exist after compile")
         import json
         data = json.loads(self._lockfile.read_text(encoding="utf-8"))
-        self.assertEqual(data["version"], 1)
+        self.assertEqual(data["version"], 2)
 
     def test_lockfile_secret_not_plaintext(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -500,18 +500,17 @@ class TestLockfileIntegration(unittest.TestCase):
         finally:
             unresolved_lf.unlink(missing_ok=True)
 
-    def test_lockfile_version_mismatch_exits_nonzero(self) -> None:
+    def test_lockfile_version_mismatch_warns_and_proceeds(self) -> None:
         import json
         self._lockfile.parent.mkdir(parents=True, exist_ok=True)
         self._lockfile.write_text(
-            json.dumps({"version": 2, "compiled_at": "1.0.0",
+            json.dumps({"version": 3, "compiled_at": "1.0.0",
                         "bmad_version": "1.0.0", "entries": []}),
             encoding="utf-8",
         )
         with tempfile.TemporaryDirectory() as tmp:
             result = _run_cli(self._var_res_skill(), Path(tmp))
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("LOCKFILE_VERSION_MISMATCH", result.stderr)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
 
 
 if __name__ == "__main__":

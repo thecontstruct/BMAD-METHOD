@@ -19,7 +19,7 @@ from src.scripts.bmad_compile.errors import (
 
 
 class TestErrorCodes(unittest.TestCase):
-    def test_exactly_seven_frozen_codes(self) -> None:
+    def test_exactly_eleven_frozen_codes(self) -> None:
         expected = {
             "UNKNOWN_DIRECTIVE",
             "UNRESOLVED_VARIABLE",
@@ -28,6 +28,10 @@ class TestErrorCodes(unittest.TestCase):
             "OVERRIDE_OUTSIDE_ROOT",
             "LOCKFILE_VERSION_MISMATCH",
             "PRECEDENCE_UNDEFINED",
+            "COMPONENT_ERROR",
+            "COMPONENT_TIMEOUT",
+            "COMPONENT_PROP_ERROR",
+            "COMPONENT_BATCH_ERROR",
         }
         self.assertEqual(ERROR_CODES, expected)
 
@@ -145,8 +149,8 @@ class TestCyclicChainRendering(unittest.TestCase):
 
 
 class TestSubclassesListed(unittest.TestCase):
-    def test_seven_subclasses_exported(self) -> None:
-        self.assertEqual(len(errors.SUBCLASSES), 7)
+    def test_eleven_subclasses_exported(self) -> None:
+        self.assertEqual(len(errors.SUBCLASSES), 11)
         for cls in errors.SUBCLASSES:
             with self.subTest(cls=cls.__name__):
                 self.assertTrue(issubclass(cls, CompilerError))
@@ -160,6 +164,10 @@ class TestSubclassesListed(unittest.TestCase):
                 errors.OverrideOutsideRootError,
                 errors.LockfileVersionMismatchError,
                 errors.PrecedenceUndefinedError,
+                errors.ComponentError,
+                errors.ComponentTimeoutError,
+                errors.ComponentPropError,
+                errors.ComponentBatchError,
             },
         )
 

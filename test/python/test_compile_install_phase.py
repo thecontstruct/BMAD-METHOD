@@ -313,7 +313,7 @@ class TestBmadHelpInstallPhase(unittest.TestCase):
         lockfile_path = self._install / "_config" / "bmad.lock"
         self.assertTrue(lockfile_path.is_file(), f"bmad.lock not found at {lockfile_path}")
         lf = json.loads(lockfile_path.read_bytes())
-        self.assertEqual(lf["version"], 1)
+        self.assertEqual(lf["version"], 2)
 
         entries = [e for e in lf["entries"] if e["skill"] == "bmad-help"]
         self.assertEqual(len(entries), 1, "expected exactly one lockfile entry for skill=bmad-help")
@@ -1017,15 +1017,15 @@ class TestExitCodeAlignment(unittest.TestCase):
             code, _, _ = _run_compile_skill(install, ["--skill", str(skill_dir)])
             self.assertEqual(code, 1)
 
-    def test_lockfile_version_mismatch_exits_2(self) -> None:
-        """bmad.lock with version > 1 → LockfileVersionMismatchError → exit 2."""
+    def test_lockfile_version_mismatch_warns_and_proceeds(self) -> None:
+        """bmad.lock with version > 2 → log.warning → compile succeeds (no exception)."""
         with tempfile.TemporaryDirectory() as tmp:
             install = Path(tmp)
             _write(install / "core" / "my-skill" / "my-skill.template.md", "Hello!")
-            # Write a lockfile with version=2 (future, unsupported)
+            # Write a lockfile with version=3 (future, unsupported)
             future_lock = (
                 json.dumps(
-                    {"bmad_version": "99.0.0", "compiled_at": "99.0.0", "entries": [], "version": 2},
+                    {"bmad_version": "99.0.0", "compiled_at": "99.0.0", "entries": [], "version": 3},
                     sort_keys=True,
                     indent=2,
                 )
@@ -1033,7 +1033,7 @@ class TestExitCodeAlignment(unittest.TestCase):
             )
             _write(install / "_config" / "bmad.lock", future_lock)
             code, _, stderr = _run_compile_skill(install, ["core/my-skill"])
-            self.assertEqual(code, 2, f"stderr: {stderr}")
+            self.assertEqual(code, 0, f"stderr: {stderr}")
 
 
 def _run_explain(install_dir: Path, args: list[str]) -> tuple[int, str, str]:

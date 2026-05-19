@@ -1,11 +1,11 @@
-"""Layer 7 — lockfile v1 writer.
+"""Layer 7 — lockfile v2 writer.
 
 Emits ``_bmad/_config/bmad.lock`` after each successful compile. The file
 is JSON (not YAML) — ``json.dumps(sort_keys=True, indent=2)`` — because the
 Python port is stdlib-only and ``pyyaml`` is banned. JSON is a strict subset
 of YAML so downstream tools that parse YAML can read it.
 
-Schema v1 example::
+Schema v2 example::
 
     {
       "bmad_version": "1.0.0",
@@ -13,6 +13,7 @@ Schema v1 example::
       "entries": [
         {
           "compiled_hash": "<sha256>",
+          "components": [],
           "fragments": [
             {
               "hash": "<sha256>",
@@ -34,7 +35,7 @@ Schema v1 example::
           ]
         }
       ],
-      "version": 1
+      "version": 2
     }
 
 Allowed imports (layer 7): errors (1), io (2), resolver (6), stdlib json.
@@ -52,7 +53,7 @@ from typing import Any
 from . import errors, io, resolver
 from .io import PurePosixPath
 
-_VERSION = 1
+_VERSION = 2
 _BMAD_VERSION = "1.0.0"  # deterministic sentinel — never wall-clock
 
 
@@ -72,10 +73,10 @@ def read_lockfile_version(path: str) -> int | None:
     Story 7.14 AC-5: this function is NOT inside the advisory lock that wraps
     ``_do_write_skill_entry``. A concurrent reader calling this function while
     a writer holds the lock may observe stale state (the pre-write lockfile).
-    This is acceptable for v1: the ``version`` field is 1 and does not change
-    between writes within v1 schema. A future v1\u2192v2 schema migration MUST move
-    this read inside the lock. See deferred-work.md: [lockfile concurrency, v2
-    migration \u2014 read_lockfile_version inside lock].
+    Story 8.1 AC-4 now calls ``read_lockfile_version`` as the first statement
+    inside ``_do_write_skill_entry`` (the authoritative in-lock read); this
+    outer call in ``_compile_core`` remains as the non-authoritative fail-fast
+    early check.
     """
     if not io.is_file(path):
         return None
@@ -188,6 +189,7 @@ def _build_skill_entry(
     var_scope: resolver.VariableScope,
     target_ide: str | None,
     cache: resolver.CompileCache,
+    components: list[dict] | None = None,
 ) -> dict[str, Any]:
     source_hash = io.hash_text(source_text)
     compiled_hash = io.hash_text(compiled_text)
@@ -278,6 +280,7 @@ def _build_skill_entry(
 
     return {
         "compiled_hash": compiled_hash,
+        "components": components if components is not None else [],
         "fragments": fragments,
         "glob_inputs": glob_inputs,  # pragma: allow-raw-io
         "skill": skill_basename,
@@ -299,6 +302,7 @@ def write_skill_entry(
     target_ide: str | None,
     cache: resolver.CompileCache,
     lock_timeout_seconds: float = 300.0,
+    components: list[dict] | None = None,
 ) -> None:
     """Write (or update) the skill entry in the lockfile at ``lockfile_path``.
 
@@ -336,6 +340,7 @@ def write_skill_entry(
             var_scope=var_scope,
             target_ide=target_ide,
             cache=cache,
+            components=components,
         )
     finally:
         # io.release_lock is documented no-throw (swallows OSError per
@@ -360,6 +365,7 @@ def _do_write_skill_entry(
     var_scope: resolver.VariableScope,
     target_ide: str | None,
     cache: resolver.CompileCache,
+    components: list[dict] | None = None,
 ) -> None:
     """Internal: the original RMW body, now called inside the AC-2 lock.
 
@@ -368,6 +374,7 @@ def _do_write_skill_entry(
     upgrades. Pruning/compaction is deferred — see deferred-work.md:
     [lineage, Story 5.x — pruning].
     """
+    _current_version = read_lockfile_version(lockfile_path)
     existing: dict[str, Any] = {}
     if io.is_file(lockfile_path):
         try:
@@ -409,6 +416,7 @@ def _do_write_skill_entry(
         var_scope=var_scope,
         target_ide=target_ide,
         cache=cache,
+        components=components,
     )
 
     # Story 5.3: carry forward lineage for override-tier fragments.

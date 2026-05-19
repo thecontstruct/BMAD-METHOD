@@ -4,6 +4,7 @@
   "entries": [
     {
       "compiled_hash": "19562dcb4a79aeae393e38bfe2bb9f846d7b6a1e0254558c1ae5c7a3c748a5f5",
+      "components": [],
       "fragments": [
         {
           "hash": "3294252ca3c457e6a32da5482494ff9e384aaa198841525ac140413bb45135b0",
@@ -25,5 +26,5 @@
       "variant": "cursor"
     }
   ],
-  "version": 1
+  "version": 2
 }

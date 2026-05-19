@@ -17,6 +17,10 @@ class ErrorCode(StrEnum):
     OVERRIDE_OUTSIDE_ROOT = "OVERRIDE_OUTSIDE_ROOT"
     LOCKFILE_VERSION_MISMATCH = "LOCKFILE_VERSION_MISMATCH"
     PRECEDENCE_UNDEFINED = "PRECEDENCE_UNDEFINED"
+    COMPONENT_ERROR = "COMPONENT_ERROR"
+    COMPONENT_TIMEOUT = "COMPONENT_TIMEOUT"
+    COMPONENT_PROP_ERROR = "COMPONENT_PROP_ERROR"
+    COMPONENT_BATCH_ERROR = "COMPONENT_BATCH_ERROR"
 
 
 ERROR_CODES: frozenset[str] = frozenset(c.value for c in ErrorCode)
@@ -138,6 +142,48 @@ class PrecedenceUndefinedError(CompilerError):
     CODE: ClassVar[str] = ErrorCode.PRECEDENCE_UNDEFINED.value
 
 
+class ComponentError(CompilerError):
+    CODE: ClassVar[str] = ErrorCode.COMPONENT_ERROR.value
+
+    def __init__(
+        self,
+        desc: str,
+        *,
+        component_name: str | None = None,
+        exit_code: int | None = None,
+        stderr: str | None = None,
+        render_error_fallback: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(desc, **kwargs)
+        self.component_name = component_name
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.render_error_fallback = render_error_fallback
+
+
+class ComponentTimeoutError(ComponentError):
+    CODE: ClassVar[str] = ErrorCode.COMPONENT_TIMEOUT.value
+
+
+class ComponentPropError(ComponentError):
+    CODE: ClassVar[str] = ErrorCode.COMPONENT_PROP_ERROR.value
+
+
+class ComponentBatchError(ComponentError):
+    CODE: ClassVar[str] = ErrorCode.COMPONENT_BATCH_ERROR.value
+
+    def __init__(
+        self,
+        desc: str,
+        *,
+        errors: list[ComponentError] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(desc, **kwargs)
+        self.errors: list[ComponentError] = errors if errors is not None else []
+
+
 SUBCLASSES: tuple[type[CompilerError], ...] = (
     UnknownDirectiveError,
     UnresolvedVariableError,
@@ -146,4 +192,8 @@ SUBCLASSES: tuple[type[CompilerError], ...] = (
     OverrideOutsideRootError,
     LockfileVersionMismatchError,
     PrecedenceUndefinedError,
+    ComponentError,
+    ComponentTimeoutError,
+    ComponentPropError,
+    ComponentBatchError,
 )

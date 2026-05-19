@@ -132,13 +132,13 @@ class TestWriteSkillEntry(unittest.TestCase):
             data = json.loads(io.read_template(lf))
             self.assertIsInstance(data, dict)
 
-    def test_schema_version_is_1(self) -> None:
+    def test_schema_version_is_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = PurePosixPath(tmp)
             lf = str(root / "bmad.lock")
             _call_write(lf, root)
             data = json.loads(io.read_template(lf))
-            self.assertEqual(data["version"], 1)
+            self.assertEqual(data["version"], 2)
 
     def test_compiled_at_is_sentinel_not_datetime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -409,7 +409,7 @@ class TestForwardCompat(unittest.TestCase):
 class TestVersionMismatch(unittest.TestCase):
 
     def test_version_mismatch_raises(self) -> None:
-        """write a v2 lockfile into the fixture tree, compile should raise."""
+        """write a v3 lockfile; compile should warn, not raise."""
         import pathlib
         repo_root = pathlib.Path(__file__).resolve().parents[2]
         fixture_scenario = (
@@ -419,16 +419,18 @@ class TestVersionMismatch(unittest.TestCase):
         try:
             lockfile_path.parent.mkdir(parents=True, exist_ok=True)
             lockfile_path.write_text(
-                json.dumps({"version": 2, "compiled_at": "1.0.0",
+                json.dumps({"version": 3, "compiled_at": "1.0.0",
                             "bmad_version": "1.0.0", "entries": []}),
                 encoding="utf-8",
             )
             skill = fixture_scenario / "core" / "var-resolution-skill"
             with tempfile.TemporaryDirectory() as tmp_out:
-                with self.assertRaises(errors.LockfileVersionMismatchError) as ctx:
+                with self.assertLogs(level="WARNING") as log_cm:
                     engine.compile_skill(str(skill), tmp_out)
-            self.assertEqual(ctx.exception.code, "LOCKFILE_VERSION_MISMATCH")
-            self.assertIn("upgrade", ctx.exception.hint or "")
+            self.assertTrue(
+                any("version 3" in msg for msg in log_cm.output),
+                f"Expected warning about version 3 in: {log_cm.output}",
+            )
         finally:
             lockfile_path.unlink(missing_ok=True)
 

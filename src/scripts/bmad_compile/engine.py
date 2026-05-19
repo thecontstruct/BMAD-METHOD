@@ -25,9 +25,12 @@ This module routes every filesystem/hash/time concern through `io`.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Iterable
 
 from . import errors, io, lockfile, parser, resolver, toml_merge, variants
+
+log = logging.getLogger(__name__)
 
 # Story 3.0: reserved dir names at install-root depth-1; mirrors
 # compile.py's _SKIP_AT_DEPTH_1. Same set, same rationale — these dirs are
@@ -155,15 +158,11 @@ def _compile_core(
     else:
         _lockfile_path = str(scenario_root / "_bmad" / "_config" / "bmad.lock")
     _lf_ver = lockfile.read_lockfile_version(_lockfile_path)
-    if _lf_ver is not None and _lf_ver > 1:
-        raise errors.LockfileVersionMismatchError(
-            f"bmad.lock declares version {_lf_ver} but this compiler reads up to version 1",
-            file=_lockfile_path,
-            hint=(
-                f"bmad.lock declares version {_lf_ver}; this compiler supports version 1 only. "
-                "Run 'bmad upgrade' to regenerate, or delete bmad.lock to start fresh. "
-                "Your overrides in _bmad/custom/ will be preserved."
-            ),
+    if _lf_ver is not None and _lf_ver > lockfile._VERSION:
+        log.warning(
+            "bmad.lock declares version %d; this compiler reads version 2. "
+            "Unknown fields will be preserved on write. Proceeding.",
+            _lf_ver,
         )
     # AC 6: override_root param overrides the default derivation (no implicit /custom suffix).
     if override_root is not None:
