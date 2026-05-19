@@ -110,6 +110,7 @@ class Installer {
 
       await this._installAndConfigure(config, originalConfig, paths, allModules, allModules, addResult, officialModules, {
         model3FallbackApplied,
+        previousSkillManifestRows,
       });
 
       await this._setupIdes(config, allModules, paths, addResult, previousSkillIds);
@@ -239,6 +240,7 @@ class Installer {
     officialModules,
     compileOptions = {},
   ) {
+    const { previousSkillManifestRows = [] } = compileOptions;
     const isQuickUpdate = config.isQuickUpdate();
     const moduleConfigs = officialModules.moduleConfigs;
 
@@ -377,19 +379,6 @@ class Installer {
           moduleConfigs,
         });
         await this._appendPreservedSkillManifestRows(paths.bmadDir, previousSkillManifestRows, preservedModules);
-
-        // Apply post-install --set TOML patches. Runs after writeCentralConfig
-        // (inside generateManifests above) so the patch operates on the
-        // freshly written `_bmad/config.toml` / `_bmad/config.user.toml`.
-        // See `tools/installer/set-overrides.js` for routing rules.
-        if (config.setOverrides && Object.keys(config.setOverrides).length > 0) {
-          const { applySetOverrides } = require('../set-overrides');
-          const applied = await applySetOverrides(config.setOverrides, paths.bmadDir);
-          if (applied.length > 0) {
-            const summary = applied.map((a) => `${a.module}.${a.key} → ${a.file}`).join(', ');
-            await prompts.log.info(`Applied --set overrides: ${summary}`);
-          }
-        }
 
         // Apply post-install --set TOML patches. Runs after writeCentralConfig
         // (inside generateManifests above) so the patch operates on the
