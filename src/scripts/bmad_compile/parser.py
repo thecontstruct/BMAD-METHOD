@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Union
+from typing import Any, Union
 
 from . import errors
 
@@ -62,7 +62,15 @@ class VarRuntime:
     col: int
 
 
-AstNode = Union[Text, Include, VarCompile, VarRuntime]
+@dataclass(frozen=True)
+class ComponentInvocation:
+    name: str
+    props: tuple[tuple[str, Any], ...]
+    line: int
+    col: int
+
+
+AstNode = Union[Text, Include, VarCompile, VarRuntime, ComponentInvocation]
 
 
 # `<<include path="<val>" [name="<val>"]*>>` — path values additionally
@@ -85,10 +93,26 @@ _VAR_COMPILE_RE = re.compile(
 )
 _VAR_RUNTIME_RE = re.compile(r'\{(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\}')
 
+_COMPONENT_TAG_RE = re.compile(
+    r'<(?P<name>[A-Z][A-Za-z0-9]*)(?P<props_str>(?:[^\S\n]+[a-zA-Z_][a-zA-Z0-9_]*'
+    r'(?:="[^"\n]*"|=\{(?:true|false|\d+(?:\.\d+)?)\}))*)[^\S\n]*/>',
+    re.MULTILINE
+)
+_PROP_RE = re.compile(
+    r'(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)'
+    r'(?:="(?P<sval>[^"\n]*)"|=\{(?P<eval>true|false|\d+(?:\.\d+)?)\})'
+)
+_FENCE_RE = re.compile(r'^(`{3,}|~{3,})', re.MULTILINE)
+
 _QUOTING_HINT = (
     "attribute-value quoting is not escapable in v1 — "
     "split the attribute or remove the embedded quote"
 )
+
+
+def component_name_to_path(name: str) -> str:
+    snake = re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', name).lower()
+    return f"components/{snake}.py"
 
 
 def _line_col(source: str, char_offset: int) -> tuple[int, int]:
@@ -158,16 +182,30 @@ def parse(source: str, relative_path: str) -> list[AstNode]:
     pos = 0
     source_len = len(source)
 
+    # Calculate frontmatter boundary — component scanning is suppressed for pos < frontmatter_end.
+    # The frontmatter is still scanned normally for {{, <<, { so variables resolve inside it.
+    frontmatter_end: int = 0
+    if source.startswith("---\n"):
+        # Off-by-one for pathological input `---\n---\n` (empty TOML frontmatter) — drops one byte.
+        # Semantically meaningless edge case; not worth special-case branch. (DN-R2-1, resolved 2026-05-19)
+        end = source.find("\n---\n", 4)
+        if end != -1:
+            frontmatter_end = end + 5
+
+    in_fence: bool = False
+
     while pos < source_len:
         # Locate the next occurrence of each special opener.
         next_double = source.find("{{", pos)
         next_angle = source.find("<<", pos)
         next_single = source.find("{", pos)
+        next_lt = source.find("<", pos)
 
-        # Pick the earliest position; among ties {{ > << > {.
+        # Pick the earliest position; among ties {{ > << > { > <.
+        # << beats < at the same position (both start with <, handled by iteration order).
         best_pos = source_len  # sentinel — no more special tokens
         best_type: str | None = None
-        for typ, idx in (("{{", next_double), ("<<", next_angle), ("{", next_single)):
+        for typ, idx in (("{{", next_double), ("<<", next_angle), ("{", next_single), ("<", next_lt)):
             if idx == -1:
                 continue
             if idx < best_pos:
@@ -175,6 +213,13 @@ def parse(source: str, relative_path: str) -> list[AstNode]:
                 best_type = typ
             elif idx == best_pos and typ == "{{":
                 best_type = typ  # {{ beats << or { at the same position
+
+        # Update fence state for text between pos and the next token (non-frontmatter only).
+        seg_end = best_pos if best_type is not None else source_len
+        fence_scan_start = max(pos, frontmatter_end)
+        if fence_scan_start < seg_end:
+            for _fm in _FENCE_RE.finditer(source, fence_scan_start, seg_end):
+                in_fence = not in_fence
 
         if best_type is None:
             # No more special tokens — rest of source is plain text.
@@ -335,7 +380,7 @@ def parse(source: str, relative_path: str) -> list[AstNode]:
                 hint = _QUOTING_HINT
             raise _make_unknown_error(source, relative_path, pos, token, hint=hint)
 
-        else:  # best_type == "{"
+        elif best_type == "{":
             # Single brace — try to tokenize a runtime variable {name}.
             m = _VAR_RUNTIME_RE.match(source, pos)
             if m:
@@ -348,6 +393,72 @@ def parse(source: str, relative_path: str) -> list[AstNode]:
                 line, col = _line_col(source, pos)
                 nodes.append(Text(content="{", line=line, col=col))
                 pos += 1
+            continue
+
+        else:  # best_type == "<"
+            line_n, col_n = _line_col(source, pos)
+            if pos < frontmatter_end or in_fence:
+                # Inside TOML frontmatter or fenced code block — suppress component detection.
+                nodes.append(Text(content="<", line=line_n, col=col_n))
+                pos += 1
+                continue
+
+            tag_m = _COMPONENT_TAG_RE.match(source, pos)
+            if tag_m:
+                name = tag_m.group("name")
+                props_str = tag_m.group("props_str") or ""
+                raw_props: list[tuple[str, Any]] = []
+                _seen_names: set[str] = set()
+                for pm in _PROP_RE.finditer(props_str):
+                    pname = pm.group("name")
+                    if pname in _seen_names:
+                        raise errors.UnknownDirectiveError(
+                            f"duplicate prop name '{pname}' in component tag",
+                            file=relative_path,
+                            line=line_n,
+                            col=col_n,
+                            hint=f"Each prop may appear at most once per component tag.",
+                        )
+                    _seen_names.add(pname)
+                    eval_val = pm.group("eval")
+                    sval = pm.group("sval")
+                    if eval_val is not None:
+                        if eval_val == "true":
+                            val: Any = True
+                        elif eval_val == "false":
+                            val = False
+                        else:
+                            try:
+                                val = int(eval_val)
+                            except ValueError:
+                                val = float(eval_val)
+                    else:
+                        val = sval
+                    raw_props.append((pname, val))
+                nodes.append(ComponentInvocation(
+                    name=name,
+                    props=tuple(sorted(raw_props, key=lambda p: p[0])),
+                    line=line_n,
+                    col=col_n,
+                ))
+                pos = tag_m.end()
+                continue
+
+            # No component tag match at this `<`.
+            if (pos + 2 < source_len
+                    and source[pos + 1].isupper()
+                    and source[pos + 2].islower()):
+                raise errors.UnknownDirectiveError(
+                    "component tag appears to span multiple lines or is malformed",
+                    file=relative_path,
+                    line=line_n,
+                    col=col_n,
+                    token=source[pos:pos + 30],
+                    hint='Self-closing component tags must be on a single line: <Name prop="val" />',
+                )
+            # Bare `<` not starting a PascalCase name — emit as text.
+            nodes.append(Text(content="<", line=line_n, col=col_n))
+            pos += 1
             continue
 
     if not nodes:
