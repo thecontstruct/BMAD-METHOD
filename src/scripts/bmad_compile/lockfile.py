@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import json
 import sys  # pragma: allow-raw-io  (stderr write for AC-5 defensive warning)
-from typing import Any
+from typing import Any, Callable
 
 from . import errors, io, resolver
 from .io import PurePosixPath
@@ -303,6 +303,7 @@ def write_skill_entry(
     cache: resolver.CompileCache,
     lock_timeout_seconds: float = 300.0,
     components: list[dict] | None = None,
+    emit_fn: "Callable[[dict], None] | None" = None,
 ) -> None:
     """Write (or update) the skill entry in the lockfile at ``lockfile_path``.
 
@@ -341,6 +342,7 @@ def write_skill_entry(
             target_ide=target_ide,
             cache=cache,
             components=components,
+            emit_fn=emit_fn,
         )
     finally:
         # io.release_lock is documented no-throw (swallows OSError per
@@ -366,6 +368,7 @@ def _do_write_skill_entry(
     target_ide: str | None,
     cache: resolver.CompileCache,
     components: list[dict] | None = None,
+    emit_fn: "Callable[[dict], None] | None" = None,
 ) -> None:
     """Internal: the original RMW body, now called inside the AC-2 lock.
 
@@ -373,8 +376,35 @@ def _do_write_skill_entry(
     no max-length enforcement. Lineage entries accumulate indefinitely across
     upgrades. Pruning/compaction is deferred — see deferred-work.md:
     [lineage, Story 5.x — pruning].
+
+    Story 8.5: emit `lockfile_schema_migration` NDJSON event when this write
+    upgrades a v1 lockfile to v2 (i.e., when components are being written and
+    the on-disk version is below the current `_VERSION`). Fire-before-write
+    matches upgrade.py's established pattern.
     """
     _current_version = read_lockfile_version(lockfile_path)
+
+    # Story 8.5: emit lockfile_schema_migration when v1→v2 upgrade detected at write time.
+    # Fires only when components are being written to a previously-v1 lockfile.
+    if (
+        emit_fn is not None
+        and isinstance(_current_version, int)
+        and _current_version < _VERSION
+        and components
+    ):
+        try:
+            emit_fn({
+                "kind": "lockfile_schema_migration",
+                "old_version": _current_version,
+                "new_version": _VERSION,
+                "skill_id": skill_basename,
+                "new_component_names": sorted(
+                    set(c["name"] for c in components if isinstance(c, dict) and "name" in c)
+                ),
+            })
+        except Exception:
+            pass  # emit_fn errors MUST NOT propagate into the write path
+
     existing: dict[str, Any] = {}
     if io.is_file(lockfile_path):
         try:

@@ -27,11 +27,368 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Iterable
+from dataclasses import dataclass
+from typing import Any, Callable, Iterable
 
 from . import errors, io, lockfile, parser, resolver, toml_merge, variants
 
+# Story 8.5: ComponentRunner is imported lazily inside compile_skill() rather than
+# at module load. component_runner.py uses absolute `from bmad_compile.errors` imports
+# (frozen file) — importing it at engine.py module load breaks any caller that loads
+# bmad_compile via the `src.scripts.bmad_compile.*` form without first putting
+# `src/scripts` on sys.path. Lazy import defers the resolution until tests can
+# trigger compile_skill, which only happens in contexts that have already set up
+# sys.path correctly.
+
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class EnrichedInvocation:
+    """ComponentInvocation enriched with file path and render mode after discovery.
+
+    token_index is the 0-based index of this node in the flat_nodes list passed to
+    _discover_components(); used by _assemble_nodes() to look up compile-mode buffer results.
+    """
+    original: "parser.ComponentInvocation"
+    render_mode: str          # "compile" or "jit"
+    component_abs_path: str   # absolute path verified to exist and within skill_source_root
+    token_index: int          # position in the original flat_nodes for buffer lookup
+
+
+def _strip_string_and_comment_tokens(source: str) -> str:
+    """Return source with all STRING and COMMENT token content replaced by empty strings,
+    preserving line structure so MULTILINE ^ anchors work.
+
+    Used before regex scanning for RENDER_MODE and RENDER_ERROR_FALLBACK to avoid false
+    positives from docstrings or comments containing those variable names.
+    """
+    import io as _io
+    import tokenize as _tokenize
+    try:
+        tokens = list(_tokenize.generate_tokens(_io.StringIO(source).readline))
+    except _tokenize.TokenError:
+        return source
+    lines = source.splitlines(keepends=True)
+    result = list(lines)
+    for tok_type, _, (srow, scol), (erow, ecol), _ in reversed(tokens):
+        if tok_type in (_tokenize.STRING, _tokenize.COMMENT):
+            if srow == erow:
+                result[srow - 1] = result[srow - 1][:scol] + result[srow - 1][ecol:]
+            else:
+                result[srow - 1] = result[srow - 1][:scol]
+                for mid in range(srow, erow - 1):
+                    result[mid] = "\n"
+                result[erow - 1] = result[erow - 1][ecol:]
+    return "".join(result)
+
+
+# RENDER_MODE read (Architecture §8.2 two-phase approach).
+# Two-regex design (mirrors component_wrapper.py): the ASSIGN pattern is a
+# skeleton applied to the STRIPPED source (tokenize blanks string literals,
+# so docstring/comment false positives are eliminated); the LITERAL pattern
+# carries the actual string content and is applied to the RAW source for
+# value extraction. Spec §5 said "apply both to stripped" but a stripped
+# source has no literal to match, so we use stripped-for-presence + raw-for-value.
+#
+# NOTE on quoting: regex char-classes that contain quote chars must use
+# double-quoted r-strings with escaped inner quotes so every Python string
+# literal has an even count of double-quote chars in the SOURCE bytes —
+# the io-boundary checker has a naive string-strip pre-pass that pairs raw
+# double-quote bytes without honoring Python string syntax, and an unpaired
+# char makes the pre-pass collapse subsequent lines into one giant span.
+_RENDER_MODE_ASSIGN_RE = re.compile(r"^RENDER_MODE\s*=\s*", re.MULTILINE)
+_RENDER_MODE_LITERAL_RE = re.compile(
+    r"^RENDER_MODE\s*=\s*[\"'](?P<mode>compile|jit)[\"']", re.MULTILINE
+)
+# Skeleton form for presence detection on STRIPPED source (the literal value
+# is stripped to empty, so the trailing quote is intentionally not required).
+_FALLBACK_RE = re.compile(r"^RENDER_ERROR_FALLBACK\s*=\s*", re.MULTILINE)
+
+# Component tag probe shared by post-parse Text scan and fragment-body scan.
+# Requires lowercase after initial cap (suppresses all-caps tags like HTML, DOCTYPE).
+_FRAGMENT_COMPONENT_PROBE = re.compile(r'<[A-Z][a-z][A-Za-z0-9]*[\s/>]')
+_TEXT_COMPONENT_PROBE = _FRAGMENT_COMPONENT_PROBE
+
+
+def _read_render_mode(source: str, component_name: str) -> str:
+    """Read RENDER_MODE from component source text (no import, no ast.parse).
+
+    Applies tokenize-strip before regex to avoid false positives from docstrings
+    containing RENDER_MODE assignments. Raises CompilerError if RENDER_MODE is
+    present but not a recognized literal.
+    """
+    stripped = _strip_string_and_comment_tokens(source)
+    if not _RENDER_MODE_ASSIGN_RE.search(stripped):
+        return "compile"
+    # Presence confirmed on stripped (no docstring false-positive). Now extract
+    # the literal value from the RAW source (strip blanks the string content).
+    m = _RENDER_MODE_LITERAL_RE.search(source)
+    if m is None:
+        raise errors.CompilerError(
+            f"component {component_name!r}: RENDER_MODE is set but is not a recognized "
+            f"literal ('compile' or 'jit'). Found assignment but could not match a known "
+            f"string literal. Check for typos or non-literal forms (e.g. variable reference)."
+        )
+    return m.group("mode")
+
+
+def _props_hash(props: "tuple[tuple[str, Any], ...]") -> str:
+    """First 16 hex chars of SHA-256 of sorted JSON props dict (FR-4.6)."""
+    # props_hash is SHA-256[:16]; collision probability negligible at template scale.
+    import hashlib as _hashlib  # pragma: allow-raw-io
+    d = dict(props)
+    return _hashlib.sha256(  # pragma: allow-raw-io
+        json.dumps(d, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def _build_central_ctx_config(central_config_root: io.PurePosixPath) -> "dict[str, Any]":
+    """Merge the 4 central config TOML layers for ctx.config at compile time.
+
+    Layer order (lowest → highest priority):
+      <root>/config.toml              (central-base-team)
+      <root>/config.user.toml         (central-base-user)
+      <root>/custom/config.toml       (central-custom-team)
+      <root>/custom/config.user.toml  (central-custom-user)
+    """
+    layer_paths = [
+        central_config_root / "config.toml",
+        central_config_root / "config.user.toml",
+        central_config_root / "custom" / "config.toml",
+        central_config_root / "custom" / "config.user.toml",
+    ]
+    layers: list[dict[str, Any]] = []
+    for p in layer_paths:
+        if not io.is_file(str(p)):
+            continue
+        try:
+            layers.append(toml_merge.load_toml_file(str(p)))
+        except Exception as exc:
+            raise errors.CompilerError(
+                f"malformed central config '{p}': {exc}"
+            ) from exc
+    if not layers:
+        return {}
+    return toml_merge.merge_layers(*layers)
+
+
+def _fragment_body_scan(
+    dep_tree: "list[resolver.ResolvedFragment]",
+    cache: "resolver.CompileCache",
+) -> None:
+    """Scan all resolved fragments (dep_tree[1:]) for prohibited component tags.
+
+    FR-1.7: component tags must not appear in fragment bodies. Raises CompilerError
+    identifying the fragment path, offending tag, and source reference.
+    """
+    if len(dep_tree) <= 1:
+        return
+
+    for frag in dep_tree[1:]:
+        try:
+            source = cache.get_source((frag.resolved_path, frag.resolved_from))
+        except KeyError:
+            continue
+
+        stripped_lines: list[str] = []
+        in_fence = False
+        for line in source.splitlines(keepends=True):
+            is_fence_marker = bool(re.match(r'^(`{3,}|~{3,})', line))
+            if is_fence_marker:
+                in_fence = not in_fence
+                stripped_lines.append('')
+            elif in_fence:
+                stripped_lines.append('')
+            else:
+                stripped_lines.append(line)
+        stripped = ''.join(stripped_lines)
+
+        m = _FRAGMENT_COMPONENT_PROBE.search(stripped)
+        if m is not None:
+            tag_text = m.group(0).rstrip()
+            raise errors.CompilerError(
+                f"component tag '{tag_text}' found in fragment '{frag.src}'. "
+                f"Component tags are prohibited in fragment files (FR-1.7). "
+                f"Move the component tag to the root template."
+            )
+
+
+def _discover_components(
+    flat_nodes: "list[Any]",
+    skill_source_root: io.PurePosixPath,
+) -> "tuple[list[Any], list[EnrichedInvocation], list[EnrichedInvocation]]":
+    """Discover, validate, and classify component invocations in flat_nodes.
+
+    Returns (enriched_flat_nodes, compile_invocations, jit_invocations).
+    """
+    import os as _os
+
+    if not io.is_dir(str(skill_source_root)):
+        raise errors.CompilerError(
+            f"skill_source_root '{skill_source_root}' is not a directory"
+        )
+
+    real_skill_root = _os.path.realpath(str(skill_source_root))
+
+    invocations: list[tuple[int, "parser.ComponentInvocation"]] = [
+        (i, node)
+        for i, node in enumerate(flat_nodes)
+        if isinstance(node, parser.ComponentInvocation)
+    ]
+
+    if not invocations:
+        return list(flat_nodes), [], []
+
+    name_to_relpath: dict[str, str] = {}
+    relpath_to_names: dict[str, list[str]] = {}
+    for _, node in invocations:
+        if node.name in name_to_relpath:
+            continue
+        relpath = parser.component_name_to_path(node.name)
+        name_to_relpath[node.name] = relpath
+        relpath_to_names.setdefault(relpath, []).append(node.name)
+
+    for relpath, names in relpath_to_names.items():
+        if len(names) > 1:
+            raise errors.CompilerError(
+                f"component name collision: {names[0]!r} and {names[1]!r} both resolve "
+                f"to '{relpath}'. Rename one component to avoid the collision."
+            )
+
+    name_to_abspath: dict[str, str] = {}
+    for name, relpath in name_to_relpath.items():
+        abs_path = str(io.to_posix(skill_source_root) / relpath)
+        real_abs = _os.path.realpath(abs_path)
+        if not real_abs.startswith(real_skill_root + _os.sep):
+            raise errors.CompilerError(
+                f"component '{name}': resolved path '{abs_path}' escapes skill_source_root"
+            )
+        line_num = next(
+            (node.line for _, node in invocations if node.name == name), None
+        )
+        if not io.is_file(abs_path):
+            raise errors.CompilerError(
+                f"component '{name}': expected file '{abs_path}' not found"
+                + (f" (referenced at line {line_num})" if line_num else "")
+            )
+        name_to_abspath[name] = abs_path
+
+    source_cache: dict[str, str] = {}
+    for name, abs_path in name_to_abspath.items():
+        if abs_path not in source_cache:
+            source_cache[abs_path] = io.read_template(abs_path)
+
+    name_to_mode: dict[str, str] = {}
+    for name, abs_path in name_to_abspath.items():
+        source = source_cache[abs_path]
+        mode = _read_render_mode(source, name)
+        name_to_mode[name] = mode
+        if mode == "jit":
+            stripped = _strip_string_and_comment_tokens(source)
+            if not _FALLBACK_RE.search(stripped):
+                raise errors.CompilerError(
+                    f"JIT-mode component '{name}' ('{abs_path}') is missing "
+                    f"RENDER_ERROR_FALLBACK. JIT components MUST declare "
+                    f"RENDER_ERROR_FALLBACK = \"...\" at module level (FR-6.2)."
+                )
+
+    enriched: list[Any] = []
+    compile_invocations: list[EnrichedInvocation] = []
+    jit_invocations: list[EnrichedInvocation] = []
+
+    for i, node in enumerate(flat_nodes):
+        if isinstance(node, parser.ComponentInvocation):
+            abs_path = name_to_abspath[node.name]
+            mode = name_to_mode[node.name]
+            ei = EnrichedInvocation(
+                original=node,
+                render_mode=mode,
+                component_abs_path=abs_path,
+                token_index=i,
+            )
+            enriched.append(ei)
+            if mode == "compile":
+                compile_invocations.append(ei)
+            else:
+                jit_invocations.append(ei)
+        else:
+            enriched.append(node)
+
+    return enriched, compile_invocations, jit_invocations
+
+
+def _post_parse_text_scan(parsed_nodes: "Iterable[Any]") -> None:
+    """Story 8.5 (deferred from Story 8.2): scan Text nodes for malformed component tags.
+
+    For each parser.Text node, strip fenced code blocks (line-by-line tracker so
+    line numbers stay accurate), then probe for the unconsumed PascalCase tag
+    pattern. The parser already catches most malformed `<Xx...` patterns inline;
+    this scan catches the residual cases where a Text node carries a multi-line
+    or otherwise unconsumed component-like tag (e.g. content assembled from a
+    resolver substitution that escaped the parser's per-character scan).
+    """
+    for _text_node in parsed_nodes:
+        if not isinstance(_text_node, parser.Text):
+            continue
+        _stripped_lines: list[str] = []
+        _in_fence = False
+        for _line in _text_node.content.splitlines(keepends=True):
+            _is_fence = bool(re.match(r"^(`{3,}|~{3,})", _line))
+            if _is_fence:
+                _in_fence = not _in_fence
+                _stripped_lines.append("")
+            elif _in_fence:
+                _stripped_lines.append("")
+            else:
+                _stripped_lines.append(_line)
+        _stripped_content = "".join(_stripped_lines)
+        _m = _TEXT_COMPONENT_PROBE.search(_stripped_content)
+        if _m is not None:
+            _approx_line = _stripped_content[:_m.start()].count("\n") + 1
+            raise errors.CompilerError(
+                f"Component tag '{_m.group(0).rstrip()}' at approximately line "
+                f"{_approx_line} of the template appears to span multiple lines or "
+                f"contains unsupported syntax. Component tags must be self-closing on "
+                f"a single line: <ComponentName prop=\"val\" />"
+            )
+
+
+def _assemble_nodes(flat_nodes: "Iterable[Any]", buffer: "dict[int, str]") -> str:
+    """Assemble the compiled text from enriched flat_nodes.
+
+    Replaces _render() in the compile_skill() path when components are present.
+    Safe to call with an empty buffer and no EnrichedInvocation nodes — produces
+    identical output to _render() for non-component skills.
+    """
+    parts: list[str] = []
+    for node in flat_nodes:
+        if isinstance(node, parser.Text):
+            parts.append(node.content)
+        elif isinstance(node, parser.VarRuntime):
+            parts.append("{" + node.name + "}")
+        elif isinstance(node, EnrichedInvocation):
+            if node.render_mode == "compile":
+                if node.token_index not in buffer:
+                    raise RuntimeError(
+                        f"ComponentRunner returned no output for token_index={node.token_index} "
+                        f"(component={node.original.name!r}); indicates a runner/buffer mismatch"
+                    )
+                parts.append(buffer[node.token_index])
+            else:
+                # props_hash is SHA-256[:16]; collision probability negligible at template scale.
+                parts.append(
+                    f"<!-- BMAD-JIT:{node.original.name}:"
+                    f"{_props_hash(node.original.props)} -->"
+                )
+        else:
+            raise RuntimeError(
+                f"engine cannot render node type {type(node).__name__}; "
+                "VarCompile should have been resolved by resolver.resolve(), "
+                "ComponentInvocation should have been enriched by _discover_components()"
+            )
+    return "".join(parts)
+
 
 # Story 3.0: reserved dir names at install-root depth-1; mirrors
 # compile.py's _SKIP_AT_DEPTH_1. Same set, same rationale — these dirs are
@@ -288,6 +645,7 @@ def _compile_core(
 
     source = io.read_template(str(template_path))
     parsed_nodes = parser.parse(source, relative_path)
+    _post_parse_text_scan(parsed_nodes)
 
     # --- Variable scope (Decision 3) ---
     # Probe for bmad-config YAML (non-self.* cascade, bmad-config tier).
@@ -428,6 +786,8 @@ def compile_skill(
     override_root: io.PathLike | None = None,
     install_flags: dict[str, str] | None = None,
     toml_warning_sink: list[dict[str, Any]] | None = None,
+    emit_fn: "Callable[[dict], None] | None" = None,
+    component_runner: "Any | None" = None,
 ) -> None:
     """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
 
@@ -476,7 +836,68 @@ def compile_skill(
         explain_mode=False,
         toml_warning_sink=toml_warning_sink,
     )
-    rendered = _render(flat_nodes)
+
+    # Story 8.5: fragment-body scan, component discovery, dispatch, and assembly.
+    _fragment_body_scan(dep_tree, cache)
+
+    skill_posix = io.to_posix(skill_dir)
+    enriched_flat_nodes, compile_invocations, _jit_invocations = _discover_components(
+        flat_nodes, skill_posix
+    )
+
+    # Build ctx_dict for ComponentRunner.
+    _current_module = skill_posix.parent.name if lockfile_root is not None else "core"
+    skill_id = f"{_current_module}/{basename}"
+    if lockfile_root is not None:
+        _central_config_root = io.to_posix(lockfile_root)
+    else:
+        _central_config_root = io.to_posix(scenario_root) / "_bmad"
+
+    ctx_dict: dict[str, Any] = {
+        "config": _build_central_ctx_config(_central_config_root),
+        "skill_id": skill_id,
+        "skill_source_root": str(skill_posix),
+        "render_mode": "compile",
+    }
+
+    # Dispatch compile-mode components (atomic batch). Raises ComponentBatchError on any
+    # per-component failure; no writes below if it raises (FR-6.1 atomicity).
+    if component_runner is not None:
+        runner = component_runner
+    else:
+        from .component_runner import ComponentRunner  # lazy: see top-of-module note
+        runner = ComponentRunner(emit_fn=emit_fn)
+    buffer: dict[int, str] = runner.run_compile_batch(compile_invocations, ctx_dict)
+
+    rendered = _assemble_nodes(enriched_flat_nodes, buffer)
+
+    # Build per-token component records for the lockfile (document token order, AC-11).
+    source_text_cache: dict[str, str] = {}
+    def _get_component_source(abs_path: str) -> str:
+        if abs_path not in source_text_cache:
+            source_text_cache[abs_path] = io.read_template(abs_path)
+        return source_text_cache[abs_path]
+
+    component_records: list[dict[str, Any]] = []
+    for inv in (n for n in enriched_flat_nodes if isinstance(n, EnrichedInvocation)):
+        src = _get_component_source(inv.component_abs_path)
+        component_records.append({
+            "name": inv.original.name,
+            "path": parser.component_name_to_path(inv.original.name),
+            "source_hash": io.hash_text(src),
+            "render_mode": inv.render_mode,
+            "props": dict(inv.original.props),
+            "props_hash": _props_hash(inv.original.props),
+            "compiled_hash": (
+                io.hash_text(buffer[inv.token_index])
+                if inv.render_mode == "compile"
+                else None
+            ),
+            "sentinel_format_version": (
+                None if inv.render_mode == "compile" else 1
+            ),
+        })
+
     io.write_text(str(output_path), rendered)
     lockfile.write_skill_entry(
         lockfile_path,
@@ -488,6 +909,8 @@ def compile_skill(
         var_scope=var_scope,
         target_ide=tid,
         cache=cache,
+        components=component_records,
+        emit_fn=emit_fn,
     )
 
 
