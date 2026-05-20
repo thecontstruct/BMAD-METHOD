@@ -131,16 +131,169 @@ function test_multiple_violations() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// TPL-02 helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+function makeComponentFixture(skillMdBody, fixtureFiles = {}) {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tpl02-test-'));
+  const skillDir = path.join(tmpRoot, 'bmad-test-fixture');
+  fs.mkdirSync(skillDir);
+  const fullSkillMd = SKILL_MD.trimEnd() + '\n\n' + skillMdBody + '\n';
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), fullSkillMd);
+  for (const [relPath, content] of Object.entries(fixtureFiles)) {
+    const absPath = path.join(skillDir, relPath);
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, content);
+  }
+  return { tmpRoot, skillDir };
+}
+
+function makeCompEntry(overrides = {}) {
+  return {
+    name: 'DateBanner',
+    path: 'components/date_banner.py',
+    source_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    render_mode: 'compile',
+    props: {},
+    props_hash: '1234567890abcdef',
+    compiled_hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    sentinel_format_version: null,
+    ...overrides,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// TPL-02 test cases
+// ─────────────────────────────────────────────────────────────────────────
+
+// Case 6 — compile-only skill with stale JIT sentinel → TPL-02 HIGH
+function test_tpl02_compile_only_with_jit_sentinel() {
+  const { tmpRoot, skillDir } = makeComponentFixture('<!-- BMAD-JIT:DateBanner:1234567890abcdef -->', {
+    'components/date_banner.py': 'RENDER_MODE = "compile"\ndef render(ctx, **props):\n    return ""\n',
+  });
+  const components = [makeCompEntry({ render_mode: 'compile' })];
+  try {
+    const findings = validateSkill(skillDir, components).filter((f) => f.rule === 'TPL-02');
+    record('Case 6: compile-only with JIT sentinel → 1 HIGH TPL-02', findings.length > 0, `got ${findings.length}`);
+    record(
+      'Case 6: finding severity HIGH',
+      findings.some((f) => f.severity === 'HIGH' && f.title === 'Compile-only skill contains JIT sentinel'),
+      JSON.stringify(findings.map((f) => f.title)),
+    );
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+// Case 7 — malformed sentinel → TPL-02 HIGH
+function test_tpl02_malformed_sentinel() {
+  const { tmpRoot, skillDir } = makeComponentFixture('<!-- BMAD-JIT:badformat -->');
+  const components = [makeCompEntry({ render_mode: 'jit', sentinel_format_version: 1, compiled_hash: null })];
+  try {
+    const findings = validateSkill(skillDir, components).filter((f) => f.rule === 'TPL-02');
+    record(
+      'Case 7: malformed sentinel → 1 HIGH TPL-02',
+      findings.some((f) => f.severity === 'HIGH' && f.title === 'Malformed JIT sentinel in SKILL.md'),
+      JSON.stringify(findings.map((f) => f.title)),
+    );
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+// Case 8 — sentinel with no lockfile entry → TPL-02 MEDIUM
+function test_tpl02_sentinel_lockfile_mismatch() {
+  const { tmpRoot, skillDir } = makeComponentFixture('<!-- BMAD-JIT:DateBanner:bbbbbbbbbbbbbbbb -->');
+  const components = [
+    makeCompEntry({ render_mode: 'jit', props_hash: 'aaaaaaaaaaaaaaaa', compiled_hash: null, sentinel_format_version: 1 }),
+  ];
+  try {
+    const findings = validateSkill(skillDir, components).filter((f) => f.rule === 'TPL-02');
+    record(
+      'Case 8: sentinel hash mismatch → MEDIUM TPL-02',
+      findings.some((f) => f.severity === 'MEDIUM' && f.title === 'JIT sentinel has no matching lockfile entry'),
+      JSON.stringify(findings.map((f) => `${f.severity}:${f.title}`)),
+    );
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+// Case 9 — component missing def render( → TPL-02 HIGH
+function test_tpl02_missing_def_render() {
+  const { tmpRoot, skillDir } = makeComponentFixture('Body content.', {
+    'components/date_banner.py': 'RENDER_MODE = "compile"\n# no render function\n',
+  });
+  const components = [makeCompEntry({ render_mode: 'compile' })];
+  try {
+    const findings = validateSkill(skillDir, components).filter((f) => f.rule === 'TPL-02');
+    record(
+      'Case 9: missing def render( → HIGH TPL-02',
+      findings.some((f) => f.severity === 'HIGH' && f.title === 'Component missing def render( function'),
+      JSON.stringify(findings.map((f) => `${f.severity}:${f.title}`)),
+    );
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+// Case 10 — JIT component missing RENDER_ERROR_FALLBACK → TPL-02 HIGH
+function test_tpl02_missing_render_error_fallback() {
+  const { tmpRoot, skillDir } = makeComponentFixture('Body content.', {
+    'components/sprint_banner.py': 'RENDER_MODE = "jit"\ndef render(ctx, **props):\n    return "hello"\n',
+  });
+  const components = [
+    makeCompEntry({
+      name: 'SprintBanner',
+      path: 'components/sprint_banner.py',
+      render_mode: 'jit',
+      compiled_hash: null,
+      sentinel_format_version: 1,
+    }),
+  ];
+  try {
+    const findings = validateSkill(skillDir, components).filter((f) => f.rule === 'TPL-02');
+    record(
+      'Case 10: missing RENDER_ERROR_FALLBACK → HIGH TPL-02',
+      findings.some((f) => f.severity === 'HIGH' && f.title === 'JIT component missing RENDER_ERROR_FALLBACK'),
+      JSON.stringify(findings.map((f) => `${f.severity}:${f.title}`)),
+    );
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+// Case 11 — components: [] → no TPL-02 findings (AC-1 skip)
+function test_tpl02_empty_components_skip() {
+  const { tmpRoot, skillDir } = makeComponentFixture('<!-- BMAD-JIT:Whatever:1234567890abcdef -->');
+  const components = [];
+  try {
+    const findings = validateSkill(skillDir, components).filter((f) => f.rule === 'TPL-02');
+    record('Case 11: components: [] → no TPL-02 findings', findings.length === 0, `got ${findings.length}`);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────────────
 
-console.log(`${colors.cyan}test-validate-skills.js (TPL-01)${colors.reset}\n`);
+console.log(`${colors.cyan}test-validate-skills.js (TPL-01 + TPL-02)${colors.reset}\n`);
 
 test_compile_time_sub_in_template_fires();
 test_clean_template_no_finding();
 test_self_sigil_no_finding();
 test_non_template_no_finding();
 test_multiple_violations();
+
+console.log(`\n${colors.cyan}--- TPL-02 cases ---${colors.reset}`);
+test_tpl02_compile_only_with_jit_sentinel();
+test_tpl02_malformed_sentinel();
+test_tpl02_sentinel_lockfile_mismatch();
+test_tpl02_missing_def_render();
+test_tpl02_missing_render_error_fallback();
+test_tpl02_empty_components_skip();
 
 console.log('');
 console.log(`${colors.cyan}========================================${colors.reset}`);

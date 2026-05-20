@@ -20,6 +20,7 @@
  * - STEP-07: step count 2-10
  * - SEQ-02: no time estimates
  * - TPL-01: template files must not contain compile-time {{.var}} substitutions
+ * - TPL-02: component lint — JIT sentinels, render function presence, RENDER_ERROR_FALLBACK form
  *
  * Usage:
  *   node tools/validate-skills.js                    # All skills, human-readable
@@ -48,6 +49,16 @@ const STEP_FILENAME_REGEX = /^step-\d{2}[a-z]?-[a-z0-9-]+\.md$/;
 const TIME_ESTIMATE_PATTERNS = [/takes?\s+\d+\s*min/i, /~\s*\d+\s*min/i, /estimated\s+time/i, /\bETA\b/];
 const TEMPLATE_FILENAME_REGEX = /template/i;
 const COMPILE_TIME_SUB_REGEX = /\{\{\.\w+\}\}/;
+
+const LOCKFILE_PATH = path.join(PROJECT_ROOT, '_bmad', '_config', 'bmad.lock');
+const JIT_SENTINEL_PREFIX = '<!-- BMAD-JIT:';
+// Non-global: used for per-line well-formedness test in AC-3
+const JIT_SENTINEL_FULL_RE = /<!--\s*BMAD-JIT:([A-Z][A-Za-z0-9]+):([0-9a-f]{16})\s*-->/;
+// Global: used to extract all well-formed sentinels from SKILL.md for AC-4
+const JIT_SENTINEL_FULL_RE_GLOBAL = /<!--\s*BMAD-JIT:([A-Z][A-Za-z0-9]+):([0-9a-f]{16})\s*-->/g;
+const DEF_RENDER_RE = /def render\s*\(/;
+const FALLBACK_MULTILINE_RE = /^RENDER_ERROR_FALLBACK\s*=\s*("""|''')/m;
+const FALLBACK_SINGLE_LINE_RE = /^RENDER_ERROR_FALLBACK\s*=\s*["'].*["']/m;
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
@@ -242,9 +253,29 @@ function collectSkillFiles(skillDir) {
   return files;
 }
 
+// --- Lockfile Helper ---
+
+/**
+ * Read lockfile components[] for a named skill from the global lockfile.
+ * Returns null if the lockfile is absent, v1, or has no entry for this skill.
+ */
+function readLockfileComponents(skillName) {
+  if (!fs.existsSync(LOCKFILE_PATH)) return null;
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(LOCKFILE_PATH, 'utf-8'));
+  } catch {
+    return null;
+  }
+  if (!data || typeof data.version !== 'number' || data.version < 2) return null;
+  const entry = (data.entries || []).find((e) => e.skill === skillName);
+  if (!entry || !Array.isArray(entry.components)) return null;
+  return entry.components;
+}
+
 // --- Rule Checks ---
 
-function validateSkill(skillDir) {
+function validateSkill(skillDir, _testComponents) {
   const findings = [];
   const dirName = path.basename(skillDir);
   const skillMdPath = path.join(skillDir, 'SKILL.md');
@@ -598,6 +629,133 @@ function validateSkill(skillDir) {
           detail: `Template file contains compile-time substitution \`${match[0]}\` — this would be baked at render time and leak a machine-local value into every spec produced from the template.`,
           fix: 'Remove the `{{.var}}` reference. Use single-curly `{var}` if the value should be resolved at LLM runtime by the consumer of the generated spec.',
         });
+      }
+    }
+  }
+
+  // --- TPL-02: component lint for JIT sentinels, render function, RENDER_ERROR_FALLBACK ---
+  // TPL-01 catches unresolved template markers; TPL-02 catches component-level issues.
+  // Fires only for skills with a non-empty components[] in the v2 lockfile.
+  const _tpl02Components = _testComponents ?? readLockfileComponents(name);
+
+  if (_tpl02Components !== null && _tpl02Components.length > 0) {
+    const components = _tpl02Components;
+
+    // --- AC-2: compile-only skill must have no JIT sentinels ---
+    const allCompileMode = components.every((c) => c.render_mode === 'compile');
+    if (allCompileMode && skillContent.includes(JIT_SENTINEL_PREFIX)) {
+      findings.push({
+        rule: 'TPL-02',
+        title: 'Compile-only skill contains JIT sentinel',
+        severity: 'HIGH',
+        file: 'SKILL.md',
+        detail:
+          'All components are render_mode "compile" but SKILL.md contains a JIT sentinel. ' +
+          'Either a component mode changed without recompiling, or SKILL.md was corrupted.',
+        fix: 'Recompile the skill, or change the component render_mode to "jit" if JIT was intended.',
+      });
+    }
+
+    // --- AC-3: malformed JIT sentinels ---
+    const skillMdLines = skillContent.split('\n');
+    for (const [i, line] of skillMdLines.entries()) {
+      if (line.includes(JIT_SENTINEL_PREFIX) && !JIT_SENTINEL_FULL_RE.test(line)) {
+        findings.push({
+          rule: 'TPL-02',
+          title: 'Malformed JIT sentinel in SKILL.md',
+          severity: 'HIGH',
+          file: 'SKILL.md',
+          line: i + 1,
+          detail:
+            `JIT sentinel prefix found on line ${i + 1} but does not match expected format ` +
+            "'<!-- BMAD-JIT:ComponentName:16hexchars -->'. Recompile to regenerate well-formed sentinels.",
+          fix: 'Recompile the skill to regenerate SKILL.md with properly formatted sentinels.',
+        });
+      }
+    }
+
+    // --- AC-4: sentinel–lockfile alignment ---
+    for (const match of skillContent.matchAll(JIT_SENTINEL_FULL_RE_GLOBAL)) {
+      const [fullMatch, sentinelName, sentinelHash] = match;
+      const hasEntry = components.some((c) => c.name === sentinelName && c.props_hash === sentinelHash);
+      if (!hasEntry) {
+        findings.push({
+          rule: 'TPL-02',
+          title: 'JIT sentinel has no matching lockfile entry',
+          severity: 'MEDIUM',
+          file: 'SKILL.md',
+          detail:
+            `Sentinel '${fullMatch}' has no matching component entry in the lockfile ` +
+            '(name + props_hash mismatch). SKILL.md and lockfile are out of sync.',
+          fix: 'Recompile the skill to regenerate SKILL.md and lockfile together.',
+        });
+      }
+    }
+
+    // --- AC-5: missing def render( + AC-6: RENDER_ERROR_FALLBACK for JIT components ---
+    for (const entry of components) {
+      const compRelPath = entry.path;
+      const compAbsPath = path.join(skillDir, compRelPath);
+      let compSource = null;
+
+      if (!fs.existsSync(compAbsPath)) {
+        findings.push({
+          rule: 'TPL-02',
+          title: 'Component missing def render( function',
+          severity: 'HIGH',
+          file: compRelPath,
+          detail: `Component file not found: ${compRelPath}. Cannot verify render function or RENDER_ERROR_FALLBACK.`,
+          fix: 'Ensure the component file exists at the expected path relative to the skill directory.',
+        });
+        continue;
+      }
+
+      compSource = safeReadFile(compAbsPath, findings, compRelPath);
+      if (compSource === null) continue;
+
+      // AC-5: def render( check
+      // TPL-02 render-check is a regex scan; lambda and callable-class render patterns are
+      // not supported — use def render() syntax.
+      if (!DEF_RENDER_RE.test(compSource)) {
+        findings.push({
+          rule: 'TPL-02',
+          title: 'Component missing def render( function',
+          severity: 'HIGH',
+          file: compRelPath,
+          detail:
+            `Component file does not contain 'def render(' — the BMAD compile engine will ` + 'reject this component at compile time.',
+          fix: 'Add a def render(ctx, **props) -> str: function to the component.',
+        });
+      }
+
+      // AC-6: RENDER_ERROR_FALLBACK form check (JIT only)
+      if (entry.render_mode === 'jit') {
+        if (FALLBACK_MULTILINE_RE.test(compSource)) {
+          findings.push({
+            rule: 'TPL-02',
+            title: 'JIT component RENDER_ERROR_FALLBACK is not a single-line string literal',
+            severity: 'MEDIUM',
+            file: compRelPath,
+            detail:
+              "RENDER_ERROR_FALLBACK uses a triple-quoted or multi-line string. The wrapper's " +
+              'pre-import regex matches only single-line string literals — this component will ' +
+              'silently fall back to the system default error slot at JIT time.',
+            fix: "Change to a single-line string: RENDER_ERROR_FALLBACK = 'a safe error message'",
+          });
+        } else if (FALLBACK_SINGLE_LINE_RE.test(compSource)) {
+          // single-line string literal present — OK, no finding
+        } else {
+          findings.push({
+            rule: 'TPL-02',
+            title: 'JIT component missing RENDER_ERROR_FALLBACK',
+            severity: 'HIGH',
+            file: compRelPath,
+            detail:
+              'JIT-mode component does not define RENDER_ERROR_FALLBACK = "..." at module level. ' +
+              'This is required (FR-6.2 SHALL) for all JIT components to provide a safe error slot.',
+            fix: "Add RENDER_ERROR_FALLBACK = 'a safe error message' at module level.",
+          });
+        }
       }
     }
   }
