@@ -1,0 +1,1 @@
+This file is intentionally not a .py file — used to test that non-.py files in components/ are skipped.

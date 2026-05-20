@@ -301,6 +301,7 @@ class Installer {
             projectRoot: paths.projectRoot,
             message,
           });
+          await this._copyComponentFiles(skills, paths.bmadDir);
           for (const written of result.writtenFiles) {
             this.installedFiles.add(written);
           }
@@ -476,6 +477,40 @@ class Installer {
       const sourceDir = path.dirname(path.join(bmadDir, relativePath));
       if (await fs.pathExists(sourceDir)) {
         await fs.remove(sourceDir);
+      }
+    }
+  }
+
+  /**
+   * Copy component .py files from skill source dirs to the canonical installed path.
+   * <project_root>/_bmad/components/<module>/<skill>/<filename>
+   * Called after runBatchInstall() succeeds in "Compiling migrated skills" task.
+   * Skipped when model3FallbackApplied (Python absent path — no component execution possible).
+   */
+  async _copyComponentFiles(skills, bmadDir) {
+    for (const { skillDir } of skills) {
+      const componentsDir = path.join(skillDir, 'components');
+      if (!(await fs.pathExists(componentsDir))) continue;
+
+      let entries;
+      try {
+        entries = await fs.readdir(componentsDir, { withFileTypes: true });
+      } catch {
+        continue; // unreadable dir — skip silently
+      }
+      const pyFiles = entries.filter((e) => e.isFile() && e.name.endsWith('.py'));
+      if (pyFiles.length === 0) continue; // empty components/ → no-op; no destDir created
+
+      const moduleName = path.basename(path.dirname(skillDir));
+      const skillBasename = path.basename(skillDir);
+      const destDir = path.join(bmadDir, 'components', moduleName, skillBasename);
+      await fs.ensureDir(destDir);
+
+      for (const entry of pyFiles) {
+        const src = path.join(componentsDir, entry.name);
+        const dest = path.join(destDir, entry.name);
+        await fs.copyFile(src, dest);
+        this.installedFiles.add(dest);
       }
     }
   }
@@ -980,7 +1015,7 @@ class Installer {
 
     // Get all installed module directories
     const entries = await fs.readdir(bmadDir, { withFileTypes: true });
-    const nonModuleDirs = new Set(['_config', '_memory', 'memory', 'docs', 'scripts', 'custom']);
+    const nonModuleDirs = new Set(['_config', '_memory', 'memory', 'docs', 'scripts', 'custom', 'components']);
     const installedModules = entries.filter((entry) => entry.isDirectory() && !nonModuleDirs.has(entry.name)).map((entry) => entry.name);
 
     // Generate config.yaml for each installed module
@@ -1077,7 +1112,7 @@ class Installer {
 
     // Get all installed module directories
     const entries = await fs.readdir(bmadDir, { withFileTypes: true });
-    const nonModuleDirs = new Set(['_config', '_memory', 'memory', 'docs', 'scripts', 'custom']);
+    const nonModuleDirs = new Set(['_config', '_memory', 'memory', 'docs', 'scripts', 'custom', 'components']);
     const installedModules = entries.filter((entry) => entry.isDirectory() && !nonModuleDirs.has(entry.name)).map((entry) => entry.name);
 
     // Add core module to scan (it's installed at root level as _config, but we check src/core-skills)

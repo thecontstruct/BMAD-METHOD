@@ -489,6 +489,45 @@ async function main() {
     );
   });
 
+  // Story 8.9 sub-case g: Model 3 skill with components/ → fallback copies SKILL.md, no components/ dir
+  await runTest('sub-case g (8.9): Model 3 skill with components/ — fallback does not install component files', async () => {
+    const COMPONENT_FIXTURE_SKILL_DIR = path.join(__dirname, 'fixtures', 'component-installer', 'test-module', 'component-skill');
+
+    const tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-m3g-'));
+    try {
+      const skills = [{ skillDir: COMPONENT_FIXTURE_SKILL_DIR, installDir: tmpInstall }];
+      const applied = await applyModel3FallbackIfAllEligible(skills);
+
+      assert(applied === true, 'sub-case g (8.9): applyModel3FallbackIfAllEligible returns true for component fixture', `got: ${applied}`);
+
+      const installedSkillMd = path.join(tmpInstall, 'test-module', 'component-skill', 'SKILL.md');
+      let skillMdExists = false;
+      try {
+        await fs.access(installedSkillMd);
+        skillMdExists = true;
+      } catch {
+        skillMdExists = false;
+      }
+      assert(
+        skillMdExists,
+        'sub-case g (8.9): SKILL.md copied to installDir/test-module/component-skill/',
+        `expected: ${installedSkillMd}`,
+      );
+
+      const componentsDir = path.join(tmpInstall, 'components');
+      let componentsDirExists = false;
+      try {
+        await fs.access(componentsDir);
+        componentsDirExists = true;
+      } catch {
+        componentsDirExists = false;
+      }
+      assert(!componentsDirExists, 'sub-case g (8.9): no components/ dir created by applyModel3FallbackIfAllEligible');
+    } finally {
+      await fs.rm(tmpInstall, { recursive: true, force: true });
+    }
+  });
+
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);
 }
