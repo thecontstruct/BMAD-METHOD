@@ -153,6 +153,8 @@ class ComponentError(CompilerError):
         exit_code: int | None = None,
         stderr: str | None = None,
         render_error_fallback: str | None = None,
+        mode: str | None = None,
+        props: dict | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(desc, **kwargs)
@@ -160,6 +162,8 @@ class ComponentError(CompilerError):
         self.exit_code = exit_code
         self.stderr = stderr
         self.render_error_fallback = render_error_fallback
+        self.mode = mode
+        self.props = props
 
 
 class ComponentTimeoutError(ComponentError):
