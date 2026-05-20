@@ -14,7 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import hashlib
+import io as _io_mod
 import re
+import tokenize as _tok_mod
 import subprocess
 import sys
 from pathlib import Path
@@ -45,6 +48,14 @@ _COMPONENT_PROBE_RE = re.compile(
     re.MULTILINE,
 )
 
+_CURRENT_SENTINEL_FORMAT_VERSION = 1
+
+_UPG_RENDER_MODE_ASSIGN_RE = re.compile(r'^RENDER_MODE\s*=\s*', re.MULTILINE)
+_UPG_RENDER_MODE_LITERAL_RE = re.compile(
+    r'^RENDER_MODE\s*=\s*["\'](?P<mode>compile|jit)["\']',
+    re.MULTILINE,
+)
+
 # Test-only override: set to a Path to redirect compile.py resolution in tests.
 _COMPILE_PY_PATH: Path | None = None
 
@@ -70,11 +81,68 @@ def _find_component_names_in_installed_template(
     return list(dict.fromkeys(_COMPONENT_PROBE_RE.findall(content)))
 
 
+def _upg_strip_tokens(source: str) -> str:
+    """Strip STRING/COMMENT token content; preserve line structure for MULTILINE anchors."""
+    try:
+        tokens = list(_tok_mod.generate_tokens(_io_mod.StringIO(source).readline))
+    except _tok_mod.TokenError:
+        return source
+    lines = source.splitlines(keepends=True)
+    result = list(lines)
+    for tok_type, _, (srow, scol), (erow, ecol), _ in reversed(tokens):
+        if tok_type in (_tok_mod.STRING, _tok_mod.COMMENT):
+            if srow == erow:
+                result[srow - 1] = result[srow - 1][:scol] + result[srow - 1][ecol:]
+            else:
+                result[srow - 1] = result[srow - 1][:scol]
+                for mid in range(srow, erow - 1):
+                    result[mid] = "\n"
+                result[erow - 1] = result[erow - 1][ecol:]
+    return "".join(result)
+
+
+def _read_component_render_mode(source: str) -> str:
+    """Return 'compile' or 'jit'; defaults to 'compile' for absent or invalid RENDER_MODE.
+
+    Upgrade-context leniency: invalid literal → 'compile' (not CompilerError).
+    """
+    stripped = _upg_strip_tokens(source)
+    if not _UPG_RENDER_MODE_ASSIGN_RE.search(stripped):
+        return "compile"
+    m = _UPG_RENDER_MODE_LITERAL_RE.search(source)
+    return m.group("mode") if m else "compile"
+
+
+def _compute_source_hash(path: Path) -> str | None:
+    """Return SHA-256 hex of file bytes, or None on read error."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _fmt_hash(h: str | None) -> str:
     """Truncate a hex hash to 12 chars + '...' for human readability."""
     if h is None:
         return "(none)"
     return h[:12] + "..."
+
+
+def _print_component_drift_item(item: dict[str, Any]) -> None:
+    """Print one component drift item in Architecture §10.2 triage format."""
+    kind = item["kind"]
+    print(f"Skill: {item['skill']}")
+    if kind == "component_drift":
+        print(f"  [component_drift] {item['path']}")
+        print(f"    component: {item['component']}")
+        print(f"    props:     {json.dumps(item.get('props') or {})}")
+        print(f"    old-hash:  {_fmt_hash(item.get('old_hash'))}")
+        print(f"    new-hash:  {_fmt_hash(item.get('new_hash'))}")
+    elif kind == "component_mode_drift":
+        print(f"  [component_mode_drift] {item['path']}")
+        print(f"    component: {item['component']}")
+        rc = item["render_mode_change"]
+        print(f"    render_mode_change: {rc['old']} → {rc['new']}")
 
 
 def _format_human(report: DriftReport) -> str:
@@ -265,6 +333,114 @@ def _run_compile_install_phase(project_root: str) -> int:
     return 0
 
 
+def _collect_component_drift(
+    entries: list[dict[str, Any]],
+    project_root: str,
+) -> tuple[list[dict[str, Any]], dict[tuple[str, str], str]]:
+    """Detect component drift for all entries; return (drift_items, jit_source_updates).
+
+    jit_source_updates: {(skill_id, comp_name): new_hash} for JIT-source-only drift.
+    sentinel_format_migration events are printed here as a side effect (INFO, no halt).
+    """
+    drift_items: list[dict[str, Any]] = []
+    jit_updates: dict[tuple[str, str], str] = {}
+
+    for entry in entries:
+        skill_id = entry.get("skill", "")
+        components = entry.get("components") or []
+        if not isinstance(components, list):
+            continue
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            comp_name = comp.get("name", "")
+            comp_path = comp.get("path", "")
+            comp_hash = comp.get("source_hash")
+            comp_mode = comp.get("render_mode", "compile")
+            comp_sfv = comp.get("sentinel_format_version")
+            comp_props = comp.get("props") or {}
+
+            skill_parts = skill_id.split("/", 1)
+            if len(skill_parts) != 2:
+                continue
+            module_name, skill_basename = skill_parts
+            installed_path = (
+                Path(project_root) / "_bmad" / "components"
+                / module_name / skill_basename / Path(comp_path).name
+            )
+            if not installed_path.is_file():
+                continue
+
+            if comp_sfv is not None and comp_sfv != _CURRENT_SENTINEL_FORMAT_VERSION:
+                print(
+                    json.dumps({
+                        "kind": "sentinel_format_migration",
+                        "skill_id": skill_id,
+                        "component": comp_name,
+                        "old_version": comp_sfv,
+                        "new_version": _CURRENT_SENTINEL_FORMAT_VERSION,
+                    }),
+                    flush=True,
+                )
+
+            new_hash = _compute_source_hash(installed_path)
+            if new_hash is None:
+                continue
+            try:
+                source = installed_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            new_mode = _read_component_render_mode(source)
+
+            if new_mode != comp_mode:
+                drift_items.append({
+                    "kind": "component_mode_drift",
+                    "skill": skill_id,
+                    "component": comp_name,
+                    "path": comp_path,
+                    "render_mode_change": {"old": comp_mode, "new": new_mode},
+                    "old_hash": comp_hash,
+                    "new_hash": new_hash,
+                })
+                continue
+
+            if new_hash != comp_hash:
+                drift_items.append({
+                    "kind": "component_drift",
+                    "skill": skill_id,
+                    "component": comp_name,
+                    "path": comp_path,
+                    "props": comp_props,
+                    "old_hash": comp_hash,
+                    "new_hash": new_hash,
+                    "render_mode": new_mode,
+                })
+                if new_mode == "jit":
+                    jit_updates[(skill_id, comp_name)] = new_hash
+
+    return drift_items, jit_updates
+
+
+def _update_lockfile_component_source_hashes(
+    lock_path: Path,
+    updates: dict[tuple[str, str], str],
+) -> None:
+    """Update source_hash for (skill_id, comp_name) pairs in lockfile; atomic write.
+
+    JIT source-only drift does not recompile; update hash directly in lockfile.
+    """
+    data = json.loads(lock_path.read_text(encoding="utf-8"))
+    for entry in (data.get("entries") or []):
+        sid = entry.get("skill", "")
+        for comp in (entry.get("components") or []):
+            key = (sid, comp.get("name", ""))
+            if key in updates:
+                comp["source_hash"] = updates[key]
+    tmp = lock_path.with_name(lock_path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(lock_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     # Exit code taxonomy for upgrade.py:
     #   0 — success (no drift, or upgrade completed via --yes / clean path)
@@ -320,13 +496,20 @@ def main(argv: list[str] | None = None) -> int:
                     print(_format_human(report), flush=True)
                 reports.append(report)
 
+        # Component drift in dry-run (display only; no halt, no writes)
+        _dr_comp_items: list[dict[str, Any]] = []
+        if isinstance(lockfile_data.get("version"), int) and lockfile_data["version"] == 2:
+            _dr_comp_items, _ = _collect_component_drift(entries, args.project_root)
+            if not args.json:
+                for _item in _dr_comp_items:
+                    _print_component_drift_item(_item)
+        # Adjust "no drift" message to account for component drift
         if args.json:
             print(_format_json(reports), flush=True)
-        elif not reports:
+        elif not reports and not _dr_comp_items:
             print("No drift detected.", flush=True)
-        else:
+        elif reports:
             _print_footer(reports)
-
         return 0
 
     # Non-dry-run path (Story 5.2): detect drift, halt or proceed.
@@ -339,6 +522,31 @@ def main(argv: list[str] | None = None) -> int:
     if drift_reports and not args.yes:
         print(_halt_on_drift_stderr(drift_reports), file=sys.stderr)
         return 3
+
+    # Component drift detection (v2 lockfiles only).
+    component_drift_items: list[dict[str, Any]] = []
+    jit_source_updates: dict[tuple[str, str], str] = {}
+
+    if isinstance(lockfile_data.get("version"), int) and lockfile_data["version"] == 2:
+        component_drift_items, jit_source_updates = _collect_component_drift(
+            entries, args.project_root
+        )
+        for _item in component_drift_items:
+            _print_component_drift_item(_item)
+
+    if component_drift_items and not args.yes:
+        print(
+            f"Component drift detected in {len(component_drift_items)} component(s). "
+            f"Run 'bmad upgrade --yes' to upgrade past drift.",
+            file=sys.stderr,
+        )
+        return 3
+
+    # With --yes: update JIT source hashes before any recompile.
+    # Mixed-skill safety: skill A may have JIT-source drift while skill B has compile/mode
+    # drift — update skill A's hashes regardless, then let compile run for skill B.
+    if jit_source_updates and args.yes:
+        _update_lockfile_component_source_hashes(lock_path, jit_source_updates)
 
     _lockfile_version = lockfile_data.get("version", 1)
     if isinstance(_lockfile_version, int) and _lockfile_version == 1:
