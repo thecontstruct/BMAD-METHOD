@@ -1,0 +1,5 @@
+[core]
+communication_language = "English"
+
+[modules.bmm]
+implementation_artifacts = "{project-root}/impl"

@@ -1,0 +1,1 @@
+{"version": 2, "entries": [{"skill": "test-skill", "components": [{"name": "FixtureBanner", "path": "components/test-module/test-skill/fixture_banner.py", "props_hash": "aaaa1111bbbb2222", "props": {}, "render_mode": "jit", "sentinel_format_version": 1}]}]}

@@ -158,6 +158,118 @@ try {
   fs.rmSync(haltDir, { recursive: true, force: true });
 }
 
+// ── Fixture C: JIT happy path ────────────────────────────────────────────────
+
+const SCRIPTS_DIR = path.join(__dirname, '..', 'src', 'scripts');
+const JIT_FIXTURE_DIR = path.join(__dirname, 'fixtures', 'jit-renderer');
+
+let jitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmad-jit-test-'));
+jitDir = fs.realpathSync(jitDir);
+try {
+  // config
+  fs.mkdirSync(path.join(jitDir, '_bmad'), { recursive: true });
+  fs.copyFileSync(
+    path.join(JIT_FIXTURE_DIR, '_bmad', 'config.toml'),
+    path.join(jitDir, '_bmad', 'config.toml'),
+  );
+
+  // lockfile
+  fs.mkdirSync(path.join(jitDir, '_bmad', '_config'), { recursive: true });
+  fs.copyFileSync(
+    path.join(JIT_FIXTURE_DIR, '_bmad', '_config', 'bmad.lock'),
+    path.join(jitDir, '_bmad', '_config', 'bmad.lock'),
+  );
+
+  // skill dir: render.py + SKILL.md
+  const jitSkillDir = path.join(jitDir, '_bmad', 'test-module', 'test-skill');
+  fs.mkdirSync(jitSkillDir, { recursive: true });
+  fs.copyFileSync(RENDER_PY, path.join(jitSkillDir, 'render.py'));
+  fs.copyFileSync(
+    path.join(JIT_FIXTURE_DIR, '_bmad', 'test-module', 'test-skill', 'SKILL.md'),
+    path.join(jitSkillDir, 'SKILL.md'),
+  );
+
+  // component file
+  const jitCompDir = path.join(jitDir, '_bmad', 'components', 'test-module', 'test-skill');
+  fs.mkdirSync(jitCompDir, { recursive: true });
+  fs.copyFileSync(
+    path.join(JIT_FIXTURE_DIR, '_bmad', 'components', 'test-module', 'test-skill', 'fixture_banner.py'),
+    path.join(jitCompDir, 'fixture_banner.py'),
+  );
+
+  const jitResult = spawnSync('python3', [path.join(jitSkillDir, 'render.py')], {
+    cwd: jitSkillDir,
+    env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+    encoding: 'utf-8',
+  });
+
+  test('JIT: render.py exits 0 with fixture SKILL.md', () => {
+    assert(
+      jitResult.status === 0,
+      `exit ${jitResult.status}\nstdout: ${jitResult.stdout}\nstderr: ${jitResult.stderr}`,
+    );
+  });
+  test('JIT: _bmad/render/test-skill/SKILL.md exists', () => {
+    const rendered = path.join(jitDir, '_bmad', 'render', 'test-skill', 'SKILL.md');
+    assert(fs.existsSync(rendered), `not found at ${rendered}`);
+  });
+  test('JIT: rendered SKILL.md contains "[JIT RESOLVED]"', () => {
+    const rendered = path.join(jitDir, '_bmad', 'render', 'test-skill', 'SKILL.md');
+    const content = fs.readFileSync(rendered, 'utf-8');
+    assert(
+      content.includes('[JIT RESOLVED]'),
+      `"[JIT RESOLVED]" not found; content:\n${content.slice(0, 500)}`,
+    );
+  });
+} finally {
+  fs.rmSync(jitDir, { recursive: true, force: true });
+}
+
+// ── Fixture D: JIT lockfile absent ───────────────────────────────────────────
+
+let jitNoLockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmad-jit-nolock-'));
+jitNoLockDir = fs.realpathSync(jitNoLockDir);
+try {
+  // config — no lockfile
+  fs.mkdirSync(path.join(jitNoLockDir, '_bmad'), { recursive: true });
+  fs.copyFileSync(
+    path.join(JIT_FIXTURE_DIR, '_bmad', 'config.toml'),
+    path.join(jitNoLockDir, '_bmad', 'config.toml'),
+  );
+
+  const noLockSkillDir = path.join(jitNoLockDir, '_bmad', 'test-module', 'test-skill');
+  fs.mkdirSync(noLockSkillDir, { recursive: true });
+  fs.copyFileSync(RENDER_PY, path.join(noLockSkillDir, 'render.py'));
+  fs.copyFileSync(
+    path.join(JIT_FIXTURE_DIR, '_bmad', 'test-module', 'test-skill', 'SKILL.md'),
+    path.join(noLockSkillDir, 'SKILL.md'),
+  );
+
+  const noLockResult = spawnSync('python3', [path.join(noLockSkillDir, 'render.py')], {
+    cwd: noLockSkillDir,
+    env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+    encoding: 'utf-8',
+  });
+
+  test('JIT lockfile-absent: render.py exits 0', () => {
+    assert(
+      noLockResult.status === 0,
+      `exit ${noLockResult.status}\nstdout: ${noLockResult.stdout}\nstderr: ${noLockResult.stderr}`,
+    );
+  });
+  test('JIT lockfile-absent: rendered SKILL.md contains error slot', () => {
+    const rendered = path.join(jitNoLockDir, '_bmad', 'render', 'test-skill', 'SKILL.md');
+    assert(fs.existsSync(rendered), `not found at ${rendered}`);
+    const content = fs.readFileSync(rendered, 'utf-8');
+    assert(
+      content.includes('<!-- BMAD-ERROR:FixtureBanner -->'),
+      `Error slot not found; content:\n${content.slice(0, 500)}`,
+    );
+  });
+} finally {
+  fs.rmSync(jitNoLockDir, { recursive: true, force: true });
+}
+
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
