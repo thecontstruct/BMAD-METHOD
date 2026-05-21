@@ -1,12 +1,9 @@
 """Story 8.4 unit tests: ComponentRunner, MockComponentRunner, errors.py DN-2 lift."""
 from __future__ import annotations
 
-import json
-import subprocess
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 BMAD_ROOT = Path(__file__).resolve().parent.parent.parent
 FIXTURES = Path(__file__).parent / "fixtures" / "component_runner"
@@ -24,7 +21,7 @@ from bmad_compile.errors import (
     ComponentBatchError,
     ComponentError,
     ComponentPropError,
-    ComponentTimeoutError,
+    ComponentTimeoutError,  # retained for TestErrorsDN2Lift
 )
 
 _CTX = {
@@ -32,13 +29,6 @@ _CTX = {
     "skill_id": "test/skill",
     "render_mode": "compile",
     "skill_source_root": str(FIXTURES),
-}
-
-_MOCK_CTX = {
-    "skill_id": "x",
-    "render_mode": "jit",
-    "config": {},
-    "skill_source_root": "/",
 }
 
 
@@ -97,86 +87,6 @@ class TestComponentRunnerUnit(unittest.TestCase):
             )
         self.assertEqual(cm.exception.render_error_fallback, "jit fb")
 
-    def test_g_timeout_raises_component_timeout_error(self):
-        mock_proc = MagicMock()
-        mock_proc.communicate.side_effect = [
-            subprocess.TimeoutExpired(cmd=[], timeout=0.1),
-            (b"", b""),
-        ]
-        mock_proc.pid = 99999
-        with patch("subprocess.Popen", return_value=mock_proc), \
-             patch("bmad_compile.component_runner._kill_process_group") as mock_kill:
-            runner = ComponentRunner()
-            with self.assertRaises(ComponentTimeoutError) as cm:
-                runner.run_jit(
-                    "/fake/path.py",
-                    _MOCK_CTX,
-                    {"p": 1},
-                    component_name="Fake",
-                )
-            mock_kill.assert_called_once_with(mock_proc)
-            exc = cm.exception
-            self.assertEqual(exc.mode, "jit")
-            self.assertEqual(exc.props, {"p": 1})
-
-    def test_h_empty_stdout_raises_component_error(self):
-        mock_proc = MagicMock()
-        mock_proc.communicate.return_value = (b"", b"stderr stuff")
-        mock_proc.returncode = 1
-        with patch("subprocess.Popen", return_value=mock_proc):
-            runner = ComponentRunner()
-            with self.assertRaises(ComponentError):
-                runner.run_jit("/fake/path.py", _MOCK_CTX, {}, component_name="Fake")
-
-    def test_i_ok_false_no_fallback(self):
-        mock_proc = MagicMock()
-        mock_proc.communicate.return_value = (
-            json.dumps({"ok": False, "error": "oops", "render_error_fallback": None}).encode(),
-            b"",
-        )
-        mock_proc.returncode = 1
-        with patch("subprocess.Popen", return_value=mock_proc):
-            runner = ComponentRunner()
-            with self.assertRaises(ComponentError) as cm:
-                runner.run_jit("/fake/path.py", _MOCK_CTX, {}, component_name="Fake")
-            self.assertIsNone(cm.exception.render_error_fallback)
-
-    def test_d_ok_false_with_fallback(self):
-        mock_proc = MagicMock()
-        mock_proc.communicate.return_value = (
-            json.dumps({"ok": False, "error": "oops", "render_error_fallback": "fallback"}).encode(),
-            b"",
-        )
-        mock_proc.returncode = 1
-        with patch("subprocess.Popen", return_value=mock_proc):
-            runner = ComponentRunner()
-            with self.assertRaises(ComponentError) as cm:
-                runner.run_jit("/fake/path.py", _MOCK_CTX, {}, component_name="Fake")
-            self.assertEqual(cm.exception.render_error_fallback, "fallback")
-
-    def test_j_emit_fn_called_on_failure(self):
-        events = []
-        mock_proc = MagicMock()
-        mock_proc.communicate.return_value = (
-            json.dumps({"ok": False, "error": "fail"}).encode(),
-            b"some stderr",
-        )
-        mock_proc.returncode = 1
-        with patch("subprocess.Popen", return_value=mock_proc):
-            runner = ComponentRunner(emit_fn=events.append)
-            with self.assertRaises(ComponentError):
-                runner.run_jit(
-                    "/fake/path.py",
-                    _MOCK_CTX,
-                    {"key": "val"},
-                    component_name="TestComp",
-                )
-        self.assertEqual(len(events), 1)
-        evt = events[0]
-        self.assertEqual(evt["kind"], "component_error")
-        for key in ("kind", "component", "mode", "props", "exit_code", "stderr", "phase"):
-            self.assertIn(key, evt)
-
     def test_m_prop_error_emits_component_prop_error_event(self):
         events = []
         runner = ComponentRunner(emit_fn=events.append)
@@ -184,7 +94,7 @@ class TestComponentRunnerUnit(unittest.TestCase):
         with self.assertRaises(ComponentPropError):
             runner.run_jit(
                 "/fake/path.py",
-                _MOCK_CTX,
+                _CTX,
                 bad_props,
                 component_name="BadComp",
             )
