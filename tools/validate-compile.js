@@ -41,6 +41,13 @@ function escapeAnnotation(str) {
 function reconstructSkillSrcDir(entry) {
   const fragments = entry.fragments;
   if (!Array.isArray(fragments) || fragments.length === 0) {
+    // Story 9.2: fragment-less skills (e.g. simple flat-template skills with no fragments/ dir)
+    // fall back to locating the source directory by skill name in standard locations.
+    const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
+    const candidates = [path.join(srcRoot, 'core-skills', entry.skill)];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
     throw new Error(`bmad.lock entry for skill "${entry.skill}" has no fragments[]; cannot reconstruct source directory.`);
   }
   const fragPath = fragments[0].path;
