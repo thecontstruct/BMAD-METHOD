@@ -988,7 +988,7 @@ def _parse_include_src(
     # cross-module prefix. Bare-path includes (had_module_prefix=False) resolve
     # to current_module and are unaffected — only validate when an explicit
     # prefix matched a module root.
-    if had_module_prefix and effective_module not in ("core", current_module):
+    if had_module_prefix and effective_module not in ("core", current_module, "_shared"):
         raise errors.PrecedenceUndefinedError(
             f"Cross-third-party include not allowed: "
             f"{src!r} (module {effective_module!r}) from template in "

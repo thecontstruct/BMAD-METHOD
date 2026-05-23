@@ -286,6 +286,10 @@ class Installer {
             addResult('Compile migrated skills', 'skip', 'Model 3 fallback applied (compiler absent)');
             return 'Skipped — Model 3 fallback applied';
           }
+          // Story 10.0: copy src/_shared/ → <bmadDir>/_shared/ BEFORE enumerateMigratedSkills
+          // so shared fragments are materialized even on fresh installs where no migrated
+          // skills are enumerated (skills.length === 0 path below).
+          await this._copySharedRoot(paths);
           const compilerHelper = require('../compiler/invoke-python');
           // R2 BH-6: enumerateMigratedSkills already walks the source tree;
           // the prior hasMigratedSkillsInScope preflight here was a redundant
@@ -511,6 +515,36 @@ class Installer {
         const dest = path.join(destDir, entry.name);
         await fs.copyFile(src, dest);
         this.installedFiles.add(dest);
+      }
+    }
+  }
+
+  /**
+   * Story 10.0 — copy src/_shared/ into <bmadDir>/_shared/ recursively (markdown only).
+   * Called from "Compiling migrated skills" task BEFORE enumerateMigratedSkills so the
+   * install-time JIT compile (Model 2) can resolve `_shared/...` include paths through
+   * engine._discover_module_roots's Story 10.0 injection. No-op when src/_shared/ is
+   * absent (pre-Story-10.1 state). Filters to *.md (Epic 10 v1 — _shared/fragments/ only).
+   */
+  async _copySharedRoot(paths) {
+    const sharedSrc = path.join(paths.srcDir, 'src', '_shared');
+    if (!(await fs.pathExists(sharedSrc))) return;
+    const sharedDest = path.join(paths.bmadDir, '_shared');
+    await this._copyMarkdownTreeRecursive(sharedSrc, sharedDest);
+  }
+
+  async _copyMarkdownTreeRecursive(src, dest) {
+    const entries = await fs.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(src, entry.name);
+      if (entry.isDirectory()) {
+        await this._copyMarkdownTreeRecursive(entryPath, path.join(dest, entry.name));
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        const destFile = path.join(dest, entry.name);
+        await fs.ensureDir(path.dirname(destFile));
+        await fs.copyFile(entryPath, destFile);
+        // POSIX-normalize tracked path to match Python lockfile path format.
+        this.installedFiles.add(destFile.replaceAll('\\', '/'));
       }
     }
   }

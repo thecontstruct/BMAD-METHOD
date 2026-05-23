@@ -408,7 +408,7 @@ class TestModuleDiscovery(unittest.TestCase):
             roots = engine._discover_module_roots(
                 install_root, "ext-mod", install_root / "ext-mod"
             )
-            self.assertEqual(set(roots.keys()), {"ext-mod"})
+            self.assertEqual(set(roots.keys()), {"ext-mod", "_shared"})
 
     def test_module_roots_contains_all_module_dirs(self) -> None:
         """AC 2: cross-module routing — both `core` and `bmm` discovered."""

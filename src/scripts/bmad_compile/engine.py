@@ -445,6 +445,9 @@ def _discover_module_roots(
             roots[entry.name] = entry
     if current_module not in roots:
         roots[current_module] = current_module_dir
+    # Story 10.0: admit `_shared` as the documented exception to the underscore-prefix
+    # filter. Downstream is_file probes resolve absent paths cleanly (Arch §5 / DN-1).
+    roots["_shared"] = install_root / "_shared"
     return roots
 
 
