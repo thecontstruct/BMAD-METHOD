@@ -11,7 +11,7 @@ description: 'Manage significant changes during sprint execution. Use when the u
 
 ## Conventions
 
-- Bare paths (e.g. `checklist.md`) resolve from the skill root.
+- Bare paths resolve from the skill root.
 - `{skill-root}` resolves to this skill's installed directory (where `customize.toml` lives).
 - `{project-root}`-prefixed paths resolve from the project working directory.
 - `{skill-name}` resolves to the skill directory's basename.
@@ -282,10 +282,10 @@ Activation is complete. Begin the workflow below.
 
 <step n="6" goal="Workflow Completion">
 <action>Summarize workflow execution:</action>
-  - Issue addressed: {{change_trigger}}
-  - Change scope: {{scope_classification}}
-  - Artifacts modified: {{list_of_artifacts}}
-  - Routed to: {{handoff_recipients}}
+  - Issue addressed: {change_trigger}
+  - Change scope: {scope_classification}
+  - Artifacts modified: {list_of_artifacts}
+  - Routed to: {handoff_recipients}
 
 <action>Confirm all deliverables produced:</action>
 
