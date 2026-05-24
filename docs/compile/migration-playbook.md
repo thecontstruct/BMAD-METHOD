@@ -76,6 +76,12 @@ print(e['classification'], e['line_count'], e['subdirectories'])
 
 If the classification is `migration-candidate-runtime-scaffold`, jump to the FR-3 sub-playbook (Story 10.25+). If `migration-candidate-multi-file`, follow steps/templates dir conventions from Arch §7.
 
+> **⚠ ADVISORY — `top_3_duplication_blocks` is a heuristic (until Story 10.27 ships):** This field uses lexical similarity, not byte-equivalence-aware structural matching. Do **not** accept a fragment substitution based solely on this field — always empirically verify the candidate block against the spike fragment before treating it as a match.
+>
+> **Batch 1 over-claim example (Story 10.3):** `bmad-party-mode` listed `top_3_duplication_blocks: [config-load]`, but byte-inspection showed the actual block is a 2-key resolver (vs. the spike fragment's 8 resolution targets + 4 behavioral directives across 13 lines). Accepting the substitution would change observable behavior, violating NFR-4. The classifier fired on loose lexical matching ("file mentions config or load config"), not structural equivalence.
+>
+> Story 10.27 (FR-5 ArtifactDrift) will refine the classifier to require byte-equivalence between the candidate block and the corresponding spike fragment body. Until then, treat `top_3_duplication_blocks` as ADVISORY only.
+
 ---
 
 ## §5 — Fragment extraction
@@ -97,9 +103,29 @@ tail -c 2 src/_shared/fragments/<name>.md | xxd
 # Expected: ...0a (single \n) — NOT 0a0a (double) and NOT just ascii (zero)
 ```
 
-**Engine caveat:** the engine emits fragment bytes VERBATIM including HTML-comment headers. If pre-migration consumer bytes don't have these headers, byte-equivalence fails. Spike-time discovery: ship fragments WITHOUT HTML headers OR document headers as an intentional byte deviation in the exception list (kind enum doesn't fit — surface in retro).
+**Engine caveat:** the engine emits fragment bytes VERBATIM including any HTML-comment headers. Ship fragments WITHOUT HTML-comment headers — this matches the existing `bmad-customize/fragments/*` convention and avoids byte-equivalence failures against pre-migration consumer bytes that have no such headers.
 
 **Cross-consumer diff (mandatory):** before authoring a fragment that ≥3 consumers will share, diff against each candidate's equivalent block. Variance ≥1 line of semantic content signals SPLIT or DEMOTE per AC-FRAG-4 protocol (spike author's judgment).
+
+### §5.x — Fragment corpus status at Batch 1 close
+
+**Fragment families at Batch 1 close (2026-05-24):**
+
+| Fragment family | File | Consumers at Batch 1 close |
+|---|---|---|
+| Conventions | `src/_shared/fragments/conventions.md` | 1 — Story 10.1 spike only |
+| Persistent facts | `src/_shared/fragments/persistent-facts.md` | 1 — Story 10.1 spike only |
+| Resolver fallback | `src/_shared/fragments/resolver-fallback.md` | 1 — Story 10.1 spike only |
+| Config load | `src/_shared/fragments/config-load.md` | 1 — Story 10.1 spike only; DN-2 PENDING |
+
+**Batch 1 cross-consumer diff result:** all 4 non-spike Batch 1 migrations (10.2–10.5) were fragment-empty — zero additional consumers added to any fragment family. The mandatory cross-consumer diff check above ("before authoring a fragment that ≥3 consumers will share") was not triggered in Batch 1.
+
+**">50% corpus-wide" criterion (Arch §14): NOT YET FIRED.** At Batch 1 close, 0% of the ~37-skill migration corpus shares a fragment family beyond the spike. This criterion activates once enough Batch 2/3 skills share a fragment.
+
+**`config-load.md` DN-2 verdict: STILL PENDING.** No Batch 1 skill exercised the config-load fragment (all 4 non-spike Batch 1 migrations were fragment-empty — zero `## Step N: Load Config` pattern matches). DN-2 defers to the first Batch 2+ skill whose source has a matching config-load block. At that point:
+1. Verify the LOC savings (fragment body ≈ 13 lines; if the consumer block is byte-equivalent, the fragment is justified)
+2. If justified: update `config-load.md`'s `<!-- params: ... -->` comment and record the verdict in this playbook
+3. If no consumers by Batch 3 close: demote `config-load.md` to a reference-only file and remove it from the family listing above
 
 ---
 
@@ -134,6 +160,44 @@ git rm src/<module>/<skill>/SKILL.md
 
 **Include placement rule:** the `<<include>>` directive line is followed IMMEDIATELY by the next content line (no blank line between include and following content) — the fragment provides its own trailing newline. Adding a blank line after the include yields a double-newline → 2 blank lines between fragment and next heading.
 
+### §7.x — Fragment-empty migration
+
+**When this applies:** the skill's source `SKILL.md` has zero blocks matching the spike fragments (`## Conventions`, `workflow.persistent_facts`, resolver-fallback dual-CLI block, `## Step N: Load Config`). No `<<include>>` directives will be authored. The template is a verbatim copy of the source `SKILL.md`.
+
+**Mechanical steps (simplified from §5–§7):**
+
+```bash
+# 1. Copy source as template (no include directives added):
+cp src/<module>/<skill>/SKILL.md src/<module>/<skill>/<skill>.template.md
+
+# 2. Delete the source (compile output replaces it):
+git rm src/<module>/<skill>/SKILL.md
+```
+
+No fragment authoring. No `<<include>>` directive insertion. Proceed directly to §3 (golden capture from the template) and §8 (byte-equivalence verification).
+
+**Done when:** `src/<module>/<skill>/<skill>.template.md` exists and is byte-identical to the pre-migration source `SKILL.md` (zero `<<include>>` directives — no spike fragment blocks present in this skill); source `SKILL.md` is DELETED in the same commit.
+
+**Harness note:** `test_migration_equivalence.py` auto-discovers fragment-empty goldens via `_iter_goldens()` — no changes to the test file are needed. AC-S6 byte-equivalence is trivially satisfied (the engine's `_compile_core → parser.parse` produces a single Text node; resolver short-circuits; output = input bytes). Batch 1 empirical confirmation: 4/4 fragment-empty migrations (10.2–10.5) passed with 0 deviations.
+
+### §7.y — Pre-migration VarRuntime placeholder normalization
+
+**When this applies:** the source `SKILL.md` contains `{{name}}` double-brace syntax inside `<workflow>` step content (e.g., `{{change_trigger}}`, `{{skill_name}}`). The engine's parser tokenizes `{{name}}` as a `VarCompile` node — at compile time, if the parameter is not declared in the template frontmatter, the engine raises `UnresolvedVariableError`.
+
+**Resolution:** normalize `{{name}}` → `{name}` (single-brace) in the template BEFORE golden capture. Single-brace `{name}` is tokenized as `VarRuntime` — the engine passes it through verbatim to compiled output.
+
+```bash
+# Identify double-brace VarCompile placeholders in the source:
+grep -oE '\{\{[^}]+\}\}' src/<module>/<skill>/SKILL.md
+
+# Normalize in template (verify each {{name}} is a runtime workflow variable):
+sed -i 's/{{/{/g; s/}}/}/g' src/<module>/<skill>/<skill>.template.md
+```
+
+Then **re-capture the golden** (§3) from the normalized template. Document the normalization in Dev Notes as a deliberate content change. This does NOT constitute a byte-equivalence exception-list entry — the normalized form IS the correct compiled output.
+
+**Spike reference:** `bmad-correct-course/SKILL.md` had `{{change_trigger}}` etc. in `<workflow>` content. Story 10.1 normalized these to `{change_trigger}` in the template and golden before byte-equivalence verification.
+
 ---
 
 ## §8 — Byte-equivalence verification
@@ -154,6 +218,33 @@ sha256sum \
 ```
 
 If the SHA mismatch is content (not whitespace), STOP — the spike-fail criterion has fired (or, for non-spike migrations, the source bytes don't match the migrated form). Investigate and fix; do NOT add a content-kind exception.
+
+### §8.x — Batch 1 empirical status (SM-7 budget)
+
+**At Batch 1 close (Stories 10.0–10.5, 2026-05-24):**
+
+| Metric | Value |
+|---|---|
+| Skills migrated | 5 (Story 10.0 spike + Stories 10.2–10.5 Batch 1) |
+| Byte-equivalence deviations signed off | 0 |
+| `migration_equivalence_exceptions.json` entries | 0 |
+| SM-7 progress | 5 / ~37 total migration stories (13.5%) |
+| SM-7 compliance | 5/5 = 100% byte-equivalent → ≥90% target met for migrated subset |
+
+**Charset decisions (Batch 1 empirical data):**
+
+| Story | Skill | Lines | Decision | Trigger |
+|---|---|---|---|---|
+| 10.2 | `bmad-index-docs` | 66 | `ascii-canonicalized` | ASCII-pure source (zero non-ASCII bytes) |
+| 10.3 | `bmad-party-mode` | 128 | `unicode-passthrough` | 26 × U+2014 EM DASH |
+| 10.4 | `bmad-review-adversarial-general` | 37 | `unicode-passthrough` | 5 × U+2014 EM DASH |
+| 10.5 | `bmad-review-edge-case-hunter` | 67 | `unicode-passthrough` | 11 × U+2014 EM DASH |
+
+**Trigger rule (empirically confirmed):** `ascii-canonicalized` requires ALL source bytes to be ASCII. Any U+2014 em-dash or other non-ASCII codepoint → `unicode-passthrough`.
+
+**Quote-style decisions:** no Batch 1 quote-style decisions changed. All 4 non-spike Batch 1 migrations were fragment-empty (zero frontmatter quote-style authoring required). Fragment family quote-style decisions from Story 10.1 remain as-is.
+
+**Fragment-family charset decisions (§2):** unchanged at Batch 1 close. All 4 families (`conventions.md`, `persistent-facts.md`, `resolver-fallback.md`, `config-load.md`) remain as authored at spike time — no Batch 1 consumer added or amended a family charset decision.
 
 ---
 
@@ -176,6 +267,10 @@ for f in e.get('fragments', []):
         print(f['path'], f['hash'])
 "
 ```
+
+**⚠ Pitfall — do NOT commit sibling assets alongside the template.** Unless a deliberate source-of-truth-shadow decision is recorded in the story spec (with rationale), commit ONLY `<skill>.template.md` (and the deleted source `SKILL.md`). Non-markdown sibling files placed in the migration tree (e.g., `checklist.md`, `customize.toml`) are bypassed at install time — the marketplace-source copy is canonical (see §10.5 below).
+
+*Story 10.1 exception:* the R0 spike committed `checklist.md` + `customize.toml` at `src/bmm-skills/4-implementation/bmad-correct-course/`. Whether these are intentional source-of-truth shadows or dead code is deferred to Story 10.27a (FR-3 retroactive amendment opportunity). Until 10.27a resolves this, do not replicate the pattern in Batch 2+ stories without explicit spec-level rationale.
 
 ---
 
@@ -207,12 +302,12 @@ walk('', d)
 
 For each surfaced key, verify against the migrated template's surface. If the key is absorbed into a fragment param, queue a deprecation entry for the lockfile v3 schema (Story 10.26).
 
----
+### §10.5 — Sibling-asset propagation
 
-## Spike-discovered gaps (for Story 10.7 refinement)
+Migration compile emits **only** the compiled `SKILL.md`. Non-markdown sibling files at the skill root (CSVs, JSONs, TOML configs, checklists, etc.) do **not** propagate via the migration path. Instead, they reach the install destination via the marketplace-source `_installOfficialModules → copyModuleWithFiltering` path, which copies the entire pre-migration source tree.
 
-- **Engine HTML-comment passthrough.** Arch §6 prescribes HTML-comment headers on fragments; the engine emits them verbatim into compiled output. Pre-migration source bytes have no such headers → byte-equivalence breaks. Spike-time resolution: ship fragments WITHOUT HTML headers (matches existing `bmad-customize/fragments/*` convention). Surfaced for Story 10.7 / Arch §6 retro.
-- **Pre-migration `{{name}}` runtime-placeholder syntax.** Pre-migration `bmad-correct-course/SKILL.md` had `{{change_trigger}}` etc. (double-brace) inside `<workflow>` step content. Parser treats `{{name}}` as VarCompile → UnresolvedVariableError. Spike-time resolution: normalize `{{name}}` → `{name}` (VarRuntime passthrough) in both template AND golden. Document the normalization. Future migrated skills with this pattern apply the same normalization.
-- **`<<include>>` trailing-newline budget.** The directive line consumes its own trailing `\n` as part of the next Text node. Author template with NO blank line between `<<include>>` and the following content line; the fragment provides its own trailing newline.
+**Pre-FR-3 (before Story 10.25 ships):** as a migration author, you need no special action for sibling assets. The marketplace path handles them automatically when the channel is reachable.
 
-These gaps are surfaced to Story 10.7 (playbook refinement) for empirical refinement after Batch 1 closes.
+**Pre-FR-3 caveat:** for offline or disconnected installs, sibling assets sourced from the marketplace may be missing. See Story 10.43 investigation seed (sprint-status 2026-05-23) — this gap is not yet empirically verified or closed.
+
+**Post-FR-3 (Story 10.25+):** prefer the `artifacts:` frontmatter mechanism in the skill template to make the migrated skill marketplace-independent. See Story 10.27a for the first FR-3 consumer (`bmad-advanced-elicitation`), which serves as the smoke test for the `artifacts:` mechanism.
