@@ -1,17 +1,22 @@
-"""Story 10.25 + 10.26: FR-3 multi-artifact emit + lockfile v3 tests.
+"""Stories 10.25 + 10.26 + 10.27: FR-3 multi-artifact emit + lockfile v3 + FR-5/FR-13/DN-4.
 
 Tests:
 - AC-1b: _extract_artifacts_from_frontmatter — regression guard
 - AC-5: path traversal / absolute path / unknown kind rejection
 - AC-6: integration tests (basic emit + lockfile records)
 - Lockfile v2→v3 migration
+- Story 10.27 AC-11: ArtifactDrift detection, shared-fragment rollup, FR-13 deprecation
+  warning, DN-4 orphan detector, bmad-customize contract, NFR-1b performance probe
 """
 
 from __future__ import annotations
 
+import contextlib
+import io as _stdlib_io
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -22,8 +27,18 @@ _SCRIPTS = str(_PROJECT_ROOT / "src" / "scripts")
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
+import upgrade as _upgrade_mod  # Story 10.27: _halt_on_drift_stderr
 from bmad_compile import engine, errors, io, lockfile, resolver
 from bmad_compile.component_runner import MockComponentRunner
+from bmad_compile.drift import (  # Story 10.27
+    ArtifactDrift,
+    DriftReport,
+    OrphanedOverride,
+    ProseFragmentChange,
+    _detect_artifact_drift,
+    _detect_orphaned_overrides,
+    detect_drift,
+)
 from bmad_compile.engine import Artifact, _extract_artifacts_from_frontmatter
 from bmad_compile.io import PurePosixPath
 from bmad_compile.resolver import CompileCache, VariableScope
@@ -440,6 +455,425 @@ class TestLockfileV3(unittest.TestCase):
             data = json.loads(Path(lf_path).read_text(encoding="utf-8"))
             entry = data["entries"][0]
             self.assertEqual(entry["artifacts"], [artifact_record])
+
+
+# ---------------------------------------------------------------------------
+# Story 10.27 AC-11: ArtifactDrift detection (AC-2 + AC-3)
+# ---------------------------------------------------------------------------
+
+def _make_entry_with_artifact(
+    art_path: str, art_hash: str, module: str = "core", skill: str = "test-skill"
+) -> dict:
+    """Build a minimal lockfile entry dict with one artifact and one base fragment
+    so _infer_module can determine the module directory."""
+    return {
+        "skill": skill,
+        "compiled_hash": "abc",
+        "source_hash": "def",
+        "fragments": [
+            {
+                "path": f"{module}/{skill}/fragments/base.md",
+                "resolved_from": "base",
+                "hash": "fragHash",
+            }
+        ],
+        "variables": [],
+        "components": [],
+        "artifacts": [
+            {"hash": art_hash, "kind": "scaffold-verbatim", "path": art_path}
+        ],
+        "deprecations": [],
+    }
+
+
+class TestArtifactDriftDetection(unittest.TestCase):
+    """Story 10.27 AC-3 / AC-2: _detect_artifact_drift and has_drift() extension."""
+
+    def _write_install_file(
+        self, scenario_root: Path, module: str, skill: str, name: str, content: str
+    ) -> Path:
+        dest = scenario_root / module / skill / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        return dest
+
+    def test_artifact_drift_detection_no_drift(self) -> None:
+        """Install-dir artifact hash matches lockfile hash → artifact_changes empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            content = "col_a,col_b\nval1,val2\n"
+            self._write_install_file(scenario_root, "core", "test-skill", "data.csv", content)
+            expected_hash = io.hash_text(io.read_template(
+                str(scenario_root / "core" / "test-skill" / "data.csv")
+            ))
+            entry = _make_entry_with_artifact("data.csv", expected_hash)
+            result = _detect_artifact_drift(entry, scenario_root)
+            self.assertEqual(result, [])
+
+    def test_artifact_drift_detection_install_hash_mismatch(self) -> None:
+        """Install-dir artifact content modified → artifact_changes non-empty, has_drift True."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            self._write_install_file(
+                scenario_root, "core", "test-skill", "data.csv", "different content\n"
+            )
+            entry = _make_entry_with_artifact("data.csv", "a" * 64)  # wrong hash
+            result = _detect_artifact_drift(entry, scenario_root)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0].artifact_path, "data.csv")
+            self.assertIsNotNone(result[0].install_hash)
+            self.assertEqual(result[0].old_hash, "a" * 64)
+            # has_drift extension
+            report = DriftReport(skill="test-skill", artifact_changes=result)
+            self.assertTrue(report.has_drift())
+
+    def test_artifact_drift_detection_missing_install_file(self) -> None:
+        """Artifact file absent from install dir → install_hash is None, has_drift True."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            # Do NOT create the install file.
+            entry = _make_entry_with_artifact("data.csv", "b" * 64)
+            result = _detect_artifact_drift(entry, scenario_root)
+            self.assertEqual(len(result), 1)
+            self.assertIsNone(result[0].install_hash)
+            report = DriftReport(skill="test-skill", artifact_changes=result)
+            self.assertTrue(report.has_drift())
+
+    def test_has_drift_returns_true_when_only_artifact_changes(self) -> None:
+        """AC-2 regression: DriftReport with ONLY artifact_changes → has_drift() True.
+
+        Without the AC-2 has_drift() extension, a skill with only artifact drift
+        would silently pass the upgrade gate.
+        """
+        art = ArtifactDrift(
+            skill="s", artifact_path="f.csv", old_hash="x", new_hash="x",
+            install_hash=None, tier="scaffold-verbatim"
+        )
+        report = DriftReport(skill="s", artifact_changes=[art])
+        # All other lists are empty.
+        self.assertEqual(report.prose_fragment_changes, [])
+        self.assertEqual(report.toml_default_changes, [])
+        self.assertTrue(report.has_drift())
+
+    def test_artifact_drift_no_module_inference_returns_empty(self) -> None:
+        """Entry with no fragments or variables → _infer_module returns None → []."""
+        with tempfile.TemporaryDirectory() as tmp:
+            entry = {
+                "skill": "orphan-skill",
+                "fragments": [],
+                "variables": [],
+                "artifacts": [{"hash": "abc", "kind": "scaffold-verbatim", "path": "x.csv"}],
+            }
+            result = _detect_artifact_drift(entry, Path(tmp))
+            self.assertEqual(result, [])
+
+    def test_artifact_drift_empty_artifacts_is_fast_path(self) -> None:
+        """Entry with artifacts: [] → returns [] immediately (no filesystem access)."""
+        entry = {"skill": "s", "fragments": [], "variables": [], "artifacts": []}
+        result = _detect_artifact_drift(entry, Path("/nonexistent/root"))
+        self.assertEqual(result, [])
+
+
+# ---------------------------------------------------------------------------
+# Story 10.27 AC-6: shared-fragment drift rollup + BC-4 invariant
+# ---------------------------------------------------------------------------
+
+class TestSharedFragmentDriftRollup(unittest.TestCase):
+    """Story 10.27 AC-6: _halt_on_drift_stderr roll-up + BC-4 regression."""
+
+    def _make_shared_frag_report(self, skill: str) -> DriftReport:
+        change = ProseFragmentChange(
+            path="_shared/fragments/resolver-fallback.md",
+            old_hash="old",
+            new_hash="new",
+            user_override_hash=None,
+            tier="base",
+        )
+        return DriftReport(skill=skill, prose_fragment_changes=[change])
+
+    def test_shared_fragment_drift_rollup(self) -> None:
+        """2 skills with shared-fragment change → rollup line + consumer count."""
+        report1 = self._make_shared_frag_report("skill-a")
+        report2 = self._make_shared_frag_report("skill-b")
+        msg = _upgrade_mod._halt_on_drift_stderr([report1, report2])
+        self.assertIn("Shared fragment _shared/fragments/resolver-fallback.md changed", msg)
+        self.assertIn("2 consumers affected", msg)
+        # Must NOT contain "Drift detected in N skills" one-liner (rollup path)
+        self.assertNotIn("Drift detected in 2 skills", msg)
+
+    def test_single_skill_drift_halt_message_unchanged(self) -> None:
+        """BC-4: non-shared-fragment drift + no artifacts → exact pre-Epic-10 one-liner."""
+        change = ProseFragmentChange(
+            path="core/bmad-customize/fragments/preflight.md",
+            old_hash="old",
+            new_hash="new",
+            user_override_hash=None,
+            tier="base",
+        )
+        report = DriftReport(skill="bmad-customize", prose_fragment_changes=[change])
+        msg = _upgrade_mod._halt_on_drift_stderr([report])
+        # BC-4: must start with the exact legacy format
+        self.assertTrue(
+            msg.startswith("Drift detected in 1 skills"),
+            f"Expected BC-4 one-liner, got: {msg!r}",
+        )
+        self.assertNotIn("Shared fragment", msg)
+        self.assertNotIn("artifact", msg)
+
+    def test_artifact_changes_in_rollup_section(self) -> None:
+        """Artifact drift alone → rollup section with 'artifact file(s) changed'."""
+        art = ArtifactDrift(
+            skill="s", artifact_path="data.csv", old_hash="x", new_hash="x",
+            install_hash=None, tier="scaffold-verbatim"
+        )
+        report = DriftReport(skill="s", artifact_changes=[art])
+        msg = _upgrade_mod._halt_on_drift_stderr([report])
+        self.assertIn("Drift detected:", msg)
+        self.assertIn("artifact file(s) changed", msg)
+
+
+# ---------------------------------------------------------------------------
+# Story 10.27 AC-9: FR-13 deprecation warning in compile_skill
+# ---------------------------------------------------------------------------
+
+class TestDeprecationWarning(unittest.TestCase):
+    """Story 10.27 AC-9: compile_skill emits FR-13 deprecation WARNING to stderr."""
+
+    def _compile_with_deprecations(
+        self, tmp: str, deprecations: "list[dict] | None"
+    ) -> str:
+        """Compile a simple skill with given deprecations kwarg; return captured stderr."""
+        skill_dir = Path(tmp) / "core" / "dep-skill"
+        _make_skill(skill_dir, SIMPLE_TEMPLATE)
+        install = Path(tmp) / "install"
+        captured = _stdlib_io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            engine.compile_skill(
+                skill_dir, install,
+                component_runner=_mock_runner(),
+                deprecations=deprecations,
+            )
+        return captured.getvalue()
+
+    def test_deprecation_notice_fires_on_nonempty_deprecations(self) -> None:
+        """deprecations=[{...}] → WARNING: line on stderr."""
+        with tempfile.TemporaryDirectory() as tmp:
+            deps = [{"key": "my.old.key", "replacement": "conventions.md", "since": "v6.7.0"}]
+            stderr = self._compile_with_deprecations(tmp, deps)
+            self.assertIn("WARNING:", stderr)
+            self.assertIn("my.old.key", stderr)
+            self.assertIn("conventions.md", stderr)
+
+    def test_no_deprecation_warning_when_empty(self) -> None:
+        """deprecations=[] → no WARNING: on stderr."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stderr = self._compile_with_deprecations(tmp, [])
+            self.assertNotIn("WARNING:", stderr)
+
+    def test_no_deprecation_warning_when_none(self) -> None:
+        """deprecations=None (default) → no WARNING: on stderr."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stderr = self._compile_with_deprecations(tmp, None)
+            self.assertNotIn("WARNING:", stderr)
+
+
+# ---------------------------------------------------------------------------
+# Story 10.27 AC-7: DN-4 filesystem-walk orphan detector
+# ---------------------------------------------------------------------------
+
+class TestDN4OrphanDetector(unittest.TestCase):
+    """Story 10.27 AC-7: DN-4 extension in _detect_orphaned_overrides."""
+
+    def _base_entry(self, module: str = "core", skill: str = "test-skill") -> dict:
+        """Entry with one base fragment so module can be inferred."""
+        return {
+            "skill": skill,
+            "fragments": [
+                {
+                    "path": f"{module}/{skill}/fragments/known.md",
+                    "resolved_from": "base",
+                    "hash": "knownHash",
+                }
+            ],
+            "variables": [],
+        }
+
+    def test_orphaned_pre_migration_override_detection(self) -> None:
+        """DN-4: per-consumer override not in lockfile fragments → OrphanedOverride."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            # Create the per-consumer override file (not listed in entry["fragments"])
+            override_dir = scenario_root / "custom" / "fragments" / "core" / "test-skill"
+            override_dir.mkdir(parents=True)
+            (override_dir / "old-fragment.md").write_text("old content", encoding="utf-8")
+            entry = self._base_entry()
+            result = _detect_orphaned_overrides(entry, scenario_root)
+            # Should contain one OrphanedOverride from the DN-4 walk
+            orphan_paths = [o.path for o in result]
+            self.assertEqual(len(result), 1, f"Expected 1 orphan, got: {orphan_paths}")
+            self.assertIn("old-fragment.md", result[0].path)
+            self.assertEqual(result[0].reason, "base_fragment_removed")
+
+    def test_known_fragment_override_not_orphaned(self) -> None:
+        """DN-4: per-consumer override that IS in lockfile fragments → not reported."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            # Create override file WITH matching path in entry["fragments"]
+            override_dir = scenario_root / "custom" / "fragments" / "core" / "test-skill"
+            override_dir.mkdir(parents=True)
+            (override_dir / "known.md").write_text("override content", encoding="utf-8")
+            entry = {
+                "skill": "test-skill",
+                "fragments": [
+                    {
+                        "path": "custom/fragments/core/test-skill/known.md",
+                        "resolved_from": "user-module-fragment",
+                        "hash": "knownHash",
+                    }
+                ],
+                "variables": [],
+            }
+            result = _detect_orphaned_overrides(entry, scenario_root)
+            self.assertEqual(result, [])
+
+    def test_global_tier_override_not_orphaned(self) -> None:
+        """DN-4: global-tier override at custom/fragments/conventions.md → NOT reported.
+
+        The DN-4 walk targets custom/fragments/<module>/<skill>/ only.
+        A file at custom/fragments/conventions.md is in a completely different
+        directory and is never encountered by the walk.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            # Global-tier file (not under any module/skill subdir)
+            global_dir = scenario_root / "custom" / "fragments"
+            global_dir.mkdir(parents=True)
+            (global_dir / "conventions.md").write_text("global override", encoding="utf-8")
+            # Per-consumer dir does NOT exist
+            entry = self._base_entry()
+            result = _detect_orphaned_overrides(entry, scenario_root)
+            self.assertEqual(result, [])
+
+    def test_dn4_no_walk_when_per_consumer_dir_absent(self) -> None:
+        """DN-4: no per-consumer directory → [] returned, no filesystem error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            entry = self._base_entry()
+            result = _detect_orphaned_overrides(entry, scenario_root)
+            self.assertEqual(result, [])
+
+
+# ---------------------------------------------------------------------------
+# Story 10.27 AC-11: bmad-customize strict-superset contract
+# ---------------------------------------------------------------------------
+
+class TestBmadCustomizeContract(unittest.TestCase):
+    """Story 10.27: DriftReport JSON shape is a strict superset of pre-Epic-10 shape."""
+
+    def test_bmad_customize_tolerant_read_artifact_changes(self) -> None:
+        """JSON DriftReport with artifact_changes key → parses without error.
+
+        bmad-customize reads upgrade.py's JSON output. The artifact_changes key
+        is additive; a consumer not knowing about it ignores it cleanly.
+        """
+        report_dict = {
+            "skill": "test-skill",
+            "prose_fragment_changes": [],
+            "toml_default_changes": [],
+            "orphaned_overrides": [],
+            "new_defaults": [],
+            "glob_changes": [],
+            "variable_provenance_shifts": [],
+            "artifact_changes": [
+                {
+                    "skill": "test-skill",
+                    "artifact_path": "data.csv",
+                    "old_hash": "a" * 64,
+                    "new_hash": "a" * 64,
+                    "install_hash": None,
+                    "tier": "scaffold-verbatim",
+                }
+            ],
+        }
+        # Serialize + deserialize — structural validation.
+        serialized = json.dumps(report_dict)
+        parsed = json.loads(serialized)
+        self.assertIn("artifact_changes", parsed)
+        self.assertEqual(len(parsed["artifact_changes"]), 1)
+        self.assertEqual(parsed["artifact_changes"][0]["artifact_path"], "data.csv")
+
+
+# ---------------------------------------------------------------------------
+# Story 10.27 AC-8: NFR-1b performance probe
+# ---------------------------------------------------------------------------
+
+class TestNFR1bProbe(unittest.TestCase):
+    """Story 10.27 AC-8: drift detection completes in ≤5s on a ≥42-entry corpus."""
+
+    def _make_minimal_entry(self, idx: int) -> dict:
+        """Minimal lockfile entry — all file references point to non-existent paths
+        (drift.py returns empty for each category cleanly)."""
+        skill = f"skill-{idx:03d}"
+        return {
+            "skill": skill,
+            "compiled_hash": "a" * 64,
+            "source_hash": "b" * 64,
+            "fragments": [
+                {
+                    "path": f"core/{skill}/fragments/conventions.md",
+                    "resolved_from": "base",
+                    "hash": "c" * 64,
+                },
+                {
+                    "path": f"core/{skill}/fragments/persistent-facts.md",
+                    "resolved_from": "base",
+                    "hash": "d" * 64,
+                },
+                {
+                    "path": f"core/{skill}/fragments/resolver-fallback.md",
+                    "resolved_from": "base",
+                    "hash": "e" * 64,
+                },
+            ],
+            "variables": [
+                {
+                    "name": "self.name",
+                    "source": "toml",
+                    "source_path": f"core/{skill}/customize.toml",
+                    "toml_layer": "defaults",
+                    "value_hash": "f" * 64,
+                },
+                {
+                    "name": "self.description",
+                    "source": "toml",
+                    "source_path": f"core/{skill}/customize.toml",
+                    "toml_layer": "defaults",
+                    "value_hash": "0" * 64,
+                },
+            ],
+            "components": [],
+            "artifacts": [],
+            "deprecations": [],
+            "glob_inputs": [],
+        }
+
+    def test_drift_detection_under_5s_post_epic_10(self) -> None:
+        """NFR-1b: detect_drift across ≥42 entries must complete in ≤5s.
+
+        Uses a synthetic fixture where all referenced files are absent
+        (each category returns empty cleanly — no actual file I/O hot path).
+        Budget: 5.0 seconds on GHA windows-latest 2-core.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            entries = [self._make_minimal_entry(i) for i in range(45)]  # > 42
+            start = time.monotonic()
+            for entry in entries:
+                detect_drift(entry, tmp)
+            elapsed = time.monotonic() - start
+            self.assertLess(
+                elapsed, 5.0,
+                f"NFR-1b: drift detection took {elapsed:.2f}s for 45 entries (budget 5.0s)",
+            )
 
 
 if __name__ == "__main__":

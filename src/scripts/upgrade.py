@@ -28,6 +28,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from bmad_compile.drift import (
+    ArtifactDrift,  # Story 10.27 FR-5
     DriftReport,
     GlobChange,
     NewDefault,
@@ -265,6 +266,16 @@ def _report_to_dict(report: DriftReport) -> dict[str, Any]:
             "new_toml_layer": item.new_toml_layer,
         }
 
+    def artifact_item(item: ArtifactDrift) -> dict[str, Any]:
+        return {
+            "skill": item.skill,
+            "artifact_path": item.artifact_path,
+            "old_hash": item.old_hash,
+            "new_hash": item.new_hash,
+            "install_hash": item.install_hash,
+            "tier": item.tier,
+        }
+
     return {
         "skill": report.skill,
         "prose_fragment_changes": [prose_item(i) for i in report.prose_fragment_changes],
@@ -273,6 +284,7 @@ def _report_to_dict(report: DriftReport) -> dict[str, Any]:
         "new_defaults": [new_item(i) for i in report.new_defaults],
         "glob_changes": [glob_item(i) for i in report.glob_changes],
         "variable_provenance_shifts": [prov_item(i) for i in report.variable_provenance_shifts],
+        "artifact_changes": [artifact_item(i) for i in report.artifact_changes],  # Story 10.27
     }
 
 
@@ -292,6 +304,7 @@ def _format_json(reports: list[DriftReport]) -> str:
         "new_defaults": sum(len(r.new_defaults) for r in reports),
         "glob_changes": sum(len(r.glob_changes) for r in reports),
         "variable_provenance_shifts": sum(len(r.variable_provenance_shifts) for r in reports),
+        "artifact_changes": sum(len(r.artifact_changes) for r in reports),  # Story 10.27
     }
     result: dict[str, Any] = {
         "schema_version": 1,
@@ -302,7 +315,40 @@ def _format_json(reports: list[DriftReport]) -> str:
 
 
 def _halt_on_drift_stderr(reports: list[DriftReport]) -> str:
-    """Format the mandated AC 1 halt message with N/M/P/Q substitution."""
+    """Format the halt message.
+
+    Story 10.27 AC-6 / Arch §4.4: when shared fragments (_shared/fragments/*.md)
+    changed, prepend a roll-up section naming each fragment + consumer count and
+    listing total artifact changes.  When neither condition applies, emit the
+    pre-Epic-10 one-liner verbatim (BC-4 invariant).
+    """
+    n_artifact_changes = sum(len(r.artifact_changes) for r in reports)
+
+    # Collect shared-fragment drift: path → count of consumer skills affected.
+    shared_fragment_consumers: dict[str, int] = {}
+    for report in reports:
+        for change in report.prose_fragment_changes:
+            if "_shared/fragments/" in change.path:
+                shared_fragment_consumers[change.path] = (
+                    shared_fragment_consumers.get(change.path, 0) + 1
+                )
+
+    if shared_fragment_consumers or n_artifact_changes > 0:
+        lines = ["Drift detected:"]
+        for frag_path in sorted(shared_fragment_consumers):
+            count = shared_fragment_consumers[frag_path]
+            lines.append(f"  Shared fragment {frag_path} changed")
+            lines.append(f"    — {count} consumer{'s' if count != 1 else ''} affected")
+        if n_artifact_changes > 0:
+            lines.append(f"  {n_artifact_changes} artifact file(s) changed")
+        lines.append(
+            "Invoke 'bmad-customize' skill in your IDE chat to review and resolve, "
+            "then re-run 'bmad upgrade'. "
+            "Use 'bmad upgrade --yes' to ignore drift and proceed (not recommended)."
+        )
+        return "\n".join(lines)
+
+    # BC-4: pre-Epic-10 one-liner, unchanged.
     n_skills = sum(1 for r in reports if r.has_drift())
     m_prose = sum(len(r.prose_fragment_changes) for r in reports)
     p_toml = sum(len(r.toml_default_changes) for r in reports)

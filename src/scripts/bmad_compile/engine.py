@@ -860,6 +860,7 @@ def compile_skill(
     toml_warning_sink: list[dict[str, Any]] | None = None,
     emit_fn: "Callable[[dict], None] | None" = None,
     component_runner: "Any | None" = None,
+    deprecations: "list[dict[str, Any]] | None" = None,  # Story 10.27 FR-13
 ) -> None:
     """Compile a single skill directory to `<install_dir>/<skill_basename>/SKILL.md`.
 
@@ -1016,8 +1017,20 @@ def compile_skill(
         cache=cache,
         components=component_records,
         artifacts=artifacts_records,  # Story 10.25: FR-3
+        deprecations=deprecations,    # Story 10.27: FR-13
         emit_fn=emit_fn,
     )
+
+    # Story 10.27: FR-13 deprecation channel — warn on deprecated customize.toml keys.
+    # Fires once per deprecated key per compile. For all 22 current skills,
+    # deprecations is None or [] → zero warnings (no-op).
+    import sys as _sys
+    for _dep in (deprecations or []):
+        _sys.stderr.write(
+            f"WARNING: skill '{basename}' declares deprecated key '{_dep['key']}'"
+            f" — see {_dep.get('replacement', '?')} (since {_dep.get('since', '?')})."
+            f" Migration: {_dep.get('replacement', 'see documentation')}.\n"
+        )
 
 
 def explain_skill(

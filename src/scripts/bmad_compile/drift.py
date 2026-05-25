@@ -86,6 +86,17 @@ class VariableProvenanceShift:
 
 
 @dataclass
+class ArtifactDrift:
+    """Story 10.27: FR-5 — drift in a skill's emitted artifacts."""
+    skill: str
+    artifact_path: str        # POSIX, install-root-relative (as stored in lockfile)
+    old_hash: str
+    new_hash: str | None      # None = artifact deleted upstream (source gone)
+    install_hash: str | None  # None = artifact removed from install dir
+    tier: str                 # "scaffold-verbatim" | future
+
+
+@dataclass
 class DriftReport:
     skill: str
     prose_fragment_changes: list[ProseFragmentChange] = field(default_factory=list)
@@ -94,18 +105,41 @@ class DriftReport:
     new_defaults: list[NewDefault] = field(default_factory=list)
     glob_changes: list[GlobChange] = field(default_factory=list)  # pragma: allow-raw-io
     variable_provenance_shifts: list[VariableProvenanceShift] = field(default_factory=list)
+    artifact_changes: list[ArtifactDrift] = field(default_factory=list)  # Story 10.27 FR-5
 
     def has_drift(self) -> bool:
         return any([
             self.prose_fragment_changes, self.toml_default_changes,
             self.orphaned_overrides, self.new_defaults,
             self.glob_changes, self.variable_provenance_shifts,  # pragma: allow-raw-io
+            self.artifact_changes,  # Story 10.27 FR-5
         ])
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _infer_module(entry: dict[str, Any]) -> str | None:
+    """Infer the install module directory from lockfile entry fragments or variables.
+
+    Story 10.27: shared by _detect_artifact_drift and DN-4 extension in
+    _detect_orphaned_overrides.  Returns the module directory name (e.g.
+    "core-skills", "core", "bmm") or None if it cannot be inferred.
+    """
+    for frag in entry.get("fragments", []):
+        if frag.get("resolved_from") == "base":
+            parts = PurePosixPath(frag["path"]).parts
+            if len(parts) >= 2:
+                return parts[0]
+    for var in entry.get("variables", []):
+        sp = var.get("source_path", "")
+        if sp:
+            parts = PurePosixPath(sp).parts
+            if len(parts) >= 2:
+                return parts[0]
+    return None
+
 
 def _toml_str(v: Any) -> str:
     """Serialize a TOML scalar to string the same way resolver.py does."""
@@ -388,7 +422,86 @@ def _detect_orphaned_overrides(
                 reason="base_fragment_removed",
             ))
 
+    # Story 10.27 DN-4 extension: filesystem-walk to catch per-consumer overrides
+    # whose include paths were REMOVED from the migrated template (empty-base-hash case).
+    # These never appear in entry["fragments"] so the base-hash loop above misses them.
+    module = _infer_module(entry)
+    if module is not None:
+        skill_basename: str = entry["skill"]
+        per_consumer_dir = scenario_root / "custom" / "fragments" / module / skill_basename
+        if per_consumer_dir.is_dir():  # pragma: allow-raw-io
+            # Build set of fragment paths already recorded in the lockfile.
+            lockfile_frag_paths: set[str] = {
+                frag["path"] for frag in entry.get("fragments", [])
+            }
+            for frag_file in sorted(per_consumer_dir.rglob("*.md")):  # pragma: allow-raw-io
+                rel = frag_file.relative_to(scenario_root).as_posix()
+                if rel not in lockfile_frag_paths:
+                    # Override has no corresponding lockfile fragment — orphaned.
+                    try:
+                        content = frag_file.read_text("utf-8")  # pragma: allow-raw-io
+                        override_hash = io.hash_text(content)
+                    except OSError:
+                        continue
+                    result.append(OrphanedOverride(
+                        path=rel,
+                        override_hash=override_hash,
+                        reason="base_fragment_removed",
+                    ))
+
     result.sort(key=lambda o: o.path)
+    return result
+
+
+def _detect_artifact_drift(
+    entry: dict[str, Any], scenario_root: Path
+) -> list[ArtifactDrift]:
+    """Story 10.27 FR-5: detect drift in emitted artifact files.
+
+    Reads entries[i].artifacts[] from the lockfile (v3 schema, Story 10.26),
+    hashes each install-dir copy, and reports drift when install_hash != old_hash
+    (covers both hash mismatch and missing-from-install-dir cases).
+
+    Install-dir path reconstruction: scenario_root / <module> / <skill> / artifact["path"]
+    where <module> is inferred from fragment paths or variable source_path.
+    """
+    artifact_entries: list[dict[str, Any]] = entry.get("artifacts", [])
+    if not artifact_entries:
+        return []  # fast path — all 22 current skills have artifacts: []
+
+    module = _infer_module(entry)
+    if module is None:
+        return []  # cannot reconstruct install path; skip safely
+
+    skill_basename: str = entry["skill"]
+    result: list[ArtifactDrift] = []
+
+    for art in artifact_entries:
+        art_path: str = art["path"]
+        old_hash: str = art["hash"]
+        tier: str = art.get("kind", "scaffold-verbatim")
+
+        install_abs = scenario_root / module / skill_basename / art_path
+
+        if install_abs.is_file():  # pragma: allow-raw-io
+            # Use CRLF-normalized read (same path as io.write_text used at emit time).
+            install_hash: str | None = io.hash_text(
+                io.read_template(str(install_abs))  # pragma: allow-raw-io
+            )
+        else:
+            install_hash = None  # artifact missing from install dir
+
+        if install_hash != old_hash:
+            result.append(ArtifactDrift(
+                skill=skill_basename,
+                artifact_path=art_path,
+                old_hash=old_hash,
+                new_hash=old_hash,   # upstream source hash not available here; use lockfile hash
+                install_hash=install_hash,
+                tier=tier,
+            ))
+
+    result.sort(key=lambda a: a.artifact_path)
     return result
 
 
@@ -397,7 +510,7 @@ def _detect_orphaned_overrides(
 # ---------------------------------------------------------------------------
 
 def detect_drift(entry: dict[str, Any], project_root: str) -> DriftReport:
-    """Run all four detection functions for one lockfile entry.
+    """Run all detection functions for one lockfile entry.
 
     No fast path in v1 — always runs all categories. source_hash in the
     lockfile is root-template-only and cannot be used as an all-inputs gate.
@@ -409,6 +522,7 @@ def detect_drift(entry: dict[str, Any], project_root: str) -> DriftReport:
     globs = _detect_glob_drift(entry, scenario_root)  # pragma: allow-raw-io
     toml_changes, new_defs, prov_shifts = _detect_toml_variable_drift(entry, scenario_root)
     orphans = _detect_orphaned_overrides(entry, scenario_root)
+    artifact_changes = _detect_artifact_drift(entry, scenario_root)  # Story 10.27 FR-5
 
     return DriftReport(
         skill=skill,
@@ -418,4 +532,5 @@ def detect_drift(entry: dict[str, Any], project_root: str) -> DriftReport:
         new_defaults=new_defs,
         glob_changes=globs,  # pragma: allow-raw-io
         variable_provenance_shifts=prov_shifts,
+        artifact_changes=artifact_changes,  # Story 10.27 FR-5
     )
