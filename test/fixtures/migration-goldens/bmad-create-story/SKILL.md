@@ -18,7 +18,7 @@ description: 'Creates a dedicated story file with all the context the agent will
 
 ## Conventions
 
-- Bare paths (e.g. `discover-inputs.md`) resolve from the skill root.
+- Bare paths resolve from the skill root.
 - `{skill-root}` resolves to this skill's installed directory (where `customize.toml` lives).
 - `{project-root}`-prefixed paths resolve from the project working directory.
 - `{skill-name}` resolves to the skill directory's basename.
@@ -52,8 +52,14 @@ Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
 - `project_name`, `user_name`
 - `communication_language`, `document_output_language`
 - `user_skill_level`
-- `planning_artifacts`, `implementation_artifacts`
+- `implementation_artifacts`
+- `planning_artifacts`
+- `project_knowledge`
 - `date` as system-generated current datetime
+- YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
+- Language MUST be tailored to `{user_skill_level}`
+- Generate all documents in `{document_output_language}`
+- DOCUMENT OUTPUT: Updated epics, stories, or PRD sections. Clear, actionable changes. User skill level (`{user_skill_level}`) affects conversation style ONLY, not document updates.
 
 ### Step 5: Greet the User
 
@@ -73,7 +79,7 @@ Activation is complete. Begin the workflow below.
 - `architecture_file` = `{planning_artifacts}/architecture.md`
 - `ux_file` = `{planning_artifacts}/*ux*.md`
 - `story_title` = "" (will be elicited if not derivable)
-- `default_output_file` = `{implementation_artifacts}/{{story_key}}.md`
+- `default_output_file` = `{implementation_artifacts}/{story_key}.md`
 
 ## Input Files
 
@@ -89,13 +95,13 @@ Activation is complete. Begin the workflow below.
 <workflow>
 
 <step n="1" goal="Determine target story">
-  <check if="{{story_path}} is provided by user or user provided the epic and story number such as 2-4 or 1.6 or epic 1 story 5">
+  <check if="{story_path} is provided by user or user provided the epic and story number such as 2-4 or 1.6 or epic 1 story 5">
     <action>Parse user-provided story path: extract epic_num, story_num, story_title from format like "1-2-user-auth"</action>
-    <action>Set {{epic_num}}, {{story_num}}, {{story_key}} from user input</action>
+    <action>Set {epic_num}, {story_num}, {story_key} from user input</action>
     <action>GOTO step 2a</action>
   </check>
 
-  <action>Check if {{sprint_status}} file exists for auto discover</action>
+  <action>Check if {sprint_status} file exists for auto discover</action>
   <check if="sprint status file does NOT exist">
     <output>🚫 No sprint status file found and no story specified</output>
     <output>
@@ -117,7 +123,7 @@ Activation is complete. Begin the workflow below.
 
     <check if="user provides epic-story number">
       <action>Parse user input: extract epic_num, story_num, story_title</action>
-      <action>Set {{epic_num}}, {{story_num}}, {{story_key}} from user input</action>
+      <action>Set {epic_num}, {story_num}, {story_key} from user input</action>
       <action>GOTO step 2a</action>
     </check>
 
@@ -130,7 +136,7 @@ Activation is complete. Begin the workflow below.
   <!-- Auto-discover from sprint status only if no user input -->
   <check if="no user input provided">
     <critical>MUST read COMPLETE {sprint_status} file from start to end to preserve order</critical>
-    <action>Load the FULL file: {{sprint_status}}</action>
+    <action>Load the FULL file: {sprint_status}</action>
     <action>Read ALL lines from beginning to end - do not skip any content</action>
     <action>Parse the development_status section completely</action>
 
@@ -158,36 +164,36 @@ Activation is complete. Begin the workflow below.
       - story_num: second number after first dash (e.g., "2")
       - story_title: remainder after second dash (e.g., "user-authentication")
     </action>
-    <action>Set {{story_id}} = "{{epic_num}}.{{story_num}}"</action>
+    <action>Set {story_id} = "{epic_num}.{story_num}"</action>
     <action>Store story_key for later use (e.g., "1-2-user-authentication")</action>
 
     <!-- Mark epic as in-progress if this is first story -->
-    <action>Check if this is the first story in epic {{epic_num}} by looking for {{epic_num}}-1-* pattern</action>
-    <check if="this is first story in epic {{epic_num}}">
-      <action>Load {{sprint_status}} and check epic-{{epic_num}} status</action>
+    <action>Check if this is the first story in epic {epic_num} by looking for {epic_num}-1-* pattern</action>
+    <check if="this is first story in epic {epic_num}">
+      <action>Load {sprint_status} and check epic-{epic_num} status</action>
       <action>If epic status is "backlog" → update to "in-progress"</action>
       <action>If epic status is "contexted" (legacy status) → update to "in-progress" (backward compatibility)</action>
       <action>If epic status is "in-progress" → no change needed</action>
       <check if="epic status is 'done'">
         <output>🚫 ERROR: Cannot create story in completed epic</output>
-        <output>Epic {{epic_num}} is marked as 'done'. All stories are complete.</output>
+        <output>Epic {epic_num} is marked as 'done'. All stories are complete.</output>
         <output>If you need to add more work, either:</output>
         <output>1. Manually change epic status back to 'in-progress' in sprint-status.yaml</output>
         <output>2. Create a new epic for additional work</output>
         <action>HALT - Cannot proceed</action>
       </check>
       <check if="epic status is not one of: backlog, contexted, in-progress, done">
-        <output>🚫 ERROR: Invalid epic status '{{epic_status}}'</output>
-        <output>Epic {{epic_num}} has invalid status. Expected: backlog, in-progress, or done</output>
+        <output>🚫 ERROR: Invalid epic status '{epic_status}'</output>
+        <output>Epic {epic_num} has invalid status. Expected: backlog, in-progress, or done</output>
         <output>Please fix sprint-status.yaml manually or run sprint-planning to regenerate</output>
         <action>HALT - Cannot proceed</action>
       </check>
-      <output>📊 Epic {{epic_num}} status updated to in-progress</output>
+      <output>📊 Epic {epic_num} status updated to in-progress</output>
     </check>
 
     <action>GOTO step 2a</action>
   </check>
-  <action>Load the FULL file: {{sprint_status}}</action>
+  <action>Load the FULL file: {sprint_status}</action>
   <action>Read ALL lines from beginning to end - do not skip any content</action>
   <action>Parse the development_status section completely</action>
 
@@ -215,31 +221,31 @@ Activation is complete. Begin the workflow below.
     - story_num: second number after first dash (e.g., "2")
     - story_title: remainder after second dash (e.g., "user-authentication")
   </action>
-  <action>Set {{story_id}} = "{{epic_num}}.{{story_num}}"</action>
+  <action>Set {story_id} = "{epic_num}.{story_num}"</action>
   <action>Store story_key for later use (e.g., "1-2-user-authentication")</action>
 
   <!-- Mark epic as in-progress if this is first story -->
-  <action>Check if this is the first story in epic {{epic_num}} by looking for {{epic_num}}-1-* pattern</action>
-  <check if="this is first story in epic {{epic_num}}">
-    <action>Load {{sprint_status}} and check epic-{{epic_num}} status</action>
+  <action>Check if this is the first story in epic {epic_num} by looking for {epic_num}-1-* pattern</action>
+  <check if="this is first story in epic {epic_num}">
+    <action>Load {sprint_status} and check epic-{epic_num} status</action>
     <action>If epic status is "backlog" → update to "in-progress"</action>
     <action>If epic status is "contexted" (legacy status) → update to "in-progress" (backward compatibility)</action>
     <action>If epic status is "in-progress" → no change needed</action>
     <check if="epic status is 'done'">
       <output>ERROR: Cannot create story in completed epic</output>
-      <output>Epic {{epic_num}} is marked as 'done'. All stories are complete.</output>
+      <output>Epic {epic_num} is marked as 'done'. All stories are complete.</output>
       <output>If you need to add more work, either:</output>
       <output>1. Manually change epic status back to 'in-progress' in sprint-status.yaml</output>
       <output>2. Create a new epic for additional work</output>
       <action>HALT - Cannot proceed</action>
     </check>
     <check if="epic status is not one of: backlog, contexted, in-progress, done">
-      <output>ERROR: Invalid epic status '{{epic_status}}'</output>
-      <output>Epic {{epic_num}} has invalid status. Expected: backlog, in-progress, or done</output>
+      <output>ERROR: Invalid epic status '{epic_status}'</output>
+      <output>Epic {epic_num} has invalid status. Expected: backlog, in-progress, or done</output>
       <output>Please fix sprint-status.yaml manually or run sprint-planning to regenerate</output>
       <action>HALT - Cannot proceed</action>
     </check>
-    <output>Epic {{epic_num}} status updated to in-progress</output>
+    <output>Epic {epic_num} status updated to in-progress</output>
   </check>
 
   <action>GOTO step 2a</action>
@@ -253,16 +259,16 @@ Activation is complete. Begin the workflow below.
   <note>Available content: {epics_content}, {prd_content}, {architecture_content}, {ux_content}, plus the project-context facts loaded during activation via `persistent_facts`.</note>
 
   <!-- Analyze epics file for story foundation -->
-  <action>From {epics_content}, extract Epic {{epic_num}} complete context:</action> **EPIC ANALYSIS:** - Epic
+  <action>From {epics_content}, extract Epic {epic_num} complete context:</action> **EPIC ANALYSIS:** - Epic
   objectives and business value - ALL stories in this epic for cross-story context - Our specific story's requirements, user story
   statement, acceptance criteria - Technical requirements and constraints - Dependencies on other stories/epics - Source hints pointing to
   original documents <!-- Extract specific story requirements -->
-  <action>Extract our story ({{epic_num}}-{{story_num}}) details:</action> **STORY FOUNDATION:** - User story statement
+  <action>Extract our story ({epic_num}-{story_num}) details:</action> **STORY FOUNDATION:** - User story statement
   (As a, I want, so that) - Detailed acceptance criteria (already BDD formatted) - Technical requirements specific to this story -
   Business context and value - Success criteria <!-- Previous story analysis for context continuity -->
   <check if="story_num > 1">
-    <action>Find {{previous_story_num}}: scan {implementation_artifacts} for the story file in epic {{epic_num}} with the highest story number less than {{story_num}}</action>
-    <action>Load previous story file: {implementation_artifacts}/{{epic_num}}-{{previous_story_num}}-*.md</action> **PREVIOUS STORY INTELLIGENCE:** -
+    <action>Find {previous_story_num}: scan {implementation_artifacts} for the story file in epic {epic_num} with the highest story number less than {story_num}</action>
+    <action>Load previous story file: {implementation_artifacts}/{epic_num}-{previous_story_num}-*.md</action> **PREVIOUS STORY INTELLIGENCE:** -
   Dev notes and learnings from previous story - Review feedback and corrections needed - Files that were created/modified and their
   patterns - Testing approaches that worked/didn't work - Problems encountered and solutions found - Code patterns established <action>Extract
   all learnings that could impact current story implementation</action>
@@ -397,11 +403,11 @@ Activation is complete. Begin the workflow below.
 
   <!-- Update sprint status -->
   <check if="sprint status file exists">
-    <action>Update {{sprint_status}}</action>
+    <action>Update {sprint_status}</action>
     <action>Load the FULL file and read all development_status entries</action>
-    <action>Find development_status key matching {{story_key}}</action>
+    <action>Find development_status key matching {story_key}</action>
     <action>Verify current status is "backlog" (expected previous state)</action>
-    <action>Update development_status[{{story_key}}] = "ready-for-dev"</action>
+    <action>Update development_status[{story_key}] = "ready-for-dev"</action>
     <action>Update last_updated field to current date</action>
     <action>Save file, preserving ALL comments and structure including STATUS DEFINITIONS</action>
   </check>
@@ -410,13 +416,13 @@ Activation is complete. Begin the workflow below.
   <output>**🎯 ULTIMATE BMad Method STORY CONTEXT CREATED, {user_name}!**
 
     **Story Details:**
-    - Story ID: {{story_id}}
-    - Story Key: {{story_key}}
-    - File: {{story_file}}
+    - Story ID: {story_id}
+    - Story Key: {story_key}
+    - File: {story_file}
     - Status: ready-for-dev
 
     **Next Steps:**
-    1. Review the comprehensive story in {{story_file}}
+    1. Review the comprehensive story in {story_file}
     2. Run dev agents `dev-story` for optimized implementation
     3. Run `code-review` when complete (auto-marks done)
     4. Optional: If Test Architect module installed, run `/bmad:tea:automate` after `dev-story` to generate guardrail tests
@@ -427,3 +433,4 @@ Activation is complete. Begin the workflow below.
 </step>
 
 </workflow>
+
