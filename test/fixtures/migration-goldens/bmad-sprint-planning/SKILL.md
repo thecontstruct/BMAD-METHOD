@@ -11,7 +11,7 @@ description: 'Generate sprint status tracking from epics. Use when the user says
 
 ## Conventions
 
-- Bare paths (e.g. `checklist.md`) resolve from the skill root.
+- Bare paths resolve from the skill root.
 - `{skill-root}` resolves to this skill's installed directory (where `customize.toml` lives).
 - `{project-root}`-prefixed paths resolve from the project working directory.
 - `{skill-name}` resolves to the skill directory's basename.
@@ -44,11 +44,15 @@ Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
 
 - `project_name`, `user_name`
 - `communication_language`, `document_output_language`
+- `user_skill_level`
 - `implementation_artifacts`
 - `planning_artifacts`
+- `project_knowledge`
 - `date` as system-generated current datetime
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
+- Language MUST be tailored to `{user_skill_level}`
 - Generate all documents in `{document_output_language}`
+- DOCUMENT OUTPUT: Updated epics, stories, or PRD sections. Clear, actionable changes. User skill level (`{user_skill_level}`) affects conversation style ONLY, not document updates.
 
 ### Step 5: Greet the User
 
@@ -228,20 +232,20 @@ development_status:
 
 <action>Count totals:</action>
 
-- Total epics: {{epic_count}}
-- Total stories: {{story_count}}
-- Epics in-progress: {{in_progress_count}}
-- Stories done: {{done_count}}
+- Total epics: {epic_count}
+- Total stories: {story_count}
+- Epics in-progress: {in_progress_count}
+- Stories done: {done_count}
 
 <action>Display completion summary to {user_name} in {communication_language}:</action>
 
 **Sprint Status Generated Successfully**
 
 - **File Location:** {status_file}
-- **Total Epics:** {{epic_count}}
-- **Total Stories:** {{story_count}}
-- **Epics In Progress:** {{in_progress_count}}
-- **Stories Completed:** {{done_count}}
+- **Total Epics:** {epic_count}
+- **Total Stories:** {story_count}
+- **Epics In Progress:** {in_progress_count}
+- **Stories Completed:** {done_count}
 
 **Next Steps:**
 
@@ -297,3 +301,4 @@ optional ↔ done
 3. **Parallel Work Supported**: Multiple stories can be `in-progress` if team capacity allows
 4. **Review Before Done**: Stories should pass through `review` before `done`
 5. **Learning Transfer**: Developer typically creates next story after previous one is `done` to incorporate learnings
+
