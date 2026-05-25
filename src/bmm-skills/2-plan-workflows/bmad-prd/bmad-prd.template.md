@@ -1,6 +1,25 @@
 ---
 name: bmad-prd
 description: Create, update, or validate a PRD. Use when the user wants help producing, editing, or validating a PRD.
+artifacts:
+  - path: assets/headless-schemas.md
+    source: assets/headless-schemas.md
+    kind: scaffold-verbatim
+  - path: assets/prd-template.md
+    source: assets/prd-template.md
+    kind: scaffold-verbatim
+  - path: assets/prd-validation-checklist.md
+    source: assets/prd-validation-checklist.md
+    kind: scaffold-verbatim
+  - path: assets/validation-report-template.html
+    source: assets/validation-report-template.html
+    kind: scaffold-verbatim
+  - path: references/headless.md
+    source: references/headless.md
+    kind: scaffold-verbatim
+  - path: references/validate.md
+    source: references/validate.md
+    kind: scaffold-verbatim
 ---
 # BMad PRD
 
