@@ -1,6 +1,43 @@
 ---
 name: bmad-create-architecture
 description: 'Create architecture solution design decisions for AI agent consistency. Use when the user says "lets create architecture" or "create technical architecture" or "create a solution design"'
+artifacts:
+  - path: architecture-decision-template.md
+    source: architecture-decision-template.md
+    kind: scaffold-verbatim
+  - path: data/domain-complexity.csv
+    source: data/domain-complexity.csv
+    kind: scaffold-verbatim
+  - path: data/project-types.csv
+    source: data/project-types.csv
+    kind: scaffold-verbatim
+  - path: steps/step-01-init.md
+    source: steps/step-01-init.md
+    kind: scaffold-verbatim
+  - path: steps/step-01b-continue.md
+    source: steps/step-01b-continue.md
+    kind: scaffold-verbatim
+  - path: steps/step-02-context.md
+    source: steps/step-02-context.md
+    kind: scaffold-verbatim
+  - path: steps/step-03-starter.md
+    source: steps/step-03-starter.md
+    kind: scaffold-verbatim
+  - path: steps/step-04-decisions.md
+    source: steps/step-04-decisions.md
+    kind: scaffold-verbatim
+  - path: steps/step-05-patterns.md
+    source: steps/step-05-patterns.md
+    kind: scaffold-verbatim
+  - path: steps/step-06-structure.md
+    source: steps/step-06-structure.md
+    kind: scaffold-verbatim
+  - path: steps/step-07-validation.md
+    source: steps/step-07-validation.md
+    kind: scaffold-verbatim
+  - path: steps/step-08-complete.md
+    source: steps/step-08-complete.md
+    kind: scaffold-verbatim
 ---
 
 # Architecture Workflow
