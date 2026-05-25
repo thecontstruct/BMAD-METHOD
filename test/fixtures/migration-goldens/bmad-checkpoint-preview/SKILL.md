@@ -11,7 +11,7 @@ description: 'LLM-assisted human-in-the-loop review. Make sense of a change, foc
 
 ## Conventions
 
-- Bare paths (e.g. `step-01-orientation.md`) resolve from the skill root.
+- Bare paths resolve from the skill root.
 - `{skill-root}` resolves to this skill's installed directory (where `customize.toml` lives).
 - `{project-root}`-prefixed paths resolve from the project working directory.
 - `{skill-name}` resolves to the skill directory's basename.
@@ -42,14 +42,21 @@ Treat every entry in `{workflow.persistent_facts}` as foundational context you c
 
 Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
 
+- `project_name`, `user_name`
+- `communication_language`, `document_output_language`
+- `user_skill_level`
 - `implementation_artifacts`
 - `planning_artifacts`
-- `communication_language`
-- `document_output_language`
+- `project_knowledge`
+- `date` as system-generated current datetime
+- YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
+- Language MUST be tailored to `{user_skill_level}`
+- Generate all documents in `{document_output_language}`
+- DOCUMENT OUTPUT: Updated epics, stories, or PRD sections. Clear, actionable changes. User skill level (`{user_skill_level}`) affects conversation style ONLY, not document updates.
 
 ### Step 5: Greet the User
 
-Greet the user, speaking in `{communication_language}`.
+Greet `{user_name}`, speaking in `{communication_language}`.
 
 ### Step 6: Execute Append Steps
 

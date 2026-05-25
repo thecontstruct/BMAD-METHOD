@@ -50,6 +50,23 @@ function reconstructSkillSrcDir(entry) {
     }
     throw new Error(`bmad.lock entry for skill "${entry.skill}" has no fragments[]; cannot reconstruct source directory.`);
   }
+  // Story 10.12: skills whose fragments are all in _shared/ cannot use fragment-path
+  // reconstruction; fall back to name-based search in core-skills and bmm-skills.
+  const allShared = fragments.every(f => typeof f.path === 'string' && f.path.startsWith('_shared/'));
+  if (allShared) {
+    const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
+    const coreCandidate = path.join(srcRoot, 'core-skills', entry.skill);
+    if (fs.existsSync(coreCandidate)) return coreCandidate;
+    const bmmSkillsRoot = path.join(srcRoot, 'bmm-skills');
+    if (fs.existsSync(bmmSkillsRoot)) {
+      for (const cat of fs.readdirSync(bmmSkillsRoot, { withFileTypes: true })) {
+        if (!cat.isDirectory()) continue;
+        const candidate = path.join(bmmSkillsRoot, cat.name, entry.skill);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+    throw new Error(`bmad.lock entry for skill "${entry.skill}": uses _shared fragments but source not found in core-skills/ or bmm-skills/.`);
+  }
   const fragPath = fragments[0].path;
   if (typeof fragPath !== 'string' || fragPath === '') {
     throw new Error(`bmad.lock entry for skill "${entry.skill}" has empty fragments[0].path.`);
@@ -100,13 +117,53 @@ function runCompile(skillSrcDir, tmpDir) {
   return result;
 }
 
+function copyDirSync(src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, ent.name);
+    const d = path.join(dst, ent.name);
+    if (ent.isDirectory()) copyDirSync(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
+
 function validateOne(entry) {
   const skill = entry.skill;
   const skillSrcDir = reconstructSkillSrcDir(entry);
+  const skillBasename = path.basename(skillSrcDir);
+  // Story 10.12: skills with _shared/ fragments require positional compile layout.
+  const usesSharedFragments = (entry.fragments || []).some(
+    f => typeof f.path === 'string' && f.path.startsWith('_shared/')
+  );
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmad-validate-'));
 
   try {
-    const compileResult = runCompile(skillSrcDir, tmpDir);
+    let compileResult;
+    let compiledSkillDir;
+
+    if (usesSharedFragments) {
+      // Positional compile: lay out <module>/<skill>/ + _shared/ in tmpDir so
+      // _discover_module_roots() can find _shared fragments.
+      const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
+      const relToSrc = path.relative(srcRoot, skillSrcDir);
+      const module = relToSrc.startsWith('bmm-skills') ? 'bmm' : 'core';
+      const skillInstallDir = path.join(tmpDir, module, skillBasename);
+      copyDirSync(skillSrcDir, skillInstallDir);
+      copyDirSync(path.join(srcRoot, '_shared'), path.join(tmpDir, '_shared'));
+      fs.mkdirSync(path.join(tmpDir, '_config'), { recursive: true });
+      const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
+      compileResult = spawnSync(
+        pythonBin,
+        [COMPILE_PY, `${module}/${skillBasename}`, '--install-dir', tmpDir],
+        { encoding: 'utf8', timeout: 30_000 },
+      );
+      compiledSkillDir = path.join(tmpDir, module, skillBasename);
+    } else {
+      compileResult = runCompile(skillSrcDir, tmpDir);
+      // Per-skill mode (no lockfile_root): engine writes to <install_dir>/<basename>/SKILL.md.
+      compiledSkillDir = path.join(tmpDir, skillBasename);
+    }
+
     // BH-2/ECH-2: surface spawn-failure (ENOENT, EACCES, ETIMEDOUT) before status check.
     // When the process never ran or was killed mid-flight, status is null and stderr is empty;
     // without this branch the operator sees a confusing "(no output)" instead of the real cause.
@@ -136,10 +193,6 @@ function validateOne(entry) {
       };
     }
 
-    // Per-skill mode (no lockfile_root): engine writes to <install_dir>/<basename>/SKILL.md.
-    // The basename is the skill source dir's last segment.
-    const skillBasename = path.basename(skillSrcDir);
-    const compiledSkillDir = path.join(tmpDir, skillBasename);
     const compiledSkillMd = path.join(compiledSkillDir, 'SKILL.md');
     if (!fs.existsSync(compiledSkillMd)) {
       return {
@@ -158,7 +211,17 @@ function validateOne(entry) {
     const hashMatch = actual === entry.compiled_hash;
 
     // OQ-3 Option A: schema-validate the compiled output regardless of hash result.
-    const schemaFindings = validateSkill(compiledSkillDir);
+    // Story 10.12: for _shared-fragments skills the compiledSkillDir also contains template
+    // source files; validate from a clean SKILL.md-only subdir to avoid false WF-01/WF-02 hits.
+    const schemaInputDir = usesSharedFragments
+      ? (() => {
+          const d = path.join(tmpDir, '_schema_output', skillBasename);
+          fs.mkdirSync(d, { recursive: true });
+          fs.copyFileSync(compiledSkillMd, path.join(d, 'SKILL.md'));
+          return d;
+        })()
+      : compiledSkillDir;
+    const schemaFindings = validateSkill(schemaInputDir);
     // DN-R1-1=A (Phil 2026-05-08): only CRITICAL and HIGH block the build. MEDIUM and LOW
     // are informational, mirroring the `validate:skills --strict` contract.
     const schemaFailures = schemaFindings.filter((f) => f.severity === 'CRITICAL' || f.severity === 'HIGH');
