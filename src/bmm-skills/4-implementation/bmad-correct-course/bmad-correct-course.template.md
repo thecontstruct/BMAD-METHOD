@@ -17,26 +17,7 @@ description: 'Manage significant changes during sprint execution. Use when the u
 Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`
 
 <<include path="_shared/fragments/resolver-fallback.md" skill_kind="workflow">>
-### Step 2: Execute Prepend Steps
-
-Execute each entry in `{workflow.activation_steps_prepend}` in order before proceeding.
-
-### Step 3: Load Persistent Facts
-
-<<include path="_shared/fragments/persistent-facts.md">>
-### Step 4: Load Config
-
-<<include path="_shared/fragments/config-load.md" config_path="{project-root}/_bmad/bmm/config.yaml">>
-### Step 5: Greet the User
-
-Greet `{user_name}`, speaking in `{communication_language}`.
-
-### Step 6: Execute Append Steps
-
-Execute each entry in `{workflow.activation_steps_append}` in order.
-
-Activation is complete. Begin the workflow below.
-
+<<include path="_shared/fragments/workflow-activation.md" config_path="{project-root}/_bmad/bmm/config.yaml" skill_kind="workflow">>
 ## Paths
 
 - `default_output_file` = `{planning_artifacts}/sprint-change-proposal-{date}.md`
