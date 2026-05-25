@@ -99,21 +99,50 @@ class TestEmptyArrayWorkflowKeys(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertEqual(warnings[0]["key"], "foo")
 
-    def test_flatten_toml_still_raises_on_nonempty_non_file_array(self) -> None:
-        # ["literal"] still raises
-        with self.assertRaises(errors.UnknownDirectiveError):
-            bmad_resolver._flatten_toml(
-                {"x": ["literal"]}, "", "",
-                priority_map={}, result={},
-                warning_sink=[],
-            )
-        # [1, 2, 3] still raises (raise path is content-type-agnostic)
-        with self.assertRaises(errors.UnknownDirectiveError):
-            bmad_resolver._flatten_toml(
-                {"y": [1, 2, 3]}, "", "",
-                priority_map={}, result={},
-                warning_sink=[],
-            )
+    def test_flatten_toml_skips_nonempty_non_file_array_with_warning(self) -> None:
+        # Story 10.27b: non-empty non-`file:` arrays now emit
+        # TOML_NON_FILE_ARRAY_SKIPPED warning instead of raising —
+        # they are runtime dispatch tables referenced via {single.brace} only.
+        warnings: list[dict[str, Any]] = []
+        result: dict[str, bmad_resolver.ResolvedValue] = {}
+        bmad_resolver._flatten_toml(
+            {"x": ["literal"]}, "", "",
+            priority_map={}, result=result,
+            warning_sink=warnings,
+        )
+        # (a) no raise — build succeeds
+        # (b) exactly one TOML_NON_FILE_ARRAY_SKIPPED warning
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["code"], "TOML_NON_FILE_ARRAY_SKIPPED")
+        self.assertEqual(warnings[0]["key"], "x")
+        # (c) variable not in resolved scope
+        self.assertNotIn("self.x", result)
+
+        # integer arrays also warned (not raised)
+        warnings2: list[dict[str, Any]] = []
+        result2: dict[str, bmad_resolver.ResolvedValue] = {}
+        bmad_resolver._flatten_toml(
+            {"y": [1, 2, 3]}, "", "",
+            priority_map={}, result=result2,
+            warning_sink=warnings2,
+        )
+        self.assertEqual(len(warnings2), 1)
+        self.assertEqual(warnings2[0]["code"], "TOML_NON_FILE_ARRAY_SKIPPED")
+        self.assertNotIn("self.y", result2)
+
+        # skill:-prefixed arrays (the motivating case for this story) also warned
+        warnings3: list[dict[str, Any]] = []
+        result3: dict[str, bmad_resolver.ResolvedValue] = {}
+        bmad_resolver._flatten_toml(
+            {"doc_standards": ["skill:bmad-editorial-review-structure",
+                                "skill:bmad-editorial-review-prose"]},
+            "", "", priority_map={}, result=result3,
+            warning_sink=warnings3,
+        )
+        self.assertEqual(len(warnings3), 1)
+        self.assertEqual(warnings3[0]["code"], "TOML_NON_FILE_ARRAY_SKIPPED")
+        self.assertEqual(warnings3[0]["key"], "doc_standards")
+        self.assertNotIn("self.doc_standards", result3)
 
     def test_flatten_toml_still_intercepts_file_arrays(self) -> None:
         sink: list[tuple[str, list[Any], str, str | None]] = []

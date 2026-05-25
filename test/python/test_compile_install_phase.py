@@ -2058,23 +2058,38 @@ class TestGlobExpansion(unittest.TestCase):
             self.assertEqual([m.path for m in ge.matches], ["docs/a.md", "docs/b.md"])
             self.assertIsNotNone(ge.match_set_hash)
 
-    def test_variable_scope_build_non_file_list_still_raises(self) -> None:
+    def test_variable_scope_build_non_file_list_emits_warning(self) -> None:
+        # Story 10.27b: non-empty non-file: arrays now emit
+        # TOML_NON_FILE_ARRAY_SKIPPED warning instead of raising.
         from src.scripts.bmad_compile.resolver import VariableScope
-        with self.assertRaises(errors.UnknownDirectiveError):
-            VariableScope.build(
-                toml_layers=[("defaults", {"workflow": {"steps": ["a", "b"]}})],
-                toml_layer_paths=["/fake/customize.toml"],
-                scenario_root="/fake",
-            )
+        sink: list[dict] = []
+        vs = VariableScope.build(
+            toml_layers=[("defaults", {"workflow": {"steps": ["a", "b"]}})],
+            toml_layer_paths=["/fake/customize.toml"],
+            scenario_root="/fake",
+            toml_warning_sink=sink,
+        )
+        self.assertEqual(len(sink), 1)
+        self.assertEqual(sink[0]["code"], "TOML_NON_FILE_ARRAY_SKIPPED")
+        self.assertEqual(sink[0]["key"], "workflow.steps")
+        self.assertNotIn("self.workflow.steps", vs._table)
 
-    def test_variable_scope_build_mixed_list_still_raises(self) -> None:
+    def test_variable_scope_build_mixed_list_emits_warning(self) -> None:
+        # Story 10.27b: mixed list (file: + literal) also emits warning;
+        # it does not route to glob_sink since not ALL items are file:-prefixed.
         from src.scripts.bmad_compile.resolver import VariableScope
-        with self.assertRaises(errors.UnknownDirectiveError):
-            VariableScope.build(
-                toml_layers=[("defaults", {"workflow": {"items": ["file:docs/a.md", "literal"]}})],
-                toml_layer_paths=["/fake/customize.toml"],
-                scenario_root="/fake",
-            )
+        sink: list[dict] = []
+        vs = VariableScope.build(
+            toml_layers=[("defaults", {"workflow": {"items": ["file:docs/a.md", "literal"]}})],
+            toml_layer_paths=["/fake/customize.toml"],
+            scenario_root="/fake",
+            toml_warning_sink=sink,
+        )
+        self.assertEqual(len(sink), 1)
+        self.assertEqual(sink[0]["code"], "TOML_NON_FILE_ARRAY_SKIPPED")
+        self.assertEqual(sink[0]["key"], "workflow.items")
+        self.assertNotIn("self.workflow.items", vs._table)
+        self.assertEqual(vs._glob_expansions, [])  # not routed to glob_sink
 
     # ---------- Task 6.9–6.11: --explain markdown + JSON ----------
 

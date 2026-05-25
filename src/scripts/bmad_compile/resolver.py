@@ -340,8 +340,10 @@ def _flatten_toml(
                 or priority_map.get(full_key, layer_name)
             )
             # (AC 8 narrowed by 5.5b AC-1: empty list emits
-            # TOML_EMPTY_ARRAY_SKIPPED warning and is skipped; non-empty
-            # non-file: lists still raise.)
+            # TOML_EMPTY_ARRAY_SKIPPED warning and is skipped; Story 10.27b:
+            # non-empty non-file: lists also emit a warning and skip instead
+            # of raising, since they are valid runtime-dispatch tables that
+            # templates reference via single-brace {runtime} variables only.)
             if not v:
                 # Story 5.5b AC-1: empty arrays (e.g. `persistent_facts = []`)
                 # emit a structured warning and skip — preserving structural
@@ -365,19 +367,22 @@ def _flatten_toml(
                     (full_key, list(v), winning_layer, _paths.get(winning_layer))
                 )
                 continue
-            # tomllib does not expose per-value source positions; line=1,col=1 is a
-            # deterministic locator pointing at the file head — the dotted path in
-            # the message names the offending key.
-            raise errors.UnknownDirectiveError(
-                f"self.* variable '{dotted}' resolves to a TOML array, not a scalar",
-                file=_paths.get(winning_layer) or None,
-                line=1,
-                col=1,
-                hint=(
-                    f"self.* variable path '{dotted}' resolves to a TOML array, "
-                    "not a scalar — use a more specific dotted path"
-                ),
-            )
+            # Story 10.27b: non-empty, non-`file:`-prefixed arrays (e.g.
+            # `doc_standards = ["skill:...", "skill:..."]`) are runtime dispatch
+            # tables — the LLM reads them from customize.toml at runtime. They
+            # cannot be represented as compile-time scalars and are only valid
+            # as VarRuntime ({single.brace}) tokens in templates, which the
+            # resolver passes through unchanged. Emit TOML_NON_FILE_ARRAY_SKIPPED
+            # and skip (same non-fatal treatment as empty arrays). If a template
+            # mistakenly uses {{double.brace}}, the compile step raises
+            # UNRESOLVED_VARIABLE at the use site — a more precise error.
+            if warning_sink is not None:
+                warning_sink.append({
+                    "code": "TOML_NON_FILE_ARRAY_SKIPPED",
+                    "key": dotted,
+                    "path": _paths.get(winning_layer),
+                })
+            continue
         else:
             full_key = f"self.{dotted}"
             # Booleans must serialize as lowercase "true"/"false" to match

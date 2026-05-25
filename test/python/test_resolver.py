@@ -1188,14 +1188,19 @@ class TestVariableResolution(unittest.TestCase):
             self.assertEqual(len(dep), 1)
 
     # AC 13 — per-leaf TOML source_path provenance
-    def test_flatten_toml_team_array_error_reports_team_path(self) -> None:
-        """Array error on a team TOML key reports the team file path, not user."""
-        with self.assertRaises(errors.UnknownDirectiveError) as ctx:
-            VariableScope.build(
-                toml_layers=[("team", {"tags": ["a", "b"]})],
-                toml_layer_paths=["/fake/team.toml"],
-            )
-        self.assertEqual(ctx.exception.file, "/fake/team.toml")
+    def test_flatten_toml_team_array_warning_reports_team_path(self) -> None:
+        """Story 10.27b: non-file array on a team TOML key emits warning with
+        the team file path. (Previously raised UnknownDirectiveError.)"""
+        sink: list[dict] = []
+        VariableScope.build(
+            toml_layers=[("team", {"tags": ["a", "b"]})],
+            toml_layer_paths=["/fake/team.toml"],
+            toml_warning_sink=sink,
+        )
+        self.assertEqual(len(sink), 1)
+        self.assertEqual(sink[0]["code"], "TOML_NON_FILE_ARRAY_SKIPPED")
+        self.assertEqual(sink[0]["key"], "tags")
+        self.assertEqual(sink[0]["path"], "/fake/team.toml")
 
     def test_toml_variable_source_path_populated(self) -> None:
         """AC 13: TOML ResolvedValue gets source_path from winning layer."""
