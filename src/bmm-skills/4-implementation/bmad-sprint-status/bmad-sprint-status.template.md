@@ -9,55 +9,15 @@ description: 'Summarize sprint status and surface risks. Use when the user says 
 
 **Your Role:** You are a Developer providing clear, actionable sprint visibility. No time estimates — focus on status, risks, and next steps.
 
-## Conventions
-
-- Bare paths (e.g. `checklist.md`) resolve from the skill root.
-- `{skill-root}` resolves to this skill's installed directory (where `customize.toml` lives).
-- `{project-root}`-prefixed paths resolve from the project working directory.
-- `{skill-name}` resolves to the skill directory's basename.
-
+<<include path="_shared/fragments/conventions.md">>
 ## On Activation
 
 ### Step 1: Resolve the Workflow Block
 
 Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`
 
-**If the script fails**, resolve the `workflow` block yourself by reading these three files in base → team → user order and applying the same structural merge rules as the resolver:
-
-1. `{skill-root}/customize.toml` — defaults
-2. `{project-root}/_bmad/custom/{skill-name}.toml` — team overrides
-3. `{project-root}/_bmad/custom/{skill-name}.user.toml` — personal overrides
-
-Any missing file is skipped. Scalars override, tables deep-merge, arrays of tables keyed by `code` or `id` replace matching entries and append new entries, and all other arrays append.
-
-### Step 2: Execute Prepend Steps
-
-Execute each entry in `{workflow.activation_steps_prepend}` in order before proceeding.
-
-### Step 3: Load Persistent Facts
-
-Treat every entry in `{workflow.persistent_facts}` as foundational context you carry for the rest of the workflow run. Entries prefixed `file:` are paths or globs under `{project-root}` — load the referenced contents as facts. All other entries are facts verbatim.
-
-### Step 4: Load Config
-
-Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
-
-- `project_name`, `user_name`
-- `communication_language`, `document_output_language`
-- `implementation_artifacts`
-- `date` as system-generated current datetime
-- YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
-
-### Step 5: Greet the User
-
-Greet `{user_name}`, speaking in `{communication_language}`.
-
-### Step 6: Execute Append Steps
-
-Execute each entry in `{workflow.activation_steps_append}` in order.
-
-Activation is complete. Begin the workflow below.
-
+<<include path="_shared/fragments/resolver-fallback.md" skill_kind="workflow">>
+<<include path="_shared/fragments/workflow-activation.md" config_path="{project-root}/_bmad/bmm/config.yaml" skill_kind="workflow">>
 ## Paths
 
 - `sprint_status_file` = `{implementation_artifacts}/sprint-status.yaml`
@@ -73,7 +33,7 @@ Activation is complete. Begin the workflow below.
 <workflow>
 
 <step n="0" goal="Determine execution mode">
-  <action>Set mode = {{mode}} if provided by caller; otherwise mode = "interactive"</action>
+  <action>Set mode = {mode} if provided by caller; otherwise mode = "interactive"</action>
 
   <check if="mode == data">
     <action>Jump to Step 20</action>
@@ -121,10 +81,10 @@ Run `/bmad:bmm:workflows:sprint-planning` to generate it, then rerun sprint-stat
   <check if="any status is unrecognized">
     <output>
 **Unknown status detected:**
-{{#each invalid_entries}}
+{#each invalid_entries}
 
-- `{{key}}`: "{{status}}" (not recognized)
-  {{/each}}
+- `{key}`: "{status}" (not recognized)
+  {/each}
 
 **Valid statuses:**
 
@@ -133,9 +93,9 @@ Run `/bmad:bmm:workflows:sprint-planning` to generate it, then rerun sprint-stat
 - Retrospectives: optional, done
   </output>
   <ask>How should these be corrected?
-  {{#each invalid_entries}}
-  {{@index}}. {{key}}: "{{status}}" → [select valid status]
-  {{/each}}
+  {#each invalid_entries}
+  {@index}. {key}: "{status}" → [select valid status]
+  {/each}
 
 Enter corrections (e.g., "1=in-progress, 2=backlog") or "skip" to continue without fixing:</ask>
 <check if="user provided corrections">
@@ -170,23 +130,23 @@ Enter corrections (e.g., "1=in-progress, 2=backlog") or "skip" to continue witho
   <output>
 ## Sprint Status
 
-- Project: {{project}} ({{project_key}})
-- Tracking: {{tracking_system}}
+- Project: {project} ({project_key})
+- Tracking: {tracking_system}
 - Status file: {sprint_status_file}
 
-**Stories:** backlog {{count_backlog}}, ready-for-dev {{count_ready}}, in-progress {{count_in_progress}}, review {{count_review}}, done {{count_done}}
+**Stories:** backlog {count_backlog}, ready-for-dev {count_ready}, in-progress {count_in_progress}, review {count_review}, done {count_done}
 
-**Epics:** backlog {{epic_backlog}}, in-progress {{epic_in_progress}}, done {{epic_done}}
+**Epics:** backlog {epic_backlog}, in-progress {epic_in_progress}, done {epic_done}
 
-**Next Recommendation:** /bmad:bmm:workflows:{{next_workflow_id}} ({{next_story_id}})
+**Next Recommendation:** /bmad:bmm:workflows:{next_workflow_id} ({next_story_id})
 
-{{#if risks}}
+{#if risks}
 **Risks:**
-{{#each risks}}
+{#each risks}
 
-- {{this}}
-  {{/each}}
-  {{/if}}
+- {this}
+  {/each}
+  {/if}
 
   </output>
   </step>
@@ -200,18 +160,18 @@ Enter corrections (e.g., "1=in-progress, 2=backlog") or "skip" to continue witho
 Choice:</ask>
 
   <check if="choice == 1">
-    <output>Run `/bmad:bmm:workflows:{{next_workflow_id}}`.
-If the command targets a story, set `story_key={{next_story_id}}` when prompted.</output>
+    <output>Run `/bmad:bmm:workflows:{next_workflow_id}`.
+If the command targets a story, set `story_key={next_story_id}` when prompted.</output>
   </check>
 
   <check if="choice == 2">
     <output>
 ### Stories by Status
-- In Progress: {{stories_in_progress}}
-- Review: {{stories_in_review}}
-- Ready for Dev: {{stories_ready_for_dev}}
-- Backlog: {{stories_backlog}}
-- Done: {{stories_done}}
+- In Progress: {stories_in_progress}
+- Review: {stories_in_review}
+- Ready for Dev: {stories_ready_for_dev}
+- Backlog: {stories_backlog}
+- Done: {stories_done}
     </output>
   </check>
 
@@ -232,17 +192,17 @@ If the command targets a story, set `story_key={{next_story_id}}` when prompted.
 <step n="20" goal="Data mode output">
   <action>Load and parse {sprint_status_file} same as Step 2</action>
   <action>Compute recommendation same as Step 3</action>
-  <template-output>next_workflow_id = {{next_workflow_id}}</template-output>
-  <template-output>next_story_id = {{next_story_id}}</template-output>
-  <template-output>count_backlog = {{count_backlog}}</template-output>
-  <template-output>count_ready = {{count_ready}}</template-output>
-  <template-output>count_in_progress = {{count_in_progress}}</template-output>
-  <template-output>count_review = {{count_review}}</template-output>
-  <template-output>count_done = {{count_done}}</template-output>
-  <template-output>epic_backlog = {{epic_backlog}}</template-output>
-  <template-output>epic_in_progress = {{epic_in_progress}}</template-output>
-  <template-output>epic_done = {{epic_done}}</template-output>
-  <template-output>risks = {{risks}}</template-output>
+  <template-output>next_workflow_id = {next_workflow_id}</template-output>
+  <template-output>next_story_id = {next_story_id}</template-output>
+  <template-output>count_backlog = {count_backlog}</template-output>
+  <template-output>count_ready = {count_ready}</template-output>
+  <template-output>count_in_progress = {count_in_progress}</template-output>
+  <template-output>count_review = {count_review}</template-output>
+  <template-output>count_done = {count_done}</template-output>
+  <template-output>epic_backlog = {epic_backlog}</template-output>
+  <template-output>epic_in_progress = {epic_in_progress}</template-output>
+  <template-output>epic_done = {epic_done}</template-output>
+  <template-output>risks = {risks}</template-output>
   <action>Return to caller</action>
 </step>
 
@@ -264,7 +224,7 @@ If the command targets a story, set `story_key={{next_story_id}}` when prompted.
 <action>Validate required metadata fields exist: generated, project, project_key, tracking_system, story_location (last_updated is optional for backward compatibility)</action>
 <check if="any required field missing">
 <template-output>is_valid = false</template-output>
-<template-output>error = "Missing required field(s): {{missing_fields}}"</template-output>
+<template-output>error = "Missing required field(s): {missing_fields}"</template-output>
 <template-output>suggestion = "Re-run sprint-planning or add missing fields manually"</template-output>
 <action>Return</action>
 </check>
@@ -284,7 +244,7 @@ If the command targets a story, set `story_key={{next_story_id}}` when prompted.
 - Retrospectives: optional, done
   <check if="any invalid status found">
   <template-output>is_valid = false</template-output>
-  <template-output>error = "Invalid status values: {{invalid_entries}}"</template-output>
+  <template-output>error = "Invalid status values: {invalid_entries}"</template-output>
   <template-output>suggestion = "Fix invalid statuses in sprint-status.yaml"</template-output>
   <action>Return</action>
   </check>
