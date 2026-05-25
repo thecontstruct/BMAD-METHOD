@@ -2,6 +2,8 @@
 
 Canonical 10-step migration playbook for Epic 10. Authored by Story 10.1 (R0 spike). Refined empirically by Story 10.7 after Batch 1 closes.
 
+See also: [migration-cookbook.md](migration-cookbook.md) — three worked examples applying these steps to real and projected migrations.
+
 Use this checklist when migrating a hand-authored `SKILL.md` onto the compile pipeline. Each step is a binary done/not-done gate enabled by a concrete invocation.
 
 The order is **load-bearing** per Arch §9: source-encoding MUST precede golden capture, or BOM/CRLF bytes leak into the golden.
