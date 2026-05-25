@@ -210,6 +210,22 @@ function validateOne(entry) {
     const actual = sha256OfFile(compiledSkillMd);
     const hashMatch = actual === entry.compiled_hash;
 
+    // Story 10.25 AC-7 (FR-11): multi-artifact gate — verify each declared artifact.
+    // No-op for skills with empty artifacts: [] (all current 22 skills).
+    const artifactFindings = [];
+    const declaredArtifacts = Array.isArray(entry.artifacts) ? entry.artifacts : [];
+    for (const art of declaredArtifacts) {
+      const artPath = path.join(compiledSkillDir, art.path);
+      if (!fs.existsSync(artPath)) {
+        artifactFindings.push({ kind: 'missing', path: art.path });
+        continue;
+      }
+      const artActual = sha256OfFile(artPath);
+      if (artActual !== art.hash) {
+        artifactFindings.push({ kind: 'hash-mismatch', path: art.path, expected: art.hash, actual: artActual });
+      }
+    }
+
     // OQ-3 Option A: schema-validate the compiled output regardless of hash result.
     // Story 10.12: for _shared-fragments skills the compiledSkillDir also contains template
     // source files; validate from a clean SKILL.md-only subdir to avoid false WF-01/WF-02 hits.
@@ -233,6 +249,8 @@ function validateOne(entry) {
       status = 'hash-mismatch';
     } else if (schemaFailures.length > 0) {
       status = 'schema-fail';
+    } else if (artifactFindings.length > 0) {
+      status = 'artifact-mismatch';
     } else {
       status = 'pass';
     }
@@ -244,6 +262,7 @@ function validateOne(entry) {
       expected: entry.compiled_hash,
       actual,
       schemaFindings: schemaFailures,
+      artifactFindings,  // Story 10.25: FR-11 artifact check results
     };
   } finally {
     // BH-4/ECH-4: don't let cleanup failures (Windows file locks, etc.) clobber the
@@ -310,6 +329,13 @@ function reportHuman(records) {
     }
     for (const f of r.schemaFindings) {
       console.log(`      [${f.severity}] ${f.rule}: ${f.detail}`);
+    }
+    for (const a of (r.artifactFindings || [])) {
+      if (a.kind === 'missing') {
+        console.log(`      artifact missing: ${a.path}`);
+      } else {
+        console.log(`      artifact hash-mismatch: ${a.path} expected=${a.expected} actual=${a.actual}`);
+      }
     }
   }
 

@@ -452,7 +452,7 @@ class TestLockfileMigrationEvent(unittest.TestCase):
             self.assertEqual(len(migration), 1)
             ev = migration[0]
             self.assertEqual(ev["old_version"], 1)
-            self.assertEqual(ev["new_version"], 2)
+            self.assertEqual(ev["new_version"], 3)  # Story 10.26: _VERSION bumped to 3
             self.assertEqual(ev["skill_id"], "myskill")
             self.assertEqual(ev["new_component_names"], ["Bar", "Foo"])
 
@@ -468,8 +468,11 @@ class TestLockfileMigrationEvent(unittest.TestCase):
                 [],
             )
 
-    def test_g3_no_event_for_v2_lockfile(self) -> None:
-        # Pre-existing v2 lockfile → no migration event.
+    def test_g3_v2_lockfile_emits_v3_migration_event(self) -> None:
+        """Story 10.26: writing to a v2 lockfile emits a v2→v3 migration event.
+        (Previously: test_g3_no_event_for_v2_lockfile — when v2 was current, no event
+        fired. Now v3 is current so v2→v3 migration fires.)
+        """
         with tempfile.TemporaryDirectory() as tmp:
             lockfile_path = Path(tmp) / "scenario" / "_bmad" / "_config" / "bmad.lock"
             lockfile_path.parent.mkdir(parents=True, exist_ok=True)
@@ -482,10 +485,15 @@ class TestLockfileMigrationEvent(unittest.TestCase):
                 components=[{"name": "Foo"}],
                 emit_fn=events.append,
             )
-            self.assertEqual(
-                [e for e in events if e.get("kind") == "lockfile_schema_migration"],
-                [],
-            )
+            migration = [e for e in events if e.get("kind") == "lockfile_schema_migration"]
+            # Exactly 1 v2→v3 migration event (v1→v2 block is tightened to v1 only).
+            self.assertEqual(len(migration), 1)
+            ev = migration[0]
+            self.assertEqual(ev["old_version"], 2)
+            self.assertEqual(ev["new_version"], 3)
+            self.assertIn("added_keys", ev)
+            self.assertIn("artifacts", ev["added_keys"])
+            self.assertIn("deprecations", ev["added_keys"])
 
     def test_g4_no_event_when_emit_fn_none(self) -> None:
         # Default emit_fn=None must produce no exception and no event.

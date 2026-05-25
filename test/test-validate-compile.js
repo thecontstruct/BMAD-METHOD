@@ -288,6 +288,79 @@ function test_validate_compile_exits_zero_on_empty_lock() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Story 10.25 AC-7: FR-11 multi-artifact gate tests
+// ─────────────────────────────────────────────────────────────────────────
+
+function test_artifact_gate_missing_artifact_fails() {
+  // Inject an artifact declaration into the first lockfile entry.
+  // The compile will NOT create the artifact (no artifacts: in template) → missing → FAIL.
+  withLockfileMutation(
+    (original) => {
+      const lock = JSON.parse(original);
+      lock.entries[0].artifacts = [{ path: 'nonexistent-artifact.csv', hash: '0'.repeat(64), kind: 'scaffold-verbatim' }];
+      fs.writeFileSync(LOCK_PATH, JSON.stringify(lock, null, 2));
+    },
+    () => {
+      const result = runValidate();
+      record(
+        'validate:compile exits 1 when artifact file is missing',
+        result.status === 1,
+        `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+      );
+      record(
+        'missing artifact reported as artifact-mismatch or missing',
+        result.stdout.includes('artifact') || result.stdout.includes('FAIL'),
+        `stdout:\n${result.stdout}`,
+      );
+    },
+  );
+}
+
+function test_artifact_gate_hash_mismatch_fails() {
+  // Declare SKILL.md as an artifact with a wrong hash → file exists but hash is wrong → FAIL.
+  withLockfileMutation(
+    (original) => {
+      const lock = JSON.parse(original);
+      lock.entries[0].artifacts = [{ path: 'SKILL.md', hash: '0'.repeat(64), kind: 'scaffold-verbatim' }];
+      fs.writeFileSync(LOCK_PATH, JSON.stringify(lock, null, 2));
+    },
+    () => {
+      const result = runValidate();
+      record(
+        'validate:compile exits 1 when artifact hash is wrong',
+        result.status === 1,
+        `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+      );
+      record(
+        'hash-mismatch artifact reported as FAIL',
+        result.stdout.includes('FAIL'),
+        `stdout:\n${result.stdout}`,
+      );
+    },
+  );
+}
+
+function test_artifact_gate_empty_artifacts_is_noop() {
+  // Skills with artifacts: [] produce PASS (no-op check — already true for all 22 skills).
+  // Explicitly inject artifacts: [] to verify the field's presence doesn't cause issues.
+  withLockfileMutation(
+    (original) => {
+      const lock = JSON.parse(original);
+      lock.entries[0].artifacts = [];
+      fs.writeFileSync(LOCK_PATH, JSON.stringify(lock, null, 2));
+    },
+    () => {
+      const result = runValidate();
+      record(
+        'validate:compile exits 0 when artifacts: [] (no-op artifact check)',
+        result.status === 0,
+        `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+      );
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -303,6 +376,10 @@ function runTests() {
   test_validate_compile_json_output_structure();
   console.log(`  fails on missing bmad.lock:`);
   test_validate_compile_fails_on_missing_bmad_lock();
+  console.log(`  Story 10.25 AC-7: FR-11 multi-artifact gate:`);
+  test_artifact_gate_empty_artifacts_is_noop();
+  test_artifact_gate_missing_artifact_fails();
+  test_artifact_gate_hash_mismatch_fails();
 
   console.log('');
   console.log(`${colors.cyan}========================================${colors.reset}`);

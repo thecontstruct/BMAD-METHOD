@@ -3,8 +3,10 @@
   "compiled_at": "1.0.0",
   "entries": [
     {
+      "artifacts": [],
       "compiled_hash": "bb7c1956da446133243aea84a9f6068a9ecea05360337188450470eb926d8f70",
       "components": [],
+      "deprecations": [],
       "fragments": [],
       "glob_inputs": [],
       "skill": "minimal",
@@ -13,5 +15,5 @@
       "variant": null
     }
   ],
-  "version": 2
+  "version": 3
 }

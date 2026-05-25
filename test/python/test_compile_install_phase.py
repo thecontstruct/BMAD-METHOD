@@ -313,7 +313,7 @@ class TestBmadHelpInstallPhase(unittest.TestCase):
         lockfile_path = self._install / "_config" / "bmad.lock"
         self.assertTrue(lockfile_path.is_file(), f"bmad.lock not found at {lockfile_path}")
         lf = json.loads(lockfile_path.read_bytes())
-        self.assertEqual(lf["version"], 2)
+        self.assertEqual(lf["version"], 3)  # Story 10.26: bumped to v3
 
         entries = [e for e in lf["entries"] if e["skill"] == "bmad-help"]
         self.assertEqual(len(entries), 1, "expected exactly one lockfile entry for skill=bmad-help")

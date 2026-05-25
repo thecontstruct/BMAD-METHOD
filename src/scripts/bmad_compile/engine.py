@@ -28,7 +28,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Literal
 
 from . import errors, io, lockfile, parser, resolver, toml_merge, variants
 
@@ -54,6 +54,72 @@ class EnrichedInvocation:
     render_mode: str          # "compile" or "jit"
     component_abs_path: str   # absolute path verified to exist and within skill_source_root
     token_index: int          # position in the original flat_nodes for buffer lookup
+
+
+@dataclass(frozen=True)
+class Artifact:
+    """Story 10.25: FR-3 multi-artifact frontmatter declaration."""
+    path: str    # install-dir-relative POSIX path
+    source: str  # skill_dir-relative POSIX path
+    kind: Literal["scaffold-verbatim"]
+
+
+def _extract_artifacts_from_frontmatter(source: str) -> "list[Artifact]":
+    """Story 10.25: parse `artifacts:` from YAML frontmatter, return list of Artifact.
+
+    Returns [] immediately if no `artifacts:` found in first 1000 chars (fast
+    path for the 22 existing skills). Raises CompilerError if `artifacts:` IS
+    present but is malformed (not a list) or contains unsupported kind values.
+    Tolerates YAML parse failures when `artifacts:` is absent (sloppy frontmatter).
+    """
+    # Fast path: skip YAML overhead for skills with no artifacts in frontmatter.
+    if "artifacts:" not in source[:1000]:
+        return []
+
+    # Extract leading ---\n...\n---\n block.
+    fm_text: str | None = None
+    if source.startswith("---"):
+        end = source.find("\n---", 3)
+        if end != -1:
+            fm_text = source[3:end].strip()
+
+    if fm_text is None:
+        return []
+
+    import yaml  # lazy import: same pattern as migration_normalize.py
+    try:
+        fm = yaml.safe_load(fm_text)
+    except Exception:
+        # Tolerant path: YAML error AND artifacts: not in parsed block → skip.
+        return []
+
+    if not isinstance(fm, dict) or "artifacts" not in fm:
+        return []
+
+    raw = fm["artifacts"]
+    if not isinstance(raw, list):
+        raise errors.CompilerError(
+            f"frontmatter `artifacts:` must be a list, got {type(raw).__name__!r}"
+        )
+
+    result: list[Artifact] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise errors.CompilerError(
+                f"frontmatter `artifacts:` entry must be a dict, got {type(entry).__name__!r}"
+            )
+        kind = entry.get("kind")
+        if kind != "scaffold-verbatim":
+            raise errors.CompilerError(
+                f"frontmatter artifact `kind` {kind!r} is not supported"
+                " (only 'scaffold-verbatim' is valid in Epic 10 scope)"
+            )
+        result.append(Artifact(
+            path=str(entry["path"]),
+            source=str(entry["source"]),
+            kind="scaffold-verbatim",
+        ))
+    return result
 
 
 def _strip_string_and_comment_tokens(source: str) -> str:
@@ -521,7 +587,7 @@ def _compile_core(
     _lf_ver = lockfile.read_lockfile_version(_lockfile_path)
     if _lf_ver is not None and _lf_ver > lockfile._VERSION:
         log.warning(
-            "bmad.lock declares version %d; this compiler reads version 2. "
+            "bmad.lock declares version %d; this compiler reads version 3. "
             "Unknown fields will be preserved on write. Proceeding.",
             _lf_ver,
         )
@@ -647,6 +713,8 @@ def _compile_core(
         relative_path = f"{basename}/{template_entry.name}"
 
     source = io.read_template(str(template_path))
+    # Story 10.25: extract artifact declarations from frontmatter BEFORE parse.
+    _artifacts = _extract_artifacts_from_frontmatter(source)
     parsed_nodes = parser.parse(source, relative_path)
     _post_parse_text_scan(parsed_nodes)
 
@@ -775,8 +843,9 @@ def _compile_core(
         _lockfile_path,
         output_path,
         target_ide,
-        _toml_layers,       # NEW [10] — list[tuple[str, dict[str, Any]]]
-        _toml_layer_paths,  # NEW [11] — list[str]
+        _toml_layers,       # [10] — list[tuple[str, dict[str, Any]]]
+        _toml_layer_paths,  # [11] — list[str]
+        _artifacts,         # [12] — list[Artifact] (Story 10.25: FR-3)
     )
 
 
@@ -829,8 +898,9 @@ def compile_skill(
         lockfile_path,
         output_path,
         tid,
-        _,  # toml_layers — unused in compile mode
-        _,  # toml_layer_paths — unused in compile mode
+        _,          # toml_layers — unused in compile mode
+        _,          # toml_layer_paths — unused in compile mode
+        artifacts,  # list[Artifact] (Story 10.25: FR-3)
     ) = _compile_core(
         skill_dir, install_dir, target_ide,
         lockfile_root=lockfile_root,
@@ -902,6 +972,38 @@ def compile_skill(
         })
 
     io.write_text(str(output_path), rendered)
+
+    # Story 10.25: FR-3 artifact emission — copy scaffold-verbatim artifacts.
+    # skill_posix and _current_module are already set above; install_posix is new here.
+    install_posix = io.to_posix(install_dir)
+    artifacts_records: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        # Path safety: source escape guard (raises OverrideOutsideRootError on escape).
+        source_abs = io.ensure_within_root(skill_posix / artifact.source, skill_posix)
+        # Path safety: path must be non-absolute POSIX without .. segments.
+        _path_segs = artifact.path.split("/")
+        if (
+            artifact.path.startswith("/")
+            or any(seg == ".." for seg in _path_segs)
+            or (len(_path_segs[0]) >= 2 and _path_segs[0][1] == ":")
+        ):
+            raise errors.CompilerError(
+                f"artifact path {artifact.path!r} is not a safe relative POSIX path"
+            )
+        # Determine output path (mirrors SKILL.md path logic).
+        if lockfile_root is not None:
+            artifact_dest = install_posix / _current_module / basename / artifact.path
+        else:
+            artifact_dest = install_posix / basename / artifact.path
+        # Read (CRLF→LF normalized), write, hash.
+        content = io.read_template(str(source_abs))
+        io.write_text(str(artifact_dest), content)
+        artifacts_records.append({
+            "hash": io.hash_text(content),
+            "kind": artifact.kind,
+            "path": str(io.to_posix(artifact.path)),
+        })
+
     lockfile.write_skill_entry(
         lockfile_path,
         scenario_root,
@@ -913,6 +1015,7 @@ def compile_skill(
         target_ide=tid,
         cache=cache,
         components=component_records,
+        artifacts=artifacts_records,  # Story 10.25: FR-3
         emit_fn=emit_fn,
     )
 
@@ -953,6 +1056,7 @@ def explain_skill(
         _tid,
         _toml_layers,
         _toml_layer_paths,
+        _,  # artifacts — unused in explain mode (Story 10.25)
     ) = _compile_core(
         skill_dir, install_dir, target_ide,
         lockfile_root=lockfile_root,

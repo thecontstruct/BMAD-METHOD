@@ -132,13 +132,14 @@ class TestWriteSkillEntry(unittest.TestCase):
             data = json.loads(io.read_template(lf))
             self.assertIsInstance(data, dict)
 
-    def test_schema_version_is_2(self) -> None:
+    def test_schema_version_is_3(self) -> None:
+        """Story 10.26: lockfile schema version bumped to 3."""
         with tempfile.TemporaryDirectory() as tmp:
             root = PurePosixPath(tmp)
             lf = str(root / "bmad.lock")
             _call_write(lf, root)
             data = json.loads(io.read_template(lf))
-            self.assertEqual(data["version"], 2)
+            self.assertEqual(data["version"], 3)
 
     def test_compiled_at_is_sentinel_not_datetime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -409,9 +410,16 @@ class TestForwardCompat(unittest.TestCase):
 class TestVersionMismatch(unittest.TestCase):
 
     def test_version_mismatch_raises(self) -> None:
-        """write a v3 lockfile; compile should warn, not raise."""
+        """write a v4 lockfile (future); compile should warn, not raise.
+        Story 10.26: updated fixture from v3→v4 now that _VERSION=3.
+        """
         import pathlib
+        import sys as _sys
         repo_root = pathlib.Path(__file__).resolve().parents[2]
+        _scripts = str(repo_root / "src" / "scripts")
+        if _scripts not in _sys.path:
+            _sys.path.insert(0, _scripts)
+        from bmad_compile import engine as _engine  # noqa: F811
         fixture_scenario = (
             repo_root / "test" / "fixtures" / "compile" / "variable-resolution"
         )
@@ -419,17 +427,19 @@ class TestVersionMismatch(unittest.TestCase):
         try:
             lockfile_path.parent.mkdir(parents=True, exist_ok=True)
             lockfile_path.write_text(
-                json.dumps({"version": 3, "compiled_at": "1.0.0",
+                json.dumps({"version": 4, "compiled_at": "1.0.0",
                             "bmad_version": "1.0.0", "entries": []}),
                 encoding="utf-8",
             )
             skill = fixture_scenario / "core" / "var-resolution-skill"
             with tempfile.TemporaryDirectory() as tmp_out:
                 with self.assertLogs(level="WARNING") as log_cm:
-                    engine.compile_skill(str(skill), tmp_out)
+                    from bmad_compile.component_runner import MockComponentRunner as _MR
+                    _engine.compile_skill(str(skill), tmp_out,
+                                          component_runner=_MR(batch_results={}))
             self.assertTrue(
-                any("version 3" in msg for msg in log_cm.output),
-                f"Expected warning about version 3 in: {log_cm.output}",
+                any("version 4" in msg or "version 3" in msg for msg in log_cm.output),
+                f"Expected warning about version mismatch in: {log_cm.output}",
             )
         finally:
             lockfile_path.unlink(missing_ok=True)

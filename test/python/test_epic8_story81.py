@@ -124,8 +124,9 @@ class TestComponentErrorClasses(unittest.TestCase):
 
 class TestLockfileV2Schema(unittest.TestCase):
 
-    def test_version_is_2(self) -> None:
-        self.assertEqual(lockfile._VERSION, 2)
+    def test_version_is_3(self) -> None:
+        """Story 10.26: lockfile schema version bumped to 3."""
+        self.assertEqual(lockfile._VERSION, 3)
 
     def test_components_field_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -187,6 +188,9 @@ class TestLockfileV2Schema(unittest.TestCase):
 class TestEngineVersionMismatchDemotion(unittest.TestCase):
 
     def test_version_mismatch_warns_not_raises(self) -> None:
+        """Story 10.26: updated from v3→v4 fixture (v3 is now current _VERSION)."""
+        from bmad_compile.component_runner import MockComponentRunner as _MR
+        from bmad_compile import engine as _engine
         with tempfile.TemporaryDirectory() as tmp_root:
             tmp = Path(tmp_root)
             skill_dir = tmp / "core" / "warn-skill"
@@ -194,12 +198,12 @@ class TestEngineVersionMismatchDemotion(unittest.TestCase):
             (skill_dir / "warn-skill.template.md").write_text(
                 "Hello!", encoding="utf-8"
             )
-            # v3 lockfile — beyond current _VERSION=2
+            # v4 lockfile — beyond current _VERSION=3
             lock_path = tmp / "_bmad" / "_config" / "bmad.lock"
             lock_path.parent.mkdir(parents=True, exist_ok=True)
             lock_path.write_text(
                 json.dumps(
-                    {"version": 3, "compiled_at": "1.0.0",
+                    {"version": 4, "compiled_at": "1.0.0",
                      "bmad_version": "1.0.0", "entries": []}
                 ),
                 encoding="utf-8",
@@ -207,10 +211,11 @@ class TestEngineVersionMismatchDemotion(unittest.TestCase):
             install_dir = tmp / "install"
             install_dir.mkdir()
             with self.assertLogs(level="WARNING") as cm:
-                engine.compile_skill(str(skill_dir), str(install_dir))
+                _engine.compile_skill(str(skill_dir), str(install_dir),
+                                      component_runner=_MR(batch_results={}))
             self.assertTrue(
-                any("version 3" in msg for msg in cm.output),
-                f"Expected warning mentioning 'version 3' in: {cm.output}",
+                any("version 4" in msg or "version 3" in msg for msg in cm.output),
+                f"Expected warning mentioning version mismatch in: {cm.output}",
             )
 
 
