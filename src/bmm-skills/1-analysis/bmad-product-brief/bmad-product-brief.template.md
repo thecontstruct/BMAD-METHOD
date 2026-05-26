@@ -1,6 +1,10 @@
 ---
 name: bmad-product-brief
 description: Create, update, or validate a product brief. Use when the user wants help producing, editing, or validating a brief.
+artifacts:
+  - path: assets/brief-template.md
+    source: assets/brief-template.md
+    kind: scaffold-verbatim
 ---
 
 # Overview
