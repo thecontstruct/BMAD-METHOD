@@ -106,6 +106,14 @@ def extract_key(data: dict[str, Any], dotted_key: str) -> Any:
     return current
 
 
+def write_json_stdout(output: Any) -> None:
+    """Write JSON as UTF-8 so Windows cp1252/cp932 stdout can carry emoji icons."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8")
+    sys.stdout.write(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Resolve customization for a BMad skill using three-layer TOML merge.",
@@ -152,7 +160,7 @@ def main() -> None:
     else:
         output = merged
 
-    sys.stdout.write(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
+    write_json_stdout(output)
 
 
 if __name__ == "__main__":
