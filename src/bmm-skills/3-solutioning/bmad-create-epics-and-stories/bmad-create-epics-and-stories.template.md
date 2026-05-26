@@ -1,6 +1,22 @@
 ---
 name: bmad-create-epics-and-stories
 description: 'Break requirements into epics and user stories. Use when the user says "create the epics and stories list"'
+artifacts:
+  - path: templates/epics-template.md
+    source: templates/epics-template.md
+    kind: scaffold-verbatim
+  - path: steps/step-01-validate-prerequisites.md
+    source: steps/step-01-validate-prerequisites.md
+    kind: scaffold-verbatim
+  - path: steps/step-02-design-epics.md
+    source: steps/step-02-design-epics.md
+    kind: scaffold-verbatim
+  - path: steps/step-03-create-stories.md
+    source: steps/step-03-create-stories.md
+    kind: scaffold-verbatim
+  - path: steps/step-04-final-validation.md
+    source: steps/step-04-final-validation.md
+    kind: scaffold-verbatim
 ---
 
 # Create Epics and Stories
@@ -53,22 +69,14 @@ This uses **step-file architecture** for disciplined execution:
 
 Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`
 
-**If the script fails**, resolve the `workflow` block yourself by reading these three files in base → team → user order and applying the same structural merge rules as the resolver:
-
-1. `{skill-root}/customize.toml` — defaults
-2. `{project-root}/_bmad/custom/{skill-name}.toml` — team overrides
-3. `{project-root}/_bmad/custom/{skill-name}.user.toml` — personal overrides
-
-Any missing file is skipped. Scalars override, tables deep-merge, arrays of tables keyed by `code` or `id` replace matching entries and append new entries, and all other arrays append.
-
+<<include path="_shared/fragments/resolver-fallback.md" skill_kind="workflow">>
 ### Step 2: Execute Prepend Steps
 
 Execute each entry in `{workflow.activation_steps_prepend}` in order before proceeding.
 
 ### Step 3: Load Persistent Facts
 
-Treat every entry in `{workflow.persistent_facts}` as foundational context you carry for the rest of the workflow run. Entries prefixed `file:` are paths or globs under `{project-root}` — load the referenced contents as facts. All other entries are facts verbatim.
-
+<<include path="_shared/fragments/persistent-facts.md">>
 ### Step 4: Load Config
 
 Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
