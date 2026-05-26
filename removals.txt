@@ -53,6 +53,7 @@ bmad-bmm-sprint-status
 bmad-bmm-technical-research
 bmad-bmm-validate-prd
 
+# Removed skills (post-v6.7.x)
 # bmad-distillator: superseded by bmad-spec (universal intent distiller with
 # preservation-validated contract for downstream skills).
 bmad-distillator

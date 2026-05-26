@@ -49,6 +49,7 @@ Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
 - `planning_artifacts`
 - `project_knowledge`
 - `date` as system-generated current datetime
+- `project_context` = `**/project-context.md` (load if exists)
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
 - Language MUST be tailored to `{user_skill_level}`
 - Generate all documents in `{document_output_language}`
@@ -62,7 +63,7 @@ Greet `{user_name}`, speaking in `{communication_language}`.
 
 Execute each entry in `{workflow.activation_steps_append}` in order.
 
-Activation is complete. Begin the workflow below.
+Activation is complete. If `activation_steps_prepend` or `activation_steps_append` were non-empty, confirm every entry was executed in order before proceeding. Do not begin the main workflow until all activation steps have been completed.
 
 ## Paths
 
