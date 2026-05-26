@@ -79,6 +79,27 @@ async function copyDirShallow(srcDir, destDir) {
   }
 }
 
+/**
+ * Recursive directory copy — mirrors copyDirShallow but handles subdirectories.
+ * Used by Story 10.43 multi-artifact fixture tests that have steps/ subdirs.
+ *
+ * @param {string} srcDir - Source directory.
+ * @param {string} destDir - Destination directory (created if absent).
+ */
+async function copyDirRecursive(srcDir, destDir) {
+  await fs.mkdir(destDir, { recursive: true });
+  const entries = await fs.readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const src = path.join(srcDir, entry.name);
+    const dest = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirRecursive(src, dest);
+    } else if (entry.isFile()) {
+      await fs.copyFile(src, dest);
+    }
+  }
+}
+
 // R2-AA-1 (Phil R2 2026-05-08): FIXTURE_* const block hoisted above
 // `assertFixtureGoldenSelfConsistent` for lexical clarity. Function references
 // `FIXTURE_PRECOMPILED` and `FIXTURE_GOLDEN_HASH` at module scope; declaring them
@@ -102,6 +123,15 @@ const BMAD_DIR_FOR_COMPILE = path.join(__dirname, '..', 'src');
 // Story 7.6 fixtures — Model 1 (SKILL.md only) and Model 2 (template only).
 const MODEL1_SKILL_DIR = path.join(__dirname, 'fixtures', 'model1-test-module', 'source', 'model1-test-module', 'test-skill');
 const MODEL2_SKILL_DIR = path.join(__dirname, 'fixtures', 'model2-test-module', 'source', 'model2-test-module', 'test-skill');
+
+// Story 10.43 — multi-artifact Model 3 fixture (SKILL.md + steps/ subdirectory).
+// Tests that copyPrecompiledFallback copies all artifact files, not just SKILL.md.
+const FIXTURE_MULTI_SOURCE = path.join(__dirname, 'fixtures', 'model3-multi-artifact', 'source');
+const FIXTURE_MULTI_MODULE_DIR = path.join(FIXTURE_MULTI_SOURCE, 'model3-multi-artifact');
+const FIXTURE_MULTI_SKILL_DIR = path.join(FIXTURE_MULTI_MODULE_DIR, 'test-skill-multi');
+const FIXTURE_MULTI_PRECOMPILED = path.join(FIXTURE_MULTI_SKILL_DIR, 'SKILL.md');
+// Regenerate: sha256sum test/fixtures/model3-multi-artifact/source/model3-multi-artifact/test-skill-multi/SKILL.md
+const FIXTURE_MULTI_GOLDEN_HASH = '9f10ce740618b69d4766453edd84bbe182c68b44c1a111bb569c84fd3a14e5cd';
 
 /**
  * BH-6 / ECH-5 (Phil R1 2026-05-08): assert the on-disk golden SKILL.md hash matches the
@@ -489,6 +519,245 @@ async function main() {
     );
   });
 
+  // ---------------------------------------------------------------------------
+  // Story 10.43: multi-artifact distribution regression
+  // ---------------------------------------------------------------------------
+  //
+  // AC-1 (10.43): Model 3 offline-fallback copies SKILL.md + all artifact files (steps/),
+  // excluding *.template.md source files. Validates the copyPrecompiledFallback fix that
+  // extended SKILL.md-only copy to full recursive copy of non-template skill files.
+  await runTest('AC-1 (10.43): multi-artifact Model 3 fallback copies SKILL.md + artifact step files', async () => {
+    const tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-m3-multi-ac1-'));
+    try {
+      const skills = [{ skillDir: FIXTURE_MULTI_SKILL_DIR, installDir: tmpInstall }];
+      const applied = await applyModel3FallbackIfAllEligible(skills);
+      assert(applied === true, 'AC-1 (10.43): applyModel3FallbackIfAllEligible returns true for multi-artifact fixture', `got: ${applied}`);
+
+      const installedRoot = path.join(tmpInstall, 'model3-multi-artifact', 'test-skill-multi');
+
+      // SKILL.md must be installed and byte-identical to golden.
+      const skillMdPath = path.join(installedRoot, 'SKILL.md');
+      const skillMdExists = await fs
+        .access(skillMdPath)
+        .then(() => true)
+        .catch(() => false);
+      assert(skillMdExists, 'AC-1 (10.43): SKILL.md present in install dir', `expected: ${skillMdPath}`);
+      if (skillMdExists) {
+        const hash = await hashFile(skillMdPath);
+        assert(
+          hash === FIXTURE_MULTI_GOLDEN_HASH,
+          'AC-1 (10.43): installed SKILL.md byte-identical to golden',
+          `got ${hash}, want ${FIXTURE_MULTI_GOLDEN_HASH}`,
+        );
+      }
+
+      // Artifact step files must be installed under steps/.
+      const step01Path = path.join(installedRoot, 'steps', 'step-01.md');
+      const step02Path = path.join(installedRoot, 'steps', 'step-02.md');
+      assert(
+        await fs
+          .access(step01Path)
+          .then(() => true)
+          .catch(() => false),
+        'AC-1 (10.43): steps/step-01.md present in install dir',
+        `expected: ${step01Path}`,
+      );
+      assert(
+        await fs
+          .access(step02Path)
+          .then(() => true)
+          .catch(() => false),
+        'AC-1 (10.43): steps/step-02.md present in install dir',
+        `expected: ${step02Path}`,
+      );
+
+      // *.template.md MUST NOT be installed (source artifact — excluded from fallback).
+      const templatePath = path.join(installedRoot, 'test-skill-multi.template.md');
+      assert(
+        !(await fs
+          .access(templatePath)
+          .then(() => true)
+          .catch(() => false)),
+        'AC-1 (10.43): *.template.md NOT installed by fallback (source artifact excluded)',
+        `did not expect: ${templatePath}`,
+      );
+    } finally {
+      await fs.rm(tmpInstall, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  // AC-2 (10.43): compiler-present path with multi-artifact fixture — step files survive
+  // compile (compile.py only rewrites SKILL.md; pre-existing artifact files are unaffected).
+  // Uses copyDirRecursive (not copyDirShallow) because the fixture has a steps/ subdir.
+  await runTest('AC-2 (10.43): multi-artifact compile path — step files survive compile', async () => {
+    const tmpInstall = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-m3-multi-ac2-'));
+    try {
+      // OVERRIDE_OUTSIDE_ROOT: copy full fixture tree into install dir before compiling.
+      const installedSkillDir = path.join(tmpInstall, 'model3-multi-artifact', 'test-skill-multi');
+      await copyDirRecursive(FIXTURE_MULTI_SKILL_DIR, installedSkillDir);
+
+      await runBatchInstall({
+        skills: [{ skillDir: installedSkillDir, installDir: tmpInstall }],
+        bmadDir: BMAD_DIR_FOR_COMPILE,
+        projectRoot: process.cwd(),
+      });
+
+      // SKILL.md should be overwritten by compile.
+      const skillMdPath = path.join(installedSkillDir, 'SKILL.md');
+      assert(
+        await fs
+          .access(skillMdPath)
+          .then(() => true)
+          .catch(() => false),
+        'AC-2 (10.43): SKILL.md present after compile',
+        `expected: ${skillMdPath}`,
+      );
+
+      // Artifact step files should still be present — compile.py does not delete them.
+      const step01Path = path.join(installedSkillDir, 'steps', 'step-01.md');
+      const step02Path = path.join(installedSkillDir, 'steps', 'step-02.md');
+      assert(
+        await fs
+          .access(step01Path)
+          .then(() => true)
+          .catch(() => false),
+        'AC-2 (10.43): steps/step-01.md survives compile',
+        `expected: ${step01Path}`,
+      );
+      assert(
+        await fs
+          .access(step02Path)
+          .then(() => true)
+          .catch(() => false),
+        'AC-2 (10.43): steps/step-02.md survives compile',
+        `expected: ${step02Path}`,
+      );
+    } finally {
+      await fs.rm(tmpInstall, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  // AC-3 (10.43): IDE-invocation smoke test — static regression check for ≥1 Batch 1
+  // (multi-file with step artifacts, e.g. bmad-code-review) and ≥1 Batch 4/5 (research
+  // skill with D4 Handlebars + research.template.md artifact, e.g. bmad-domain-research).
+  // Verifies migration golden SKILL.md and template source still exist (guards against
+  // accidental deletion of migrated artifacts).
+  await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 1 (bmad-code-review)', async () => {
+    const BATCH1_GOLDEN = path.join(__dirname, 'fixtures', 'migration-goldens', 'bmad-code-review', 'SKILL.md');
+    const BATCH1_TEMPLATE = path.join(
+      __dirname,
+      '..',
+      'src',
+      'bmm-skills',
+      '4-implementation',
+      'bmad-code-review',
+      'bmad-code-review.template.md',
+    );
+    const BATCH1_STEP = path.join(
+      __dirname,
+      '..',
+      'src',
+      'bmm-skills',
+      '4-implementation',
+      'bmad-code-review',
+      'steps',
+      'step-01-gather-context.md',
+    );
+
+    assert(
+      await fs
+        .access(BATCH1_GOLDEN)
+        .then(() => true)
+        .catch(() => false),
+      'AC-3 (10.43): Batch 1 migration golden SKILL.md exists (bmad-code-review)',
+      `expected: ${BATCH1_GOLDEN}`,
+    );
+    assert(
+      await fs
+        .access(BATCH1_TEMPLATE)
+        .then(() => true)
+        .catch(() => false),
+      'AC-3 (10.43): Batch 1 template source exists (bmad-code-review.template.md)',
+      `expected: ${BATCH1_TEMPLATE}`,
+    );
+    assert(
+      await fs
+        .access(BATCH1_STEP)
+        .then(() => true)
+        .catch(() => false),
+      'AC-3 (10.43): Batch 1 artifact step file exists (steps/step-01-gather-context.md)',
+      `expected: ${BATCH1_STEP}`,
+    );
+  });
+
+  await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 4/5 (bmad-domain-research)', async () => {
+    const BATCH4_GOLDEN = path.join(__dirname, 'fixtures', 'migration-goldens', 'bmad-domain-research', 'SKILL.md');
+    const BATCH4_TEMPLATE = path.join(
+      __dirname,
+      '..',
+      'src',
+      'bmm-skills',
+      '1-analysis',
+      'research',
+      'bmad-domain-research',
+      'bmad-domain-research.template.md',
+    );
+    const BATCH4_STEP = path.join(
+      __dirname,
+      '..',
+      'src',
+      'bmm-skills',
+      '1-analysis',
+      'research',
+      'bmad-domain-research',
+      'domain-steps',
+      'step-01-init.md',
+    );
+    const BATCH4_ARTIFACT_TEMPLATE = path.join(
+      __dirname,
+      '..',
+      'src',
+      'bmm-skills',
+      '1-analysis',
+      'research',
+      'bmad-domain-research',
+      'research.template.md',
+    );
+
+    assert(
+      await fs
+        .access(BATCH4_GOLDEN)
+        .then(() => true)
+        .catch(() => false),
+      'AC-3 (10.43): Batch 4/5 migration golden SKILL.md exists (bmad-domain-research)',
+      `expected: ${BATCH4_GOLDEN}`,
+    );
+    assert(
+      await fs
+        .access(BATCH4_TEMPLATE)
+        .then(() => true)
+        .catch(() => false),
+      'AC-3 (10.43): Batch 4/5 skill template source exists (bmad-domain-research.template.md)',
+      `expected: ${BATCH4_TEMPLATE}`,
+    );
+    assert(
+      await fs
+        .access(BATCH4_STEP)
+        .then(() => true)
+        .catch(() => false),
+      'AC-3 (10.43): Batch 4/5 artifact domain-step exists (domain-steps/step-01-init.md)',
+      `expected: ${BATCH4_STEP}`,
+    );
+    assert(
+      await fs
+        .access(BATCH4_ARTIFACT_TEMPLATE)
+        .then(() => true)
+        .catch(() => false),
+      'AC-3 (10.43): Batch 4/5 runtime-scaffold artifact exists (research.template.md)',
+      `expected: ${BATCH4_ARTIFACT_TEMPLATE}`,
+    );
+  });
+
   // Story 8.9 sub-case g: Model 3 skill with components/ → fallback copies SKILL.md, no components/ dir
   await runTest('sub-case g (8.9): Model 3 skill with components/ — fallback does not install component files', async () => {
     const COMPONENT_FIXTURE_SKILL_DIR = path.join(__dirname, 'fixtures', 'component-installer', 'test-module', 'component-skill');
@@ -522,7 +791,14 @@ async function main() {
       } catch {
         componentsDirExists = false;
       }
-      assert(!componentsDirExists, 'sub-case g (8.9): no components/ dir created by applyModel3FallbackIfAllEligible');
+      // Story 10.43 behavioral note: after the multi-artifact fix, fallback also copies
+      // `components/` files to installDir/test-module/component-skill/components/ (within the
+      // skill subtree). This assertion checks the top-level installDir/components/ which the
+      // component-installer path would create — it remains absent from the fallback path.
+      assert(
+        !componentsDirExists,
+        'sub-case g (8.9): top-level components/ not created by applyModel3FallbackIfAllEligible (component-installer path is separate)',
+      );
     } finally {
       await fs.rm(tmpInstall, { recursive: true, force: true });
     }

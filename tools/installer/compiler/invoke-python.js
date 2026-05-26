@@ -489,10 +489,41 @@ async function detectModelTier(skillDirPath) {
 }
 
 /**
- * Copy a Model 3 precompiled `SKILL.md` from a skill source directory into the install
+ * Recursively collect all file paths under `dir`, relative to `base`.
+ * Excludes files whose name ends with `.template.md` (source templates must not be
+ * installed into the IDE context — the compiled SKILL.md is the install artifact).
+ *
+ * Story 10.43: extracted from copyPrecompiledFallback to support multi-artifact skills
+ * (skills with SKILL.md + subdirectory artifact files such as steps/, templates/, assets/).
+ *
+ * @param {string} dir - Absolute path to the directory to walk.
+ * @param {string} [base] - Root dir for relative-path calculation; defaults to `dir`.
+ * @returns {Promise<string[]>} Relative file paths (using native path.sep).
+ */
+async function _collectSkillFiles(dir, base = dir) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const result = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const sub = await _collectSkillFiles(fullPath, base);
+      result.push(...sub);
+    } else if (entry.isFile() && !entry.name.endsWith('.template.md')) {
+      result.push(path.relative(base, fullPath));
+    }
+  }
+  return result;
+}
+
+/**
+ * Copy all Model 3 precompiled skill files from a skill source directory into the install
  * directory at the same path layout that `runBatchInstall` would produce.
  *
- * Path layout: `<installDir>/<moduleName>/<skillBasename>/SKILL.md` where
+ * Story 10.43: extended from SKILL.md-only copy to full recursive copy of all non-template
+ * files (SKILL.md + artifact subdirs such as steps/, templates/, assets/). Source files whose
+ * name ends with `.template.md` are excluded — they are source artifacts, not install artifacts.
+ *
+ * Path layout: `<installDir>/<moduleName>/<skillBasename>/` where
  * `moduleName = path.basename(path.dirname(skillDir))` — mirrors compile.py's batch-mode
  * scenario_root derivation (lockfile.py:206 — frag.path = _normalize_path(...)).
  *
@@ -516,12 +547,12 @@ async function detectModelTier(skillDirPath) {
  *     code context so TOCTOU races (ENOENT, EISDIR, EACCES, EBUSY) yield an actionable
  *     diagnostic identifying which skill failed.
  *
- * @param {string} skillDir - Source skill directory containing the precompiled SKILL.md.
+ * @param {string} skillDir - Source skill directory containing the precompiled SKILL.md and
+ *   any artifact subdirectories (steps/, templates/, assets/, etc.).
  * @param {string} installDir - Destination install root.
  * @returns {Promise<void>}
  */
 async function copyPrecompiledFallback(skillDir, installDir) {
-  const sourceSkillMd = path.join(skillDir, 'SKILL.md');
   const moduleName = path.basename(path.dirname(skillDir));
   const skillBasename = path.basename(skillDir);
   // ECH-7 + R2-BH-7 (Phil R2 2026-05-08): reject empty / '.' / path-sep moduleName.
@@ -539,22 +570,28 @@ async function copyPrecompiledFallback(skillDir, installDir) {
   if (destDir !== installDirAbs && !destDir.startsWith(installDirAbs + path.sep)) {
     throw new Error(`copyPrecompiledFallback: resolved destination "${destDir}" escapes installDir "${installDirAbs}"`);
   }
-  const destSkillMd = path.join(destDir, 'SKILL.md');
   await fs.mkdir(destDir, { recursive: true });
-  try {
-    // BH-2 / ECH-4: fs.copyFile overwrites the destination by default — partial-batch retry is safe.
-    await fs.copyFile(sourceSkillMd, destSkillMd);
-  } catch (error) {
-    // BH-3 / ECH-2 (R2-BH-3 broadened per Phil 2026-05-08): wrap ANY copyFile error with the
-    // skill path + error code so TOCTOU races (ENOENT, EISDIR, EACCES, EBUSY, etc.) yield an
-    // actionable diagnostic identifying which skill failed. The prior ENOENT-only wrap left
-    // EISDIR/EACCES/EBUSY producing raw fs errors with no skill context.
-    if (error && error.code) {
-      throw new Error(
-        `copyPrecompiledFallback: failed to copy SKILL.md (skill="${skillBasename}", source="${sourceSkillMd}", code=${error.code}): ${error.message}`,
-      );
+
+  // Story 10.43: collect all files recursively, excluding *.template.md source files.
+  // BH-2 / ECH-4: fs.copyFile overwrites the destination by default — partial-batch retry is safe.
+  const relPaths = await _collectSkillFiles(skillDir);
+  for (const relPath of relPaths) {
+    const src = path.join(skillDir, relPath);
+    const dest = path.join(destDir, relPath);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    try {
+      await fs.copyFile(src, dest);
+    } catch (error) {
+      // BH-3 / ECH-2 (R2-BH-3 broadened per Phil 2026-05-08): wrap ANY copyFile error with the
+      // skill path + error code so TOCTOU races (ENOENT, EISDIR, EACCES, EBUSY, etc.) yield an
+      // actionable diagnostic identifying which skill failed.
+      if (error && error.code) {
+        throw new Error(
+          `copyPrecompiledFallback: failed to copy ${relPath} (skill="${skillBasename}", source="${src}", code=${error.code}): ${error.message}`,
+        );
+      }
+      throw error;
     }
-    throw error;
   }
 }
 
