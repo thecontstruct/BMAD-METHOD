@@ -1,0 +1,86 @@
+---
+name: bmad-generate-project-context
+description: 'Create project-context.md with AI rules. Use when the user says "generate project context" or "create project context"'
+artifacts:
+  - path: project-context-template.md
+    source: project-context-template.md
+    kind: scaffold-verbatim
+  - path: steps/step-01-discover.md
+    source: steps/step-01-discover.md
+    kind: scaffold-verbatim
+  - path: steps/step-02-generate.md
+    source: steps/step-02-generate.md
+    kind: scaffold-verbatim
+  - path: steps/step-03-complete.md
+    source: steps/step-03-complete.md
+    kind: scaffold-verbatim
+---
+
+# Generate Project Context Workflow
+
+**Goal:** Create a concise, optimized `project-context.md` file containing critical rules, patterns, and guidelines that AI agents must follow when implementing code. This file focuses on unobvious details that LLMs need to be reminded of.
+
+**Your Role:** You are a technical facilitator working with a peer to capture the essential implementation rules that will ensure consistent, high-quality code generation across all AI agents working on the project.
+
+## Conventions
+
+- Bare paths (e.g. `steps/step-01-discover.md`) resolve from the skill root.
+- `{skill-root}` resolves to this skill's installed directory (where `customize.toml` lives).
+- `{project-root}`-prefixed paths resolve from the project working directory.
+- `{skill-name}` resolves to the skill directory's basename.
+
+## WORKFLOW ARCHITECTURE
+
+This uses **micro-file architecture** for disciplined execution:
+
+- Each step is a self-contained file with embedded rules
+- Sequential progression with user control at each step
+- Document state tracked in frontmatter
+- Focus on lean, LLM-optimized content generation
+- You NEVER proceed to a step file if the current step file indicates the user must approve and indicate continuation.
+
+## On Activation
+
+### Step 1: Resolve the Workflow Block
+
+Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`
+
+<<include path="_shared/fragments/resolver-fallback.md" skill_kind="workflow">>
+### Step 2: Execute Prepend Steps
+
+Execute each entry in `{workflow.activation_steps_prepend}` in order before proceeding.
+
+### Step 3: Load Persistent Facts
+
+<<include path="_shared/fragments/persistent-facts.md">>
+### Step 4: Load Config
+
+Load config from `{project-root}/_bmad/bmm/config.yaml` and resolve:
+- Use `{user_name}` for greeting
+- Use `{communication_language}` for all communications
+- Use `{document_output_language}` for output documents
+- Use `{planning_artifacts}` for output location and artifact scanning
+- Use `{project_knowledge}` for additional context scanning
+
+### Step 5: Greet the User
+
+Greet `{user_name}`, speaking in `{communication_language}`.
+
+### Step 6: Execute Append Steps
+
+Execute each entry in `{workflow.activation_steps_append}` in order.
+
+Activation is complete. Begin the workflow below.
+
+## Paths
+
+- `output_file` = `{output_folder}/project-context.md`
+
+## Execution
+
+- ✅ YOU MUST ALWAYS SPEAK OUTPUT In your Agent communication style with the config `{communication_language}`
+- ✅ YOU MUST ALWAYS WRITE all artifact and document content in `{document_output_language}`
+
+Load and execute `./steps/step-01-discover.md` to begin the workflow.
+
+**Note:** Input document discovery and initialization protocols are handled in step-01-discover.md.
