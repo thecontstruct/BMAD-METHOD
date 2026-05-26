@@ -331,11 +331,7 @@ function test_artifact_gate_hash_mismatch_fails() {
         result.status === 1,
         `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
       );
-      record(
-        'hash-mismatch artifact reported as FAIL',
-        result.stdout.includes('FAIL'),
-        `stdout:\n${result.stdout}`,
-      );
+      record('hash-mismatch artifact reported as FAIL', result.stdout.includes('FAIL'), `stdout:\n${result.stdout}`);
     },
   );
 }

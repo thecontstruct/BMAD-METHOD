@@ -52,7 +52,7 @@ function reconstructSkillSrcDir(entry) {
   }
   // Story 10.12: skills whose fragments are all in _shared/ cannot use fragment-path
   // reconstruction; fall back to name-based search in core-skills and bmm-skills.
-  const allShared = fragments.every(f => typeof f.path === 'string' && f.path.startsWith('_shared/'));
+  const allShared = fragments.every((f) => typeof f.path === 'string' && f.path.startsWith('_shared/'));
   if (allShared) {
     const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
     const coreCandidate = path.join(srcRoot, 'core-skills', entry.skill);
@@ -65,7 +65,9 @@ function reconstructSkillSrcDir(entry) {
         if (fs.existsSync(candidate)) return candidate;
       }
     }
-    throw new Error(`bmad.lock entry for skill "${entry.skill}": uses _shared fragments but source not found in core-skills/ or bmm-skills/.`);
+    throw new Error(
+      `bmad.lock entry for skill "${entry.skill}": uses _shared fragments but source not found in core-skills/ or bmm-skills/.`,
+    );
   }
   const fragPath = fragments[0].path;
   if (typeof fragPath !== 'string' || fragPath === '') {
@@ -132,9 +134,7 @@ function validateOne(entry) {
   const skillSrcDir = reconstructSkillSrcDir(entry);
   const skillBasename = path.basename(skillSrcDir);
   // Story 10.12: skills with _shared/ fragments require positional compile layout.
-  const usesSharedFragments = (entry.fragments || []).some(
-    f => typeof f.path === 'string' && f.path.startsWith('_shared/')
-  );
+  const usesSharedFragments = (entry.fragments || []).some((f) => typeof f.path === 'string' && f.path.startsWith('_shared/'));
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmad-validate-'));
 
   try {
@@ -152,11 +152,10 @@ function validateOne(entry) {
       copyDirSync(path.join(srcRoot, '_shared'), path.join(tmpDir, '_shared'));
       fs.mkdirSync(path.join(tmpDir, '_config'), { recursive: true });
       const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
-      compileResult = spawnSync(
-        pythonBin,
-        [COMPILE_PY, `${module}/${skillBasename}`, '--install-dir', tmpDir],
-        { encoding: 'utf8', timeout: 30_000 },
-      );
+      compileResult = spawnSync(pythonBin, [COMPILE_PY, `${module}/${skillBasename}`, '--install-dir', tmpDir], {
+        encoding: 'utf8',
+        timeout: 30_000,
+      });
       compiledSkillDir = path.join(tmpDir, module, skillBasename);
     } else {
       compileResult = runCompile(skillSrcDir, tmpDir);
@@ -262,7 +261,7 @@ function validateOne(entry) {
       expected: entry.compiled_hash,
       actual,
       schemaFindings: schemaFailures,
-      artifactFindings,  // Story 10.25: FR-11 artifact check results
+      artifactFindings, // Story 10.25: FR-11 artifact check results
     };
   } finally {
     // BH-4/ECH-4: don't let cleanup failures (Windows file locks, etc.) clobber the
@@ -330,7 +329,7 @@ function reportHuman(records) {
     for (const f of r.schemaFindings) {
       console.log(`      [${f.severity}] ${f.rule}: ${f.detail}`);
     }
-    for (const a of (r.artifactFindings || [])) {
+    for (const a of r.artifactFindings || []) {
       if (a.kind === 'missing') {
         console.log(`      artifact missing: ${a.path}`);
       } else {
