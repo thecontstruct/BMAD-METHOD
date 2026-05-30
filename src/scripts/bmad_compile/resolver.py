@@ -1028,6 +1028,13 @@ def _base_candidate(
         if root is None:
             return None
         path = root / relative_subpath
+        # Story 3.5: Reject ../ traversal. For module-prefixed includes the
+        # containment boundary is the module root itself — `scenario_root` may
+        # point to the source skill tree rather than the install tree when called
+        # from --batch mode, so module roots from the install tree (e.g. `_shared`)
+        # would be rejected. Checking against the module root is strictly tighter
+        # (the module root is always at or below scenario_root in install-phase mode).
+        return io.ensure_within_root(path, root)
     else:
         path = context.skill_dir / relative_subpath
     # Story 3.5: Reject ../ traversal that escapes scenario_root.
@@ -1110,13 +1117,17 @@ def _lookup_tier(
             / skill_basename
             / leaf
         )
-        _safe = io.ensure_within_root(path, context.scenario_root)
+        # Override fragments are always rooted at override_root, not scenario_root.
+        # scenario_root reflects the source skill tree which may be in a different
+        # filesystem tree (e.g. package source vs. target project in --batch mode).
+        _safe = io.ensure_within_root(path, context.override_root)
         return _safe if io.is_file(str(_safe)) else None
     if tier == _TIER_USER_OVERRIDE:
         if context.override_root is None:
             return None
         path = context.override_root / "fragments" / leaf
-        _safe = io.ensure_within_root(path, context.scenario_root)
+        # Same rationale: use override_root, not scenario_root, for override-tier paths.
+        _safe = io.ensure_within_root(path, context.override_root)
         return _safe if io.is_file(str(_safe)) else None
     if tier == _TIER_BASE:
         base = _base_candidate(

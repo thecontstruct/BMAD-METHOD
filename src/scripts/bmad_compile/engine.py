@@ -592,9 +592,16 @@ def _compile_core(
             _lf_ver,
         )
     # AC 6: override_root param overrides the default derivation (no implicit /custom suffix).
+    # When `lockfile_root` is provided the caller is an install-phase or batch-mode runner
+    # whose skill sources live in a separate tree from the install target. Use `lockfile_root`
+    # (the install-tree root) for override-path containment checks; `scenario_root` (derived
+    # from the source skill tree) is incorrect in that case and causes OVERRIDE_OUTSIDE_ROOT
+    # for any target-project override path. Direct per-skill calls (lockfile_root=None) are
+    # unchanged: `scenario_root` is the project root there.
+    _override_check_root = io.to_posix(lockfile_root) if lockfile_root is not None else scenario_root
     if override_root is not None:
         # Story 3.5: Caller-supplied override_root is untrusted; reject before any filesystem probe.
-        candidate_override_root = io.ensure_within_root(override_root, scenario_root)
+        candidate_override_root = io.ensure_within_root(override_root, _override_check_root)
     else:
         candidate_override_root = scenario_root / "_bmad" / "custom"
     # `is_dir` (not `path_exists`) — completes the file-type discipline
@@ -620,7 +627,8 @@ def _compile_core(
     if override_root is not None:
         _ort = override_root / "fragments" / current_module / basename / "SKILL.template.md"
         # Story 3.5: Reject symlinks in override path pointing outside scenario_root.
-        override_root_template = io.ensure_within_root(_ort, scenario_root)
+        # Use the same root as the override_root check above (lockfile_root when provided).
+        override_root_template = io.ensure_within_root(_ort, _override_check_root)
         # `is_file` (not `path_exists`) — a directory at this slot would
         # otherwise pass the probe and crash later in `read_template` with
         # a raw `IsADirectoryError` / `PermissionError` outside the
