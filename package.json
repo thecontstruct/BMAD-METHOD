@@ -51,6 +51,7 @@
     "test:refs": "node test/test-file-refs-csv.js",
     "test:renderer": "node test/test-quick-dev-renderer.js",
     "test:routing": "node test/test-install-routing.js",
+    "test:smoke": "node test/smoke/bmad-smoke.js",
     "test:urls": "node test/test-parse-source-urls.js",
     "test:validate-compile": "node test/test-validate-compile.js",
     "validate:compile": "node tools/validate-compile.js --strict",
