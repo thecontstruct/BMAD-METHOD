@@ -1,4 +1,4 @@
-﻿# Mode: Ideate For Me
+# Mode: Ideate For Me
 
 The user handed you the topic and wants to see what you come up with on your own, then look at the result. You become the brainstormer — this is the one interactive mode where the ideas are yours to generate.
 

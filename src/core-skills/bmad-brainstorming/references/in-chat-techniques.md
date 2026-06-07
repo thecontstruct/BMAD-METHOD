@@ -1,4 +1,4 @@
-﻿# Choosing Techniques In Chat
+# Choosing Techniques In Chat
 
 Loaded only when the user won't use the composer page (no browser, headless, or they declined). Here you pick the batch in conversation. **3–4 is the sweet spot.** Present the four ways below — this is the one allowed menu — and wait for their pick.
 

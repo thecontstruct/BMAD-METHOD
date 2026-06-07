@@ -1,4 +1,4 @@
-﻿# Converging: Narrow & Decide
+# Converging: Narrow & Decide
 
 Load this when divergence is spent and the user wants to narrow the field — or asks to "decide," "prioritize," "pick," or "make it real." The whole catalog is *divergent* by design (it generates); this is the deliberate opposite phase, and keeping the two apart is the point. Never run convergence while ideas are still flowing, and never let it leak into a generating batch — premature judgment is what kills good ideas. `{doc_workspace}/.memlog.md` is the canonical record; everything here works from it. Communicate in `{communication_language}`.
 

@@ -1,4 +1,4 @@
-﻿# Headless Mode
+# Headless Mode
 
 Load this file ONLY when bmad-brainstorming is invoked headless. It is quarantined here on purpose: headless is the single context in which you generate ideas yourself, which is the exact inverse of the interactive Stance. Loading it in a normal session would corrupt the facilitation. Follow it for the whole run.
 

@@ -1,4 +1,4 @@
-﻿# Wrap-Up: Synthesis & Artifacts
+# Wrap-Up: Synthesis & Artifacts
 
 Load this when the user signals they're spent or the topic is mined out. `{doc_workspace}/.memlog.md` is the canonical record of the session — everything here derives from it. Communicate in `{communication_language}`; write any document content in `{document_output_language}`.
 

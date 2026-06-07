@@ -1,4 +1,4 @@
-﻿# /// script
+# /// script
 # requires-python = ">=3.10"
 # dependencies = ["pytest>=8.0"]
 # ///
