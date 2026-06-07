@@ -2,7 +2,10 @@
 
 Canonical 10-step migration playbook for Epic 10. Authored by Story 10.1 (R0 spike). Refined empirically by Story 10.7 after Batch 1 closes.
 
-See also: [migration-cookbook.md](migration-cookbook.md) — three worked examples applying these steps to real and projected migrations.
+See also:
+
+- [migration-cookbook.md](migration-cookbook.md) — three worked examples applying these steps to real and projected migrations.
+- [dev-notes-template.md](dev-notes-template.md) — pre-dev checklist for new stories on this fork.
 
 Use this checklist when migrating a hand-authored `SKILL.md` onto the compile pipeline. Each step is a binary done/not-done gate enabled by a concrete invocation.
 
@@ -144,6 +147,36 @@ ls src/<module>/<skill>/components/ 2>/dev/null
 grep -E '<[A-Z][A-Za-z]*\s+[^>]*\s*/>' src/<module>/<skill>/SKILL.md || echo "no components"
 ```
 
+### §6.x — ComponentRunner compatibility audit for Python scripts
+
+**When this applies:** an upstream story being ported introduces new Python scripts (`scripts/*.py`) alongside the skill's SKILL.md (runtime CLI tools invoked via shell commands in SKILL.md).
+
+**Rule:** Python scripts in a skill are scaffold-verbatim install artifacts. They are **not** ComponentRunner inputs. ComponentRunner is the compile-time `<<component>>` directive system for inlining Python-level logic into SKILL.md at build time. These are orthogonal.
+
+**Signal:** if a Python file's first line is `#!/usr/bin/env python3` or it imports `argparse`, it is a CLI tool. If SKILL.md contains `python3 {skill-root}/scripts/...`, it is a runtime invocation. No ComponentRunner wiring needed.
+
+**Audit checklist for any new Python script artifact:**
+
+```bash
+# 1. CLI tool check (no ComponentRunner analysis needed if true):
+head -1 <script>.py  # #!/usr/bin/env python3
+grep "^import argparse\|^from argparse" <script>.py
+
+# 2. stdlib-only audit (no third-party deps allowed in scaffold-verbatim):
+grep "^from\|^import" <script>.py | sort -u
+
+# 3. No ComponentRunner wiring:
+grep -c '<<component' <skill>.template.md   # → 0
+
+# 4. BOM check before committing:
+python3 -c "print(open('<script>.py','rb').read(3).hex())"  # must NOT be efbbbf
+
+# 5. Check version floor (walrus operator requires Python 3.8+; match/case requires 3.10+):
+python3 --version
+```
+
+**Empirical reference:** Story 10.48 — `brain.py` (740 lines) and `memlog.py` (202 lines) in `bmad-brainstorming` are standalone runtime CLI tools. All imports are stdlib. No ComponentRunner analysis was needed. *(10-48-brainstorming-port-retro.md L1)*
+
 ---
 
 ## §7 — Template authoring + frontmatter quote-style decision
@@ -248,6 +281,48 @@ If the SHA mismatch is content (not whitespace), STOP — the spike-fail criteri
 
 **Fragment-family charset decisions (§2):** unchanged at Batch 1 close. All 4 families (`conventions.md`, `persistent-facts.md`, `resolver-fallback.md`, `config-load.md`) remain as authored at spike time — no Batch 1 consumer added or amended a family charset decision.
 
+### §8.y — Golden drift: detection and batch refresh
+
+**When this applies:** goldens in `test/fixtures/migration-goldens/` become stale when shared fragments are updated or when upstream template bodies change. Stale goldens do not block commits but fail CI test runs.
+
+**Detection:**
+
+```bash
+python3 -m pytest test/python/test_migration_equivalence.py -v 2>&1 \
+  | grep -E 'FAILED|ERROR'
+```
+
+Any `FAILED test_migration_equivalence.py::test_<skill>_matches_golden` means the compiled output drifted from the golden. An `ERROR` result means an infrastructure failure (missing import, file not found) — fix the infrastructure issue before deciding whether to refresh. Determine whether drift is intentional (upstream update → update golden) or regressive (template bug → fix template first).
+
+**Batch refresh pattern (intentional drift only):**
+
+**Prerequisite:** all skills in the list must be at a `compile.py`-discoverable location. For core-skills, `src/core-skills/<name>/` is the source. For bmm skills, `src/_bmad/bmm/<name>/` must exist (run the BMAD installer first if absent).
+
+```bash
+command -v cygpath >/dev/null 2>&1 || { echo "cygpath not found — run this loop in Git Bash"; exit 1; }
+WIN_TMP=$(cygpath -w /tmp/golden-refresh)
+
+for skill in bmad-my-skill bmad-other-skill; do
+  # core-skills skills use core-skills/ module path; bmm skills use bmm/
+  if [ -d "src/core-skills/$skill" ]; then
+    MODULE="core-skills/$skill"
+  else
+    MODULE="bmm/$skill"
+  fi
+  mkdir -p "$WIN_TMP/$MODULE"
+  python3 src/scripts/compile.py "$MODULE" --install-dir "$WIN_TMP" \
+    || { echo "compile failed for $skill"; exit 1; }
+  cp "$WIN_TMP/$MODULE/SKILL.md" "test/fixtures/migration-goldens/$skill/SKILL.md"
+done
+
+# Verify all pass:
+python3 -m pytest test/python/test_migration_equivalence.py -v
+```
+
+**Rule:** only refresh goldens when the compiled output is intentionally changed (upstream body update, shared fragment update with Phil sign-off). If tests fail unexpectedly, investigate root cause before refreshing.
+
+**Empirical reference:** Story 10.47 — 17 pre-existing stale goldens blocked the clean test run. Root cause was an activation-complete wording change propagated to 17 skills without golden updates. The batch-compile loop above resolved all 17 in one pass. *(10-47-upstream-sync-retro.md L4)*
+
 ---
 
 ## §9 — Lockfile regeneration
@@ -313,3 +388,165 @@ Migration compile emits **only** the compiled `SKILL.md`. Non-markdown sibling f
 **Pre-FR-3 caveat:** for offline or disconnected installs, sibling assets sourced from the marketplace may be missing. See Story 10.43 investigation seed (sprint-status 2026-05-23) — this gap is not yet empirically verified or closed.
 
 **Post-FR-3 (Story 10.25+):** prefer the `artifacts:` frontmatter mechanism in the skill template to make the migrated skill marketplace-independent. See Story 10.27a for the first FR-3 consumer (`bmad-advanced-elicitation`), which serves as the smoke test for the `artifacts:` mechanism.
+
+---
+
+## §11 — Windows / Git Bash path handling
+
+**Why it matters:** Git Bash maps `/tmp/` to an MSYS2 virtual path that Python's `open()` cannot resolve as a native Windows path. Any shell compile step that passes a `/tmp/` path directly to Python will raise `FileNotFoundError` or produce a silently wrong path.
+
+**The rule:** before passing any `/tmp/` path to Python, resolve to the Windows native form via `cygpath -w`.
+
+```bash
+# Pattern — always use this when a compile step touches /tmp/ on Windows:
+WIN_PATH=$(cygpath -w /tmp/my-compile-dir)
+mkdir -p "$WIN_PATH/core-skills/bmad-my-skill"
+python3 src/scripts/compile.py core-skills/bmad-my-skill --install-dir "$WIN_PATH"
+```
+
+The temp dir structure must mirror the module path: if the module path is `core-skills/bmad-my-skill`, create `$WIN_PATH/core-skills/bmad-my-skill/` before invoking `compile.py`.
+
+**Empirical reference:** Story 10.47 — compiling `bmad-party-mode` from a Git Bash `/tmp/pm-compile/` path raised `FileNotFoundError`. Fixed by resolving to the native Windows path via `cygpath -w`. *(10-47-upstream-sync-retro.md L1)*
+
+---
+
+## §12 — BOM-proof file extraction from Git
+
+**Why it matters:** PowerShell 5.1's `>` redirection, `Out-File -Encoding UTF8`, and `Set-Content -Encoding UTF8` all write **UTF-8 WITH BOM** (`EF BB BF`). For `.py` files Python silently strips the BOM, but for CSV and JSON files the BOM is fatal:
+
+- `csv.DictReader` with `encoding="utf-8"`: first column becomes `﻿category` (BOM prepended), causing `KeyError` on every row access.
+- `json.load()`: raises `JSONDecodeError("Unexpected UTF-8 BOM")`.
+
+**The rule:** never use `>` or PowerShell redirection to extract files from Git. Always use Python binary write.
+
+```bash
+# Option A — Python subprocess (preferred; works in PowerShell and Git Bash):
+python3 -c "
+import subprocess, pathlib
+content = subprocess.run(
+    ['git', 'show', '<SHA>:<path/to/file>'],
+    capture_output=True
+).stdout   # raw bytes — no BOM
+pathlib.Path('dest/file').write_bytes(content)
+"
+
+# Option B — bash pipe (Git Bash only; bash > is stdout redirection, NOT
+# PowerShell Out-File — it writes raw bytes and does NOT add BOM):
+git show <SHA>:<path/to/file> | \
+  python3 -c "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())" \
+  > dest/file
+```
+
+**BOM audit before committing any new files:**
+
+```python
+import pathlib
+
+for p in pathlib.Path('src/core-skills/bmad-my-skill').rglob('*'):
+    if p.is_file():
+        b = p.read_bytes()[:3]
+        status = 'BOM' if b == b'\xef\xbb\xbf' else 'ok'
+        print(status, p)
+```
+
+**Strip BOM in-place if already present:**
+
+```python
+import pathlib
+
+for p in pathlib.Path('src/core-skills/bmad-my-skill').rglob('*'):
+    if p.is_file():
+        content = p.read_bytes()
+        if content.startswith(b'\xef\xbb\xbf'):
+            p.write_bytes(content[3:])
+            print(f'stripped: {p}')
+```
+
+**Note on `.py` files:** Python 3 silently strips BOM from `.py` files at import — the `__pycache__` bytecode exists and the file executes without error. But strip BOM from `.py` files anyway: upstream expectation is BOM-free and the check is free.
+
+**Empirical reference:** Story 10.48 — all 18 scaffold-verbatim files for `bmad-brainstorming` were extracted via PowerShell and had BOM. The BOM in `brain-methods.csv` caused `KeyError` on `r["category"]` in the skill's own test suite. Fixed in `a9bad9b8` via the in-place strip above. *(10-48-brainstorming-port-retro.md L3, L4)*
+
+---
+
+## §13 — Compile path reference by skill location
+
+**Why it matters:** the module-path argument passed to `compile.py` and `validate-compile.js` differs by skill location. Using the wrong path produces a `ModuleNotFoundError` or silent no-op.
+
+| Skill source location | Module path | Example |
+|---|---|---|
+| `src/core-skills/<name>/` | `core-skills/<name>` | `core-skills/bmad-party-mode` |
+| `src/_bmad/bmm/<name>/` | `bmm/<name>` | `bmm/bmad-create-story` |
+
+**Compile invocation examples:**
+
+```bash
+# core-skills skill (e.g., bmad-party-mode):
+WIN_PATH=$(cygpath -w /tmp/pm-compile)
+mkdir -p "$WIN_PATH/core-skills/bmad-party-mode"
+python3 src/scripts/compile.py core-skills/bmad-party-mode \
+  --install-dir "$WIN_PATH"
+
+# bmm skill (e.g., bmad-create-story):
+WIN_PATH=$(cygpath -w /tmp/cs-compile)
+mkdir -p "$WIN_PATH/bmm/bmad-create-story"
+python3 src/scripts/compile.py bmm/bmad-create-story \
+  --install-dir "$WIN_PATH"
+```
+
+**Passthrough skills:** skills with no `<<include>>` fragments (e.g., `bmad-party-mode` post-fae70152) compile as passthrough: `compiled_hash == source_hash`. The golden is byte-identical to the template body. Verification is trivial — compare `sha256sum` of template with compiled output.
+
+**Empirical reference:** Story 10.47 — initial compile of `bmad-party-mode` failed because the temp dir was structured as `bmm/bmad-party-mode/` instead of `core-skills/bmad-party-mode/`. Required trial-and-error to discover. *(10-47-upstream-sync-retro.md L3)*
+
+---
+
+## §14 — Lockfile (`bmad.lock`) schema reference
+
+**Why it matters:** any script that reads `_config/bmad.lock` to extract hashes or verify skill entries MUST use the correct top-level key. The key is `"entries"` — **not** `"skills"`.
+
+**Prerequisite:** generate the lockfile first if absent (`python3 src/scripts/compile.py <any-module> --install-dir src/_bmad`). The file is gitignored — do not rely on `git pull` to provide it.
+
+**Top-level schema (v3, post-Story 10.26):**
+
+```json
+{
+  "version": 3,
+  "entries": [
+    {
+      "skill": "<module>/<skill>",
+      "compiled_hash": "<sha256>",
+      "source_hash": "<sha256>",
+      "fragments": [
+        { "path": "_shared/fragments/<name>.md", "hash": "<sha256>" }
+      ],
+      "artifacts": [
+        { "path": "<relative/path/to/artifact>", "hash": "<sha256>" }
+      ],
+      "deprecations": []
+    }
+  ]
+}
+```
+
+**Note (partial schema):** additional fields may be present in practice (`bmad_version`, `compiled_at`, per-entry `components`, per-fragment `resolved_from`) — these are not documented here and are subject to change.
+
+**Extraction pattern:**
+
+```python
+import json, pathlib
+
+lf = json.loads(
+    pathlib.Path('src/_bmad/_config/bmad.lock').read_bytes()
+    .decode('utf-8-sig')  # strips BOM if present on Windows
+)
+# Top-level key is "entries", NOT "skills":
+entry = next(
+    (e for e in lf['entries'] if e['skill'] == 'core-skills/bmad-party-mode'),
+    None
+)
+if entry:
+    print('compiled_hash:', entry['compiled_hash'])
+```
+
+**Lockfile path:** `src/_bmad/_config/bmad.lock` (install-phase path, gitignored). Do NOT conflate with `_bmad-output/` — that is the workspace artifact directory.
+
+**Empirical reference:** Story 10.47 — initial Python extraction returned empty because the code searched `data['skills']`. Reading raw JSON via `repr()` revealed the correct key is `"entries"`. *(10-47-upstream-sync-retro.md L2)*
