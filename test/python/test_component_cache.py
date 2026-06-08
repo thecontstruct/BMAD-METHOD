@@ -93,6 +93,20 @@ class TestComponentCacheKey(unittest.TestCase):
         # render_mode is excluded → keys must match
         self.assertEqual(k1, k2)
 
+    def test_git_field_excluded_from_key(self):
+        import types
+        src = "def render(ctx): return 'x'"
+        ctx_no_git = dict(_CTX, git=None)
+        ctx_with_git = dict(_CTX, git=types.SimpleNamespace(
+            branch="main", commit_sha="a" * 40,
+            commit_short_sha="a" * 8, is_dirty=True,
+            tag="v1.0", repo_root="/repo",
+        ))
+        k1 = self.cache._make_key(src, {}, ctx_no_git)
+        k2 = self.cache._make_key(src, {}, ctx_with_git)
+        # ctx.git is not in the allowlist → different git state must NOT bust cache
+        self.assertEqual(k1, k2)
+
     def test_cache_version_in_key(self):
         import bmad_compile.cache as cache_mod
         original = cache_mod.CACHE_VERSION

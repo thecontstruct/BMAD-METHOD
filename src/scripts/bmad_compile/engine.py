@@ -942,6 +942,10 @@ def compile_skill(
         "render_mode": "compile",
     }
 
+    # Story 10.56: attach git context once per batch (ctx.git.branch, commit_sha, etc.).
+    from .git_context import build_git_ctx  # lazy import — same pattern as cache.py
+    ctx_dict["git"] = build_git_ctx(cwd=str(skill_posix))
+
     # Story 10.52: construct cache for compile-mode component reuse (ARC-OQ-3).
     # Cache is only used when lockfile_root is known (install phase). Per-skill
     # standalone compiles (lockfile_root=None) run uncached to preserve test isolation.
