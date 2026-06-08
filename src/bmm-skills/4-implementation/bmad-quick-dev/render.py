@@ -22,6 +22,7 @@ import posixpath
 import re
 import sys
 import tomllib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 _render_dir = os.path.dirname(os.path.abspath(__file__))
 _bmad_scripts = os.path.normpath(os.path.join(_render_dir, "..", "..", "scripts"))
@@ -31,6 +32,7 @@ if os.path.isdir(_bmad_scripts) and _bmad_scripts not in sys.path:
 _JIT_SENTINEL_RE = re.compile(
     r'<!--\s*BMAD-JIT:(?P<name>[A-Z][A-Za-z0-9]+):(?P<hash>[0-9a-f]{16})\s*-->'
 )
+_JIT_BATCH_WORKERS: int = 4
 
 
 def find_project_root() -> str:
@@ -256,17 +258,17 @@ def _resolve_jit_sentinels(
 
     _replacements: dict[tuple[str, str], str] = {}
 
+    # Phase 1: pre-resolve lookup failures (main thread, no executor).
+    # Mirrors the comp-None / path-invalid / file-absent continue branches.
+    # Fast: dict lookup + os.path.isfile only. No run_jit calls here.
+    runnable: list[tuple[str, str, dict, str]] = []  # (name, hash_, props_dict, installed_path)
     for (name, hash_) in unique_pairs:
-        comp = None
-        for c in comps_list:
-            if (isinstance(c, dict)
-                    and c.get("name") == name
-                    and c.get("props_hash") == hash_):
-                comp = c
-                break
-
         sentinel_key = (name, hash_)
-
+        comp = next(
+            (c for c in comps_list
+             if isinstance(c, dict) and c.get("name") == name and c.get("props_hash") == hash_),
+            None,
+        )
         if comp is None:
             _emit_jit_event({
                 "kind": "component_error", "component": name,
@@ -276,10 +278,8 @@ def _resolve_jit_sentinels(
             })
             _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
             continue
-
         props_val = comp.get("props")
         props_dict = props_val if isinstance(props_val, dict) else {}
-
         path_val = comp.get("path")
         if not isinstance(path_val, str) or not path_val:
             _emit_jit_event({
@@ -289,10 +289,8 @@ def _resolve_jit_sentinels(
             })
             _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
             continue
-
         filename = posixpath.basename(path_val)
         installed_path = posixpath.join(installed_component_dir, filename)
-
         if not os.path.isfile(installed_path):
             _emit_jit_event({
                 "kind": "component_error", "component": name, "mode": "jit",
@@ -301,24 +299,57 @@ def _resolve_jit_sentinels(
             })
             _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
             continue
+        runnable.append((name, hash_, props_dict, installed_path))
 
-        try:
-            result = runner.run_jit(
-                installed_path, ctx_dict, props_dict, component_name=name
-            )
-            _replacements[sentinel_key] = result
-        except ComponentError as exc:
-            fb = exc.render_error_fallback
-            _replacements[sentinel_key] = (
-                fb if isinstance(fb, str) else f"<!-- BMAD-ERROR:{name} -->"
-            )
-        except Exception as exc:
-            _emit_jit_event({
-                "kind": "component_error", "component": name, "mode": "jit",
-                "props": props_dict, "exit_code": None, "stderr": str(exc),
-                "phase": "jit", "reason": "runner_unexpected_error",
-            })
-            _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
+    # Phase 2: execute runnable pairs.
+    # 0 or 1 runnable → direct call (no executor overhead, AC-8).
+    # 2+ runnable → ThreadPoolExecutor fan-out (AC-1, AC-5).
+    if len(runnable) <= 1:
+        for (name, hash_, props_dict, installed_path) in runnable:
+            sentinel_key = (name, hash_)
+            try:
+                _replacements[sentinel_key] = runner.run_jit(
+                    installed_path, ctx_dict, props_dict, component_name=name
+                )
+            except ComponentError as exc:
+                fb = exc.render_error_fallback
+                _replacements[sentinel_key] = (
+                    fb if isinstance(fb, str) else f"<!-- BMAD-ERROR:{name} -->"
+                )
+            except Exception as exc:
+                _emit_jit_event({
+                    "kind": "component_error", "component": name, "mode": "jit",
+                    "props": props_dict, "exit_code": None, "stderr": str(exc),
+                    "phase": "jit", "reason": "runner_unexpected_error",
+                })
+                _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
+    else:
+        def _run_one(name: str, hash_: str, props_dict: dict, installed_path: str) -> tuple:
+            """Execute one JIT component. Returns (sentinel_key, replacement). Never raises."""
+            sk = (name, hash_)
+            try:
+                return sk, runner.run_jit(
+                    installed_path, ctx_dict, props_dict, component_name=name
+                )
+            except ComponentError as exc:
+                fb = exc.render_error_fallback
+                return sk, (fb if isinstance(fb, str) else f"<!-- BMAD-ERROR:{name} -->")
+            except Exception as exc:
+                _emit_jit_event({
+                    "kind": "component_error", "component": name, "mode": "jit",
+                    "props": props_dict, "exit_code": None, "stderr": str(exc),
+                    "phase": "jit", "reason": "runner_unexpected_error",
+                })
+                return sk, f"<!-- BMAD-ERROR:{name} -->"
+
+        with ThreadPoolExecutor(max_workers=_JIT_BATCH_WORKERS) as executor:
+            future_map = {
+                executor.submit(_run_one, n, h, p, ip): (n, h)
+                for (n, h, p, ip) in runnable
+            }
+            for future in as_completed(future_map):
+                key, val = future.result()  # _run_one never raises
+                _replacements[key] = val
 
     def _repl(m: re.Match) -> str:
         key = (m.group("name"), m.group("hash"))
