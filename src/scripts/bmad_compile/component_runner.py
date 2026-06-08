@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import re
+import sys
 import tokenize
 import traceback
 import types
@@ -220,8 +221,10 @@ class ComponentRunner:
                         try:
                             src_text = _read_component_source(inv.component_abs_path)
                             self._cache.put(src_text, props_dict, ctx_dict, output)
-                        except Exception:
-                            pass  # cache write failure is non-fatal
+                        except Exception as exc:
+                            sys.stderr.write(  # pragma: allow-raw-io
+                                f"warning: component cache write failed: {exc}\n"
+                            )
                 except ComponentError as exc:
                     exc.mode = "compile"
                     exc.props = props_dict

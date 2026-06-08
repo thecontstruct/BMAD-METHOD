@@ -948,7 +948,7 @@ def compile_skill(
     _component_cache = None
     if lockfile_root is not None:
         from .cache import ComponentCache  # lazy import
-        _cache_root = str(io.to_posix(lockfile_root) / "cache")
+        _cache_root = str(io.to_posix(lockfile_root) / "_bmad" / "cache")
         _component_cache = ComponentCache(_cache_root)
 
     # Dispatch compile-mode components (atomic batch). Raises ComponentBatchError on any
