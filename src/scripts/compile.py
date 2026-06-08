@@ -685,7 +685,7 @@ def _scan_watch_sources(install_dir: Path) -> dict[str, float]:
     Excluded: SKILL.md (compiled output), _config/, memory/, _memory/ subtrees.
     """
     result: dict[str, float] = {}
-    for root, dirs, files in os.walk(str(install_dir)):
+    for root, dirs, files in os.walk(str(install_dir), topdown=True):
         root_path = Path(root)
         try:
             rel_root = root_path.relative_to(install_dir)
@@ -804,11 +804,14 @@ def _run_watch_phase(install_dir: Path, poll_interval: float = _WATCH_POLL_INTER
                     ok = all(ev["kind"] != "error" for ev in events)
                     for ev in events:
                         _emit(ev)
-                    status = "ok" if ok else "✗ ERROR"
-                    sys.stderr.write(f"{status} ({elapsed:.2f}s)\n")
+                    if ok:
+                        sys.stderr.write(f"✓ ({elapsed:.2f}s)\n")
+                    else:
+                        sys.stderr.write("✗ ERROR\n")
     except KeyboardInterrupt:
         sys.stderr.write("\n[watch] Stopped.\n")
         return 0
+    return 0  # unreachable; satisfies -> int annotation
 
 
 def main(argv: list[str] | None = None) -> int:
