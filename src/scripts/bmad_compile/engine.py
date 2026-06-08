@@ -176,6 +176,60 @@ _FALLBACK_RE = re.compile(r"^RENDER_ERROR_FALLBACK\s*=\s*", re.MULTILINE)
 _FRAGMENT_COMPONENT_PROBE = re.compile(r'<[A-Z][a-z][A-Za-z0-9]*[\s/>]')
 _TEXT_COMPONENT_PROBE = _FRAGMENT_COMPONENT_PROBE
 
+# Story 10.57: blocklist for data file hash (build artifacts and OS detritus).
+# Keep in sync with COPY_BLOCKLIST_NAMES / COPY_BLOCKLIST_SUFFIXES in installer.js.
+_DATA_FILE_BLOCKLIST: frozenset[str] = frozenset({".DS_Store", ".gitignore"})
+_DATA_FILE_BLOCKLIST_SUFFIXES: tuple[str, ...] = (".pyc",)
+
+
+def _list_data_files(components_dir: io.PurePosixPath) -> list[str]:
+    """Return sorted basenames of non-.py, non-excluded files in components_dir.
+
+    Returns [] if the directory doesn't exist or cannot be read.
+    Only considers flat files; subdirectories are ignored.
+    """
+    dir_str = str(components_dir)
+    if not io.is_dir(dir_str):
+        return []
+    try:
+        entries = io.list_files_sorted(dir_str)
+    except Exception:
+        return []
+    result = []
+    for entry in entries:
+        name = entry.name
+        if name.endswith(".py"):
+            continue
+        if name in _DATA_FILE_BLOCKLIST:
+            continue
+        if any(name.endswith(s) for s in _DATA_FILE_BLOCKLIST_SUFFIXES):
+            continue
+        result.append(name)
+    return result
+
+
+def _compute_data_files_hash(
+    components_dir: io.PurePosixPath,
+    names: list[str] | None = None,
+) -> str:
+    """Return SHA256 of sorted [(basename, sha256)] list for non-.py data files.
+
+    Returns hash("[]") when no data files exist or the directory is absent.
+    Pass `names` to reuse an already-fetched listing and avoid a second scan.
+    """
+    if names is None:
+        names = _list_data_files(components_dir)
+    if not names:
+        return io.hash_text("[]")
+    pairs: list[tuple[str, str]] = []
+    for name in names:
+        full = str(components_dir / name)
+        try:
+            pairs.append((name, io.sha256_hex(full)))
+        except Exception:
+            pairs.append((name, ""))
+    return io.hash_text(json.dumps(pairs, separators=(",", ":")))
+
 
 def _read_render_mode(source: str, component_name: str) -> str:
     """Read RENDER_MODE from component source text (no import, no ast.parse).
@@ -946,6 +1000,14 @@ def compile_skill(
     from .git_context import build_git_ctx  # lazy import — same pattern as cache.py
     ctx_dict["git"] = build_git_ctx(cwd=str(skill_posix))
 
+    # Story 10.57: single scan — names list reused for both cache key and lockfile records.
+    # All non-.py, non-excluded files in components/ contribute to every component's
+    # cache key. Stored under private key "_data_files_hash" (not for component use).
+    _data_file_names: list[str] = _list_data_files(skill_posix / "components")
+    ctx_dict["_data_files_hash"] = _compute_data_files_hash(
+        skill_posix / "components", names=_data_file_names
+    )
+
     # Story 10.52: construct cache for compile-mode component reuse (ARC-OQ-3).
     # Cache is only used when lockfile_root is known (install phase). Per-skill
     # standalone compiles (lockfile_root=None) run uncached to preserve test isolation.
@@ -991,6 +1053,7 @@ def compile_skill(
             "sentinel_format_version": (
                 None if inv.render_mode == "compile" else 1
             ),
+            "data_files": _data_file_names,  # Story 10.57: non-.py assets in components/
         })
 
     io.write_text(str(output_path), rendered)

@@ -42,7 +42,11 @@ class ComponentCache:
         ctx_hash = _io.hash_text(
             json.dumps(ctx_subset, sort_keys=True, separators=(",", ":"))
         )
-        combined = f"{source_hash}:{props_hash}:{ctx_hash}:{CACHE_VERSION}"
+        # Story 10.57: include data files hash so changes to non-.py assets in
+        # components/ invalidate the cache. Empty string when absent (standalone
+        # per-skill compiles where lockfile_root=None skip cache anyway).
+        data_files_hash = ctx_dict.get("_data_files_hash", "")
+        combined = f"{source_hash}:{props_hash}:{ctx_hash}:{data_files_hash}:{CACHE_VERSION}"
         return _io.hash_text(combined)
 
     def get(self, source_text: str, props: dict, ctx_dict: dict) -> str | None:

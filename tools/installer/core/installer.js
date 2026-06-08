@@ -486,12 +486,19 @@ class Installer {
   }
 
   /**
-   * Copy component .py files from skill source dirs to the canonical installed path.
+   * Copy component files from skill source dirs to the canonical installed path.
    * <project_root>/_bmad/components/<module>/<skill>/<filename>
+   * Copies all files except blocklisted build artifacts and OS detritus.
+   * Guard: skips destDir creation when no .py files exist (data-only dirs not supported).
    * Called after runBatchInstall() succeeds in "Compiling migrated skills" task.
    * Skipped when model3FallbackApplied (Python absent path — no component execution possible).
    */
   async _copyComponentFiles(skills, bmadDir) {
+    // Story 10.57: copy all files except blocklisted build artifacts/OS detritus.
+    // Keep in sync with _DATA_FILE_BLOCKLIST / _DATA_FILE_BLOCKLIST_SUFFIXES in engine.py.
+    const COPY_BLOCKLIST_NAMES = new Set(['.DS_Store', '.gitignore']);
+    const COPY_BLOCKLIST_SUFFIXES = ['.pyc'];
+
     for (const { skillDir } of skills) {
       const componentsDir = path.join(skillDir, 'components');
       if (!(await fs.pathExists(componentsDir))) continue;
@@ -502,15 +509,23 @@ class Installer {
       } catch {
         continue; // unreadable dir — skip silently
       }
-      const pyFiles = entries.filter((e) => e.isFile() && e.name.endsWith('.py'));
-      if (pyFiles.length === 0) continue; // empty components/ → no-op; no destDir created
+
+      // Guard: skip if no .py files (data-only dirs not supported — DN-4).
+      const hasPy = entries.some((e) => e.isFile() && e.name.endsWith('.py'));
+      if (!hasPy) continue;
+
+      // All copyable files: files only (no subdirs), excluding blocklist.
+      const copyable = entries.filter(
+        (e) => e.isFile() && !COPY_BLOCKLIST_NAMES.has(e.name) && !COPY_BLOCKLIST_SUFFIXES.some((s) => e.name.endsWith(s)),
+      );
+      if (copyable.length === 0) continue;
 
       const moduleName = path.basename(path.dirname(skillDir));
       const skillBasename = path.basename(skillDir);
       const destDir = path.join(bmadDir, 'components', moduleName, skillBasename);
       await fs.ensureDir(destDir);
 
-      for (const entry of pyFiles) {
+      for (const entry of copyable) {
         const src = path.join(componentsDir, entry.name);
         const dest = path.join(destDir, entry.name);
         await fs.copyFile(src, dest);

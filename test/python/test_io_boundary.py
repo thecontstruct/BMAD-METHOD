@@ -81,9 +81,12 @@ def _strip_string_literals(source: str) -> str:
     # Remove triple-quoted strings (greedy across lines).
     source = re.sub(r'"""[\s\S]*?"""', lambda m: "\n" * m.group(0).count("\n"), source)
     source = re.sub(r"'''[\s\S]*?'''", lambda m: "\n" * m.group(0).count("\n"), source)
-    # Remove single-line single/double quoted strings (naive; good enough here).
-    source = re.sub(r'"(?:\\.|[^"\\])*"', '""', source)
-    source = re.sub(r"'(?:\\.|[^'\\])*'", "''", source)
+    # Remove single-line single/double quoted strings. Exclude newlines from the
+    # character class so possessive apostrophes in comments (e.g. "engine.py's")
+    # don't start a multi-line match that eats hundreds of lines and shifts the
+    # glob-check onto the wrong original line.
+    source = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', source)
+    source = re.sub(r"'(?:\\.|[^'\\\n])*'", "''", source)
     return source
 
 
