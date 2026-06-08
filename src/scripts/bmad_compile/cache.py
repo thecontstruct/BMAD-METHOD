@@ -32,7 +32,8 @@ class ComponentCache:
             json.dumps(props, sort_keys=True, separators=(",", ":"))
         )
         # Include config, skill_id, skill_source_root — all non-constant ctx fields.
-        # render_mode is always "compile" for compile-mode components; excluded.
+        # render_mode is always "compile" — excluded. ctx.git is intentionally
+        # excluded: git state changes should not bust component output caches (DN-1).
         ctx_subset = {
             k: ctx_dict[k]
             for k in ("config", "skill_id", "skill_source_root")
