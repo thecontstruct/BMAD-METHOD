@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,9 @@ _ANSI_RED   = "\033[31m"
 _ANSI_CYAN  = "\033[36m"
 _ANSI_BOLD  = "\033[1m"
 _ANSI_RESET = "\033[0m"
+
+_WATCH_POLL_INTERVAL: float = 0.5  # seconds between source scans
+_WATCH_SKIP_DIRS: frozenset[str] = frozenset({"_config", "memory", "_memory"})
 
 
 def _emit(obj: dict[str, Any]) -> None:
@@ -672,6 +677,140 @@ def _resolve_skill_canonical(canonical: str, install_dir: Path) -> "Path | None"
         return matches[0]
 
 
+def _scan_watch_sources(install_dir: Path) -> dict[str, float]:
+    """Return {abs_path_str: st_mtime} for all watchable source files under install_dir.
+
+    Included: *.template.md, customize.toml, components/*.py, any *.md or *.toml
+    under _shared/ or custom/, and any other *.md / *.toml / *.py except SKILL.md.
+    Excluded: SKILL.md (compiled output), _config/, memory/, _memory/ subtrees.
+    """
+    result: dict[str, float] = {}
+    for root, dirs, files in os.walk(str(install_dir)):
+        root_path = Path(root)
+        try:
+            rel_root = root_path.relative_to(install_dir)
+        except ValueError:
+            dirs.clear()
+            continue
+        # Prune skip dirs entirely at depth 1 to avoid descending into them
+        if rel_root.parts and rel_root.parts[0] in _WATCH_SKIP_DIRS:
+            dirs.clear()
+            continue
+        for fname in files:
+            if fname == "SKILL.md":
+                continue
+            if not (fname.endswith(".md") or fname.endswith(".toml") or fname.endswith(".py")):
+                continue
+            fpath = root_path / fname
+            try:
+                result[str(fpath)] = fpath.stat().st_mtime
+            except OSError:
+                pass
+    return result
+
+
+def _route_changed_file(changed: Path, install_dir: Path) -> "list[Path] | None":
+    """Map a changed source file to the skill dirs that need recompilation.
+
+    Returns None meaning "recompile all skills via _run_install_phase".
+    Returns a list (may be empty) of specific skill Path objects otherwise.
+    """
+    try:
+        rel = changed.relative_to(install_dir)
+    except ValueError:
+        return None  # outside install_dir — conservative: all skills
+    parts = rel.parts
+    if not parts:
+        return None
+    # Shared fragments or custom overrides → all skills
+    if parts[0] in {"_shared", "custom"}:
+        return None
+    # Depth-1 files (unusual) → conservative: all skills
+    if len(parts) < 2:
+        return None
+    # <module>/<skill>/... → just that skill
+    skill_dir = install_dir / parts[0] / parts[1]
+    if skill_dir.is_dir():
+        return [skill_dir]
+    return None  # skill dir vanished — conservative
+
+
+def _report_watch_changes(changed: list[Path], install_dir: Path, *, all_skills: bool) -> None:
+    """Emit [watch] Change: lines to stderr for each changed file."""
+    for cf in changed:
+        try:
+            rel = cf.relative_to(install_dir)
+        except ValueError:
+            rel = cf
+        suffix = " (all skills)" if all_skills else ""
+        sys.stderr.write(f"[watch] Change: {rel}{suffix}\n")
+
+
+def _run_watch_phase(install_dir: Path, poll_interval: float = _WATCH_POLL_INTERVAL) -> int:
+    """Run initial full compile then poll for source changes and recompile on save.
+
+    Streams NDJSON skill/error/summary events to stdout (same as --install-phase).
+    Human-readable [watch] status lines go to stderr.
+    Returns 0 on KeyboardInterrupt (Ctrl+C); never returns non-zero from the loop.
+    """
+    # Initial full compile — establishes baseline and warms the component cache
+    _run_install_phase(install_dir)
+
+    snapshot = _scan_watch_sources(install_dir)
+    sys.stderr.write(f"[watch] Watching {len(snapshot)} sources in {install_dir} …\n")
+
+    try:
+        while True:
+            time.sleep(poll_interval)
+            current = _scan_watch_sources(install_dir)
+
+            # Diff snapshot vs current to find changed files
+            changed_files: list[Path] = []
+            for p in set(snapshot) | set(current):
+                if snapshot.get(p) != current.get(p):
+                    changed_files.append(Path(p))
+            snapshot = current
+
+            if not changed_files:
+                continue
+
+            # Determine whether to recompile all skills or a targeted subset
+            recompile_all = False
+            affected: list[Path] = []
+            for cf in changed_files:
+                result = _route_changed_file(cf, install_dir)
+                if result is None:
+                    recompile_all = True
+                    break
+                for sk in result:
+                    if sk not in affected:
+                        affected.append(sk)
+
+            _report_watch_changes(changed_files, install_dir, all_skills=recompile_all)
+
+            t0 = time.monotonic()
+            if recompile_all:
+                sys.stderr.write("[watch] Recompiling all skills …\n")
+                _run_install_phase(install_dir)
+                elapsed = time.monotonic() - t0
+                sys.stderr.write(f"[watch] Done ({elapsed:.2f}s)\n")
+            else:
+                for sk in affected:
+                    skill_id = f"{sk.parent.name}/{sk.name}"
+                    sys.stderr.write(f"[watch] Recompiling {skill_id} … ")
+                    t1 = time.monotonic()
+                    events = _compile_one_skill(sk, install_dir, hash_skip=False)
+                    elapsed = time.monotonic() - t1
+                    ok = all(ev["kind"] != "error" for ev in events)
+                    for ev in events:
+                        _emit(ev)
+                    status = "ok" if ok else "✗ ERROR"
+                    sys.stderr.write(f"{status} ({elapsed:.2f}s)\n")
+    except KeyboardInterrupt:
+        sys.stderr.write("\n[watch] Stopped.\n")
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="bmad compile", description="Compile a BMAD skill."
@@ -712,6 +851,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--json", action="store_true",
         help="With --explain: emit structured JSON provenance output.",
+    )
+    ap.add_argument(
+        "--watch", action="store_true",
+        help="Watch for source changes and recompile on save (use with --install-phase).",
     )
     args = ap.parse_args(argv)
     # Normalize empty-string positional to None (argparse can produce '' for nargs="?")
@@ -779,6 +922,18 @@ def main(argv: list[str] | None = None) -> int:
     if (args.tree or args.json) and args.diff:
         sys.stderr.write("error: --tree cannot be combined with --diff\n")
         return 1
+    if args.watch and not args.install_phase:
+        sys.stderr.write("error: --watch requires --install-phase\n")
+        return 1
+    if args.watch and (args.skill or args.skill_canonical):
+        sys.stderr.write("error: --watch cannot be combined with a skill argument\n")
+        return 1
+    if args.watch and args.diff:
+        sys.stderr.write("error: --watch cannot be combined with --diff\n")
+        return 1
+    if args.watch and args.explain:
+        sys.stderr.write("error: --watch cannot be combined with --explain\n")
+        return 1
 
     install_flags: dict[str, str] = {}
     for kv in (args.var_overrides or []):
@@ -809,6 +964,8 @@ def main(argv: list[str] | None = None) -> int:
         if not install_path.is_dir():
             sys.stderr.write(f"invalid --install-dir: must be an existing directory for --install-phase: {install_path}\n")
             return 1
+        if args.watch:
+            return _run_watch_phase(install_path)
         return _run_install_phase(install_path)
 
     # Positional <skill> mode (AC 1, AC 2)
