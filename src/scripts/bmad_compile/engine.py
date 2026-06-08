@@ -942,13 +942,22 @@ def compile_skill(
         "render_mode": "compile",
     }
 
+    # Story 10.52: construct cache for compile-mode component reuse (ARC-OQ-3).
+    # Cache is only used when lockfile_root is known (install phase). Per-skill
+    # standalone compiles (lockfile_root=None) run uncached to preserve test isolation.
+    _component_cache = None
+    if lockfile_root is not None:
+        from .cache import ComponentCache  # lazy import
+        _cache_root = str(io.to_posix(lockfile_root) / "cache")
+        _component_cache = ComponentCache(_cache_root)
+
     # Dispatch compile-mode components (atomic batch). Raises ComponentBatchError on any
     # per-component failure; no writes below if it raises (FR-6.1 atomicity).
     if component_runner is not None:
         runner = component_runner
     else:
         from .component_runner import ComponentRunner  # lazy: see top-of-module note
-        runner = ComponentRunner(emit_fn=emit_fn)
+        runner = ComponentRunner(emit_fn=emit_fn, cache=_component_cache)
     buffer: dict[int, str] = runner.run_compile_batch(compile_invocations, ctx_dict)
 
     rendered = _assemble_nodes(enriched_flat_nodes, buffer)

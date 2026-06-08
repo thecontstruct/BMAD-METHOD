@@ -10,13 +10,16 @@ import tokenize
 import traceback
 import types
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from bmad_compile.errors import (
     ComponentBatchError,
     ComponentError,
     ComponentPropError,
 )
+
+if TYPE_CHECKING:
+    from bmad_compile.cache import ComponentCache
 
 _COMPILE_BATCH_WORKERS: int = 4
 
@@ -52,6 +55,12 @@ def _strip_string_and_comment_tokens(source: str) -> str:
                     result[mid] = "\n"
                 result[erow - 1] = result[erow - 1][ecol:]
     return "".join(result)
+
+
+def _read_component_source(component_path: str) -> str:
+    """Read component source text for cache key computation."""
+    with open(component_path, encoding="utf-8") as f:  # pragma: allow-raw-io
+        return f.read()
 
 
 def _run_inprocess(
@@ -148,8 +157,10 @@ class ComponentRunner:
     def __init__(
         self,
         emit_fn: Callable[[dict], None] | None = None,
+        cache: "ComponentCache | None" = None,
     ) -> None:
         self._emit_fn = emit_fn or (lambda _event: None)
+        self._cache = cache
 
     def _emit(self, event: dict) -> None:
         try:
@@ -169,6 +180,23 @@ class ComponentRunner:
         results: dict[int, str] = {}
         errors: list[tuple[int, ComponentError]] = []
 
+        # Story 10.52: split invocations into cache-hits and misses.
+        invocations_to_run: list[Any] = []
+        if self._cache is not None:
+            for inv in invocations:
+                try:
+                    src_text = _read_component_source(inv.component_abs_path)
+                    props_dict = dict(inv.original.props)
+                    hit = self._cache.get(src_text, props_dict, ctx_dict)
+                    if hit is not None:
+                        results[inv.token_index] = hit
+                        continue
+                except Exception:
+                    pass  # cache failure → treat as miss
+                invocations_to_run.append(inv)
+        else:
+            invocations_to_run = list(invocations)
+
         with ThreadPoolExecutor(max_workers=_COMPILE_BATCH_WORKERS) as executor:
             future_to_inv = {
                 executor.submit(
@@ -179,7 +207,7 @@ class ComponentRunner:
                     component_name=inv.original.name,
                     emit_fn=self._emit,
                 ): inv
-                for inv in invocations
+                for inv in invocations_to_run
             }
             for future in as_completed(future_to_inv):
                 inv = future_to_inv[future]
@@ -187,6 +215,13 @@ class ComponentRunner:
                 try:
                     output = future.result()
                     results[inv.token_index] = output
+                    # Story 10.52: populate cache after successful execution.
+                    if self._cache is not None:
+                        try:
+                            src_text = _read_component_source(inv.component_abs_path)
+                            self._cache.put(src_text, props_dict, ctx_dict, output)
+                        except Exception:
+                            pass  # cache write failure is non-fatal
                 except ComponentError as exc:
                     exc.mode = "compile"
                     exc.props = props_dict
