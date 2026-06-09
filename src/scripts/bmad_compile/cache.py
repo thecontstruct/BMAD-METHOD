@@ -46,7 +46,16 @@ class ComponentCache:
         # components/ invalidate the cache. Empty string when absent (standalone
         # per-skill compiles where lockfile_root=None skip cache anyway).
         data_files_hash = ctx_dict.get("_data_files_hash", "")
-        combined = f"{source_hash}:{props_hash}:{ctx_hash}:{data_files_hash}:{CACHE_VERSION}"
+        # Story 10.58: include _shared/components/ data hash so changes to
+        # shared assets bust every consumer's cache (correctness over precision,
+        # per DN-2). Empty string when absent (per-skill mode skips cache anyway).
+        # NO CACHE_VERSION bump (DN-5): the format change naturally orphans
+        # pre-10.58 entries — same approach Story 10.57 used.
+        shared_data_files_hash = ctx_dict.get("_shared_data_files_hash", "")
+        combined = (
+            f"{source_hash}:{props_hash}:{ctx_hash}:"
+            f"{data_files_hash}:{shared_data_files_hash}:{CACHE_VERSION}"
+        )
         return _io.hash_text(combined)
 
     def get(self, source_text: str, props: dict, ctx_dict: dict) -> str | None:

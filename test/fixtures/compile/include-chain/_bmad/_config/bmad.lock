@@ -20,11 +20,12 @@
         }
       ],
       "glob_inputs": [],
+      "shared_data_files": [],
       "skill": "include-chain-skill",
       "source_hash": "2cf19661b7c29da795427bca59d9425b3feb678d4a7b7a1bdd61f76502b8c4d1",
       "variables": [],
       "variant": null
     }
   ],
-  "version": 3
+  "version": 4
 }

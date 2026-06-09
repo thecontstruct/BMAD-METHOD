@@ -337,10 +337,22 @@ def _fragment_body_scan(
 def _discover_components(
     flat_nodes: "list[Any]",
     skill_source_root: io.PurePosixPath,
+    install_root: io.PathLike | None = None,
 ) -> "tuple[list[Any], list[EnrichedInvocation], list[EnrichedInvocation]]":
     """Discover, validate, and classify component invocations in flat_nodes.
 
     Returns (enriched_flat_nodes, compile_invocations, jit_invocations).
+
+    Story 10.58: when install_root is provided, components missing under
+    skill_source_root/components/ fall back to install_root/_shared/components/
+    (per-skill probe wins; intentional shadowing permitted). Per DN-8
+    duplicate-identification criteria, a component qualifies for _shared/
+    lift only if it is: (1) referenced by >=2 inter-skill consumers, (2)
+    byte-identical or semantically identical, (3) absent from any SHA-pinned
+    skill OR pinned-keeps-local with the lifted version serving unpinned
+    consumers, (4) a render-time primitive (component-tag-invoked), (5)
+    stable surface (same render signature + RENDER_MODE), (6) genuinely
+    cross-cutting in domain semantics. See Story 10.58 spec for full criteria.
     """
     import os as _os
 
@@ -350,6 +362,15 @@ def _discover_components(
         )
 
     real_skill_root = _os.path.realpath(str(skill_source_root))
+
+    # Story 10.58: derive shared-components root for fallback probe. Only set
+    # when the caller supplied install_root; per-skill mode (install_root=None)
+    # preserves pre-10.58 behavior (per-skill probe only).
+    shared_components_root: io.PurePosixPath | None = None
+    real_shared_root: str | None = None
+    if install_root is not None:
+        shared_components_root = io.to_posix(install_root) / "_shared" / "components"
+        real_shared_root = _os.path.realpath(str(shared_components_root))
 
     invocations: list[tuple[int, "parser.ComponentInvocation"]] = [
         (i, node)
@@ -378,21 +399,63 @@ def _discover_components(
 
     name_to_abspath: dict[str, str] = {}
     for name, relpath in name_to_relpath.items():
-        abs_path = str(io.to_posix(skill_source_root) / relpath)
-        real_abs = _os.path.realpath(abs_path)
-        if not real_abs.startswith(real_skill_root + _os.sep):
+        # Probe #1: per-skill components/<snake>.py (existing behavior).
+        per_skill_abs = str(io.to_posix(skill_source_root) / relpath)
+        per_skill_real = _os.path.realpath(per_skill_abs)
+        per_skill_ok = (
+            per_skill_real.startswith(real_skill_root + _os.sep)
+            and io.is_file(per_skill_abs)
+        )
+        # Sandbox: even when the file doesn't exist, a path that escapes
+        # the skill root must fail loud — never silently fall through to
+        # shared. Mirrors pre-10.58 strictness.
+        if not per_skill_real.startswith(real_skill_root + _os.sep):
             raise errors.CompilerError(
-                f"component '{name}': resolved path '{abs_path}' escapes skill_source_root"
+                f"component '{name}': resolved path '{per_skill_abs}' escapes skill_source_root"
             )
+
+        if per_skill_ok:
+            name_to_abspath[name] = per_skill_abs
+            continue
+
+        # Probe #2: _shared/components/<snake>.py (Story 10.58 fallback).
+        # Only consulted when install_root was supplied and per-skill probe missed.
+        shared_abs: str | None = None
+        if shared_components_root is not None and real_shared_root is not None:
+            # _shared/components/ is flat — only the basename of relpath applies
+            # (relpath is "components/<snake>.py"; strip the leading "components/").
+            basename = relpath.split("/", 1)[1] if "/" in relpath else relpath
+            shared_candidate = str(shared_components_root / basename)
+            shared_real = _os.path.realpath(shared_candidate)
+            if not shared_real.startswith(real_shared_root + _os.sep):
+                raise errors.CompilerError(
+                    f"component '{name}': resolved path '{shared_candidate}' "
+                    f"escapes _shared/components/ sandbox"
+                )
+            if io.is_file(shared_candidate):
+                shared_abs = shared_candidate
+
         line_num = next(
             (node.line for _, node in invocations if node.name == name), None
         )
-        if not io.is_file(abs_path):
+        if shared_abs is not None:
+            name_to_abspath[name] = shared_abs
+            continue
+
+        # Missing in both — raise with both probed paths listed.
+        if shared_components_root is not None:
+            shared_probed = str(shared_components_root / (
+                relpath.split("/", 1)[1] if "/" in relpath else relpath
+            ))
             raise errors.CompilerError(
-                f"component '{name}': expected file '{abs_path}' not found"
+                f"component '{name}': expected file not found at "
+                f"'{per_skill_abs}' nor at '{shared_probed}'"
                 + (f" (referenced at line {line_num})" if line_num else "")
             )
-        name_to_abspath[name] = abs_path
+        raise errors.CompilerError(
+            f"component '{name}': expected file '{per_skill_abs}' not found"
+            + (f" (referenced at line {line_num})" if line_num else "")
+        )
 
     source_cache: dict[str, str] = {}
     for name, abs_path in name_to_abspath.items():
@@ -641,9 +704,10 @@ def _compile_core(
     _lf_ver = lockfile.read_lockfile_version(_lockfile_path)
     if _lf_ver is not None and _lf_ver > lockfile._VERSION:
         log.warning(
-            "bmad.lock declares version %d; this compiler reads version 3. "
+            "bmad.lock declares version %d; this compiler reads version %d. "
             "Unknown fields will be preserved on write. Proceeding.",
             _lf_ver,
+            lockfile._VERSION,
         )
     # AC 6: override_root param overrides the default derivation (no implicit /custom suffix).
     # When `lockfile_root` is provided the caller is an install-phase or batch-mode runner
@@ -977,8 +1041,12 @@ def compile_skill(
     _fragment_body_scan(dep_tree, cache)
 
     skill_posix = io.to_posix(skill_dir)
+    # Story 10.58: thread lockfile_root → _discover_components so it can probe
+    # <install_root>/_shared/components/<snake>.py as a fallback. Per-skill
+    # probe still wins (intentional shadowing permitted); shared is consulted
+    # only when the per-skill file is absent.
     enriched_flat_nodes, compile_invocations, _jit_invocations = _discover_components(
-        flat_nodes, skill_posix
+        flat_nodes, skill_posix, install_root=lockfile_root
     )
 
     # Build ctx_dict for ComponentRunner.
@@ -1008,6 +1076,20 @@ def compile_skill(
         skill_posix / "components", names=_data_file_names
     )
 
+    # Story 10.58: scan _shared/components/ for non-.py data files. Independent
+    # namespace from per-skill _data_files_hash so per-skill changes do NOT
+    # over-invalidate cross-skill consumers (DN-2). Per-skill mode
+    # (lockfile_root=None): defaults to hash("[]") — see cache key contract.
+    if lockfile_root is not None:
+        _shared_components_dir = io.to_posix(lockfile_root) / "_shared" / "components"
+        _shared_data_file_names: list[str] = _list_data_files(_shared_components_dir)
+        ctx_dict["_shared_data_files_hash"] = _compute_data_files_hash(
+            _shared_components_dir, names=_shared_data_file_names
+        )
+    else:
+        _shared_data_file_names = []
+        ctx_dict["_shared_data_files_hash"] = io.hash_text("[]")
+
     # Story 10.52: construct cache for compile-mode component reuse (ARC-OQ-3).
     # Cache is only used when lockfile_root is known (install phase). Per-skill
     # standalone compiles (lockfile_root=None) run uncached to preserve test isolation.
@@ -1035,12 +1117,28 @@ def compile_skill(
             source_text_cache[abs_path] = io.read_template(abs_path)
         return source_text_cache[abs_path]
 
+    # Story 10.58: derive shared-components root for lockfile path detection.
+    _shared_root_str: str | None = None
+    if lockfile_root is not None:
+        _shared_root_str = str(io.to_posix(lockfile_root) / "_shared" / "components")
+
     component_records: list[dict[str, Any]] = []
     for inv in (n for n in enriched_flat_nodes if isinstance(n, EnrichedInvocation)):
         src = _get_component_source(inv.component_abs_path)
+        # Story 10.58: when the component resolved via _shared/ fallback, record
+        # `_shared/components/<snake>.py` in the lockfile so drift detection
+        # finds the actual file (per spec backward-compat matrix row 3).
+        _resolved_abs_posix = str(io.to_posix(inv.component_abs_path))
+        if (
+            _shared_root_str is not None
+            and _resolved_abs_posix.startswith(_shared_root_str + "/")
+        ):
+            _comp_path = "_shared/components/" + _resolved_abs_posix[len(_shared_root_str) + 1:]
+        else:
+            _comp_path = parser.component_name_to_path(inv.original.name)
         component_records.append({
             "name": inv.original.name,
-            "path": parser.component_name_to_path(inv.original.name),
+            "path": _comp_path,
             "source_hash": io.hash_text(src),
             "render_mode": inv.render_mode,
             "props": dict(inv.original.props),
@@ -1102,6 +1200,7 @@ def compile_skill(
         components=component_records,
         artifacts=artifacts_records,  # Story 10.25: FR-3
         deprecations=deprecations,    # Story 10.27: FR-13
+        shared_data_files=_shared_data_file_names,  # Story 10.58: v3→v4 field
         emit_fn=emit_fn,
     )
 

@@ -466,7 +466,7 @@ class TestLockfileIntegration(unittest.TestCase):
         self.assertTrue(self._lockfile.is_file(), "bmad.lock must exist after compile")
         import json
         data = json.loads(self._lockfile.read_text(encoding="utf-8"))
-        self.assertEqual(data["version"], 3)  # Story 10.26: bumped to v3
+        self.assertEqual(data["version"], 4)  # Story 10.58: bumped to v4
 
     def test_lockfile_secret_not_plaintext(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

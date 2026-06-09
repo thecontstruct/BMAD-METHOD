@@ -133,13 +133,18 @@ class TestWriteSkillEntry(unittest.TestCase):
             self.assertIsInstance(data, dict)
 
     def test_schema_version_is_3(self) -> None:
-        """Story 10.26: lockfile schema version bumped to 3."""
+        """Story 10.58: lockfile schema bumped to v4 (was v3 in Story 10.26).
+
+        Test name retained for historical continuity; assertion tracks current
+        _VERSION sentinel rather than a hard-coded literal so future bumps
+        update in one place.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = PurePosixPath(tmp)
             lf = str(root / "bmad.lock")
             _call_write(lf, root)
             data = json.loads(io.read_template(lf))
-            self.assertEqual(data["version"], 3)
+            self.assertEqual(data["version"], lockfile._VERSION)
 
     def test_compiled_at_is_sentinel_not_datetime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -410,8 +415,11 @@ class TestForwardCompat(unittest.TestCase):
 class TestVersionMismatch(unittest.TestCase):
 
     def test_version_mismatch_raises(self) -> None:
-        """write a v4 lockfile (future); compile should warn, not raise.
-        Story 10.26: updated fixture from v3→v4 now that _VERSION=3.
+        """write a future-version lockfile; compile should warn, not raise.
+
+        Story 10.58: bumped fixture from v4→v5 now that _VERSION=4. The point
+        of the test is the future-version path (declared > _VERSION) — fixture
+        version tracks _VERSION+1 so future bumps update in one place.
         """
         import pathlib
         import sys as _sys
@@ -420,6 +428,7 @@ class TestVersionMismatch(unittest.TestCase):
         if _scripts not in _sys.path:
             _sys.path.insert(0, _scripts)
         from bmad_compile import engine as _engine  # noqa: F811
+        future_version = lockfile._VERSION + 1
         fixture_scenario = (
             repo_root / "test" / "fixtures" / "compile" / "variable-resolution"
         )
@@ -427,7 +436,7 @@ class TestVersionMismatch(unittest.TestCase):
         try:
             lockfile_path.parent.mkdir(parents=True, exist_ok=True)
             lockfile_path.write_text(
-                json.dumps({"version": 4, "compiled_at": "1.0.0",
+                json.dumps({"version": future_version, "compiled_at": "1.0.0",
                             "bmad_version": "1.0.0", "entries": []}),
                 encoding="utf-8",
             )
@@ -438,7 +447,11 @@ class TestVersionMismatch(unittest.TestCase):
                     _engine.compile_skill(str(skill), tmp_out,
                                           component_runner=_MR(batch_results={}))
             self.assertTrue(
-                any("version 4" in msg or "version 3" in msg for msg in log_cm.output),
+                any(
+                    f"version {future_version}" in msg
+                    or f"version {lockfile._VERSION}" in msg
+                    for msg in log_cm.output
+                ),
                 f"Expected warning about version mismatch in: {log_cm.output}",
             )
         finally:

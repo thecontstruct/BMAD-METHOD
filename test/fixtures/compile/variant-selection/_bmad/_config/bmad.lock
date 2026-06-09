@@ -15,6 +15,7 @@
         }
       ],
       "glob_inputs": [],
+      "shared_data_files": [],
       "skill": "variant-skill",
       "source_hash": "d6916dc6e16247c1ac84cc2ae57908bca00b418c31c73dd6e2110792e5611658",
       "variables": [
@@ -28,5 +29,5 @@
       "variant": "cursor"
     }
   ],
-  "version": 3
+  "version": 4
 }

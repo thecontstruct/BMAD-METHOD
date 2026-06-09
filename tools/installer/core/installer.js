@@ -290,6 +290,7 @@ class Installer {
           // so shared fragments are materialized even on fresh installs where no migrated
           // skills are enumerated (skills.length === 0 path below).
           await this._copySharedRoot(paths);
+          await this._copySharedComponentsRoot(paths);
           const compilerHelper = require('../compiler/invoke-python');
           // R2 BH-6: enumerateMigratedSkills already walks the source tree;
           // the prior hasMigratedSkillsInScope preflight here was a redundant
@@ -561,6 +562,55 @@ class Installer {
         // POSIX-normalize tracked path to match Python lockfile path format.
         this.installedFiles.add(destFile.replaceAll('\\', '/'));
       }
+    }
+  }
+
+  /**
+   * Story 10.58 — copy src/_shared/components/ into <bmadDir>/_shared/components/.
+   * Mirrors _copyComponentFiles' blocklist (DN-4 = A) so per-skill components/
+   * and _shared/components/ have identical install-time filter semantics:
+   *   - Skips .DS_Store, .gitignore, *.pyc, __pycache__/ entries (build artifacts).
+   *   - Skips *.md (README.md is author guidance, not installable runtime content).
+   * Flat-only (no recursion) — subdirectory support deferred (DN-FOLLOWUP-E,
+   * mirrors Story 10.57 DN-4). No-op when src/_shared/components/ is absent
+   * (pre-10.58 state) or contains zero copyable files.
+   */
+  async _copySharedComponentsRoot(paths) {
+    const COPY_BLOCKLIST_NAMES = new Set(['.DS_Store', '.gitignore']);
+    const COPY_BLOCKLIST_SUFFIXES = ['.pyc', '.md'];
+    const COPY_BLOCKLIST_DIRS = new Set(['__pycache__']);
+
+    const sharedComponentsSrc = path.join(paths.srcDir, 'src', '_shared', 'components');
+    if (!(await fs.pathExists(sharedComponentsSrc))) return;
+    const sharedComponentsDest = path.join(paths.bmadDir, '_shared', 'components');
+
+    let entries;
+    try {
+      entries = await fs.readdir(sharedComponentsSrc, { withFileTypes: true });
+    } catch {
+      return; // unreadable dir — skip silently
+    }
+
+    const copyable = entries.filter(
+      (e) => e.isFile() && !COPY_BLOCKLIST_NAMES.has(e.name) && !COPY_BLOCKLIST_SUFFIXES.some((s) => e.name.endsWith(s)),
+    );
+    // Guard the directory creation: a tree containing only blocklisted entries
+    // (e.g. a stray __pycache__) must not produce an empty install dest.
+    if (copyable.length === 0) return;
+    // COPY_BLOCKLIST_DIRS is enforced by the .isFile() filter above (directories
+    // never copy), but the constant is named explicitly to keep the intent visible
+    // for future-maintainer scans grepping for blocklist semantics.
+    void COPY_BLOCKLIST_DIRS;
+
+    await fs.ensureDir(sharedComponentsDest);
+
+    for (const entry of copyable) {
+      const src = path.join(sharedComponentsSrc, entry.name);
+      const dest = path.join(sharedComponentsDest, entry.name);
+      await fs.copyFile(src, dest);
+      // POSIX-normalize tracked path to match Python lockfile path format
+      // (same convention as _copyMarkdownTreeRecursive).
+      this.installedFiles.add(dest.replaceAll('\\', '/'));
     }
   }
 

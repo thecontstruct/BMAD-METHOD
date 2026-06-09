@@ -452,7 +452,9 @@ class TestLockfileMigrationEvent(unittest.TestCase):
             self.assertEqual(len(migration), 1)
             ev = migration[0]
             self.assertEqual(ev["old_version"], 1)
-            self.assertEqual(ev["new_version"], 3)  # Story 10.26: _VERSION bumped to 3
+            # Story 10.58: _VERSION bumped to 4. Asserts against the sentinel
+            # so future bumps update in one place.
+            self.assertEqual(ev["new_version"], lockfile._VERSION)
             self.assertEqual(ev["skill_id"], "myskill")
             self.assertEqual(ev["new_component_names"], ["Bar", "Foo"])
 
@@ -469,9 +471,13 @@ class TestLockfileMigrationEvent(unittest.TestCase):
             )
 
     def test_g3_v2_lockfile_emits_v3_migration_event(self) -> None:
-        """Story 10.26: writing to a v2 lockfile emits a v2→v3 migration event.
-        (Previously: test_g3_no_event_for_v2_lockfile — when v2 was current, no event
-        fired. Now v3 is current so v2→v3 migration fires.)
+        """Story 10.58: writing to a v2 lockfile emits a v2→current migration event.
+
+        Per Story 10.26 this fired as v2→v3 with added_keys=[artifacts, deprecations];
+        Story 10.58 bumped current to v4 so the same v2 fixture still passes through
+        the v2→v3 migration block (the block is now bounded to v2 only after the v4
+        bump). The event shape ({kind, old_version, new_version, added_keys}) is
+        invariant; only `new_version` updates.
         """
         with tempfile.TemporaryDirectory() as tmp:
             lockfile_path = Path(tmp) / "scenario" / "_bmad" / "_config" / "bmad.lock"
@@ -486,11 +492,14 @@ class TestLockfileMigrationEvent(unittest.TestCase):
                 emit_fn=events.append,
             )
             migration = [e for e in events if e.get("kind") == "lockfile_schema_migration"]
-            # Exactly 1 v2→v3 migration event (v1→v2 block is tightened to v1 only).
-            self.assertEqual(len(migration), 1)
-            ev = migration[0]
-            self.assertEqual(ev["old_version"], 2)
-            self.assertEqual(ev["new_version"], 3)
+            # v2 lockfile triggers both v2→v3 (artifacts/deprecations) and
+            # implicit v3→v4 (shared_data_files) shape upgrades when migrating
+            # past v3. We expect at least the v2→v3 event present.
+            self.assertGreaterEqual(len(migration), 1)
+            v2_to_v3 = [e for e in migration if e.get("old_version") == 2]
+            self.assertEqual(len(v2_to_v3), 1)
+            ev = v2_to_v3[0]
+            self.assertEqual(ev["new_version"], lockfile._VERSION)
             self.assertIn("added_keys", ev)
             self.assertIn("artifacts", ev["added_keys"])
             self.assertIn("deprecations", ev["added_keys"])

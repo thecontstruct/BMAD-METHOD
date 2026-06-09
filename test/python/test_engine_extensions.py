@@ -368,7 +368,11 @@ class TestLockfileV3(unittest.TestCase):
         return io.to_posix(tmp)
 
     def test_lockfile_v3_top_level_version(self) -> None:
-        """New lockfile write produces version: 3 at top level."""
+        """New lockfile write produces lockfile._VERSION at top level.
+
+        Story 10.58: bumped from 3 → 4. Asserts against the current sentinel
+        so future bumps update in one place.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             scenario_root = self._scenario_root(tmp)
             lf_path = self._lf_path(tmp)
@@ -380,7 +384,7 @@ class TestLockfileV3(unittest.TestCase):
                 target_ide=None, cache=_empty_cache(),
             )
             data = json.loads(Path(lf_path).read_text(encoding="utf-8"))
-            self.assertEqual(data["version"], 3)
+            self.assertEqual(data["version"], lockfile._VERSION)
 
     def test_lockfile_v3_entry_has_artifacts_and_deprecations(self) -> None:
         """New write adds artifacts: [] and deprecations: [] to entry."""
@@ -426,7 +430,8 @@ class TestLockfileV3(unittest.TestCase):
                 target_ide=None, cache=_empty_cache(),
             )
             data = json.loads(Path(lf_path).read_text(encoding="utf-8"))
-            self.assertEqual(data["version"], 3)
+            # Story 10.58: v2 → current (whichever the current version is).
+            self.assertEqual(data["version"], lockfile._VERSION)
             # Both old and new entries must have artifacts/deprecations.
             for entry in data["entries"]:
                 self.assertIn("artifacts", entry,

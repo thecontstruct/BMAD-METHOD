@@ -1,11 +1,13 @@
-"""Layer 7 — lockfile v3 writer.
+"""Layer 7 — lockfile v4 writer.
 
 Emits ``_bmad/_config/bmad.lock`` after each successful compile. The file
 is JSON (not YAML) — ``json.dumps(sort_keys=True, indent=2)`` — because the
 Python port is stdlib-only and ``pyyaml`` is banned. JSON is a strict subset
 of YAML so downstream tools that parse YAML can read it.
 
-Schema v3 example::
+Schema v4 example (Story 10.58 adds optional skill-level
+``shared_data_files: list[str]`` field; v3 readers ignoring unknown
+skill-level keys remain wire-compatible)::
 
     {
       "bmad_version": "1.0.0",
@@ -53,7 +55,7 @@ from typing import Any, Callable
 from . import errors, io, resolver
 from .io import PurePosixPath
 
-_VERSION = 3  # Story 10.26: v3 adds artifacts: [] and deprecations: [] per skill entry
+_VERSION = 4  # Story 10.58: v4 adds optional skill-level `shared_data_files: []` field
 _BMAD_VERSION = "1.0.0"  # deterministic sentinel — never wall-clock
 
 
@@ -192,6 +194,7 @@ def _build_skill_entry(
     components: list[dict] | None = None,
     artifacts: list[dict[str, Any]] | None = None,   # Story 10.26: v3 field
     deprecations: list[dict[str, Any]] | None = None, # Story 10.26: v3 field
+    shared_data_files: list[str] | None = None,      # Story 10.58: v4 field
 ) -> dict[str, Any]:
     source_hash = io.hash_text(source_text)
     compiled_hash = io.hash_text(compiled_text)
@@ -287,6 +290,7 @@ def _build_skill_entry(
         "deprecations": deprecations if deprecations is not None else [], # Story 10.26: v3
         "fragments": fragments,
         "glob_inputs": glob_inputs,  # pragma: allow-raw-io
+        "shared_data_files": shared_data_files if shared_data_files is not None else [],  # Story 10.58: v4
         "skill": skill_basename,
         "source_hash": source_hash,
         "variant": target_ide,
@@ -309,6 +313,7 @@ def write_skill_entry(
     components: list[dict] | None = None,
     artifacts: list[dict[str, Any]] | None = None,   # Story 10.26: v3 field
     deprecations: list[dict[str, Any]] | None = None, # Story 10.26: v3 field
+    shared_data_files: list[str] | None = None,      # Story 10.58: v4 field
     emit_fn: "Callable[[dict], None] | None" = None,
 ) -> None:
     """Write (or update) the skill entry in the lockfile at ``lockfile_path``.
@@ -350,6 +355,7 @@ def write_skill_entry(
             components=components,
             artifacts=artifacts,        # Story 10.26: v3 field
             deprecations=deprecations,  # Story 10.26: v3 field
+            shared_data_files=shared_data_files,  # Story 10.58: v4 field
             emit_fn=emit_fn,
         )
     finally:
@@ -378,6 +384,7 @@ def _do_write_skill_entry(
     components: list[dict] | None = None,
     artifacts: list[dict[str, Any]] | None = None,   # Story 10.26: v3 field
     deprecations: list[dict[str, Any]] | None = None, # Story 10.26: v3 field
+    shared_data_files: list[str] | None = None,      # Story 10.58: v4 field
     emit_fn: "Callable[[dict], None] | None" = None,
 ) -> None:
     """Internal: the original RMW body, now called inside the AC-2 lock.
@@ -419,9 +426,10 @@ def _do_write_skill_entry(
             pass  # emit_fn errors MUST NOT propagate into the write path
 
     # Story 10.26: v2→v3 migration — emit event when upgrading a v2 lockfile.
+    # Tightened to a v2-only check; v3→v4 handled below.
     _needs_v3_migration = (
         isinstance(_current_version, int)
-        and 2 <= _current_version < _VERSION
+        and 2 <= _current_version < 3
     )
     if _needs_v3_migration and emit_fn is not None:
         try:
@@ -431,6 +439,23 @@ def _do_write_skill_entry(
                 "new_version": _VERSION,
                 "skill_id": skill_basename,
                 "added_keys": ["artifacts", "deprecations"],
+            })
+        except Exception:
+            pass  # emit_fn errors MUST NOT propagate into the write path
+
+    # Story 10.58: v3→v4 migration — emit event when upgrading a v3 lockfile.
+    _needs_v4_migration = (
+        isinstance(_current_version, int)
+        and 3 <= _current_version < _VERSION
+    )
+    if _needs_v4_migration and emit_fn is not None:
+        try:
+            emit_fn({
+                "kind": "lockfile_schema_migration",
+                "old_version": _current_version,
+                "new_version": _VERSION,
+                "skill_id": skill_basename,
+                "added_keys": ["shared_data_files"],
             })
         except Exception:
             pass  # emit_fn errors MUST NOT propagate into the write path
@@ -479,6 +504,7 @@ def _do_write_skill_entry(
         components=components,
         artifacts=artifacts,        # Story 10.26: v3 field
         deprecations=deprecations,  # Story 10.26: v3 field
+        shared_data_files=shared_data_files,  # Story 10.58: v4 field
     )
 
     # Story 5.3: carry forward lineage for override-tier fragments.
@@ -561,6 +587,12 @@ def _do_write_skill_entry(
     # only — non-dict corruption (null, int, str, list at the entry level)
     # is opportunistically removed.
     entries: list[Any] = [e for e in raw_list if isinstance(e, dict)]
+
+    # Story 10.58: v3→v4 migration — add empty shared_data_files to pre-v4 entries.
+    if _needs_v3_migration or _needs_v4_migration:
+        for _e in entries:
+            if isinstance(_e, dict) and "shared_data_files" not in _e:
+                _e["shared_data_files"] = []
 
     # Story 10.26: v2→v3 migration — add empty artifacts/deprecations to pre-v3 entries.
     if _needs_v3_migration:
