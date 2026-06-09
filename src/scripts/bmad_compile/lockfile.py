@@ -443,10 +443,14 @@ def _do_write_skill_entry(
         except Exception:
             pass  # emit_fn errors MUST NOT propagate into the write path
 
-    # Story 10.58: v3→v4 migration — emit event when upgrading a v3 lockfile.
+    # Story 10.58: v3→v4 migration — emit event when upgrading any pre-v4 lockfile.
+    # Lower bound includes v2 so a v2→v4 jump emits both the v3 and v4 events
+    # (per-version observability; the migration block below already runs on the
+    # combined gate). R3 acceptance audit promoted R1.1 — the pre-fix gate of
+    # `3 <= current < _VERSION` silently dropped the v4 event for v2 lockfiles.
     _needs_v4_migration = (
         isinstance(_current_version, int)
-        and 3 <= _current_version < _VERSION
+        and 2 <= _current_version < _VERSION
     )
     if _needs_v4_migration and emit_fn is not None:
         try:

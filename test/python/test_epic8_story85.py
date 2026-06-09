@@ -493,16 +493,30 @@ class TestLockfileMigrationEvent(unittest.TestCase):
             )
             migration = [e for e in events if e.get("kind") == "lockfile_schema_migration"]
             # v2 lockfile triggers both v2→v3 (artifacts/deprecations) and
-            # implicit v3→v4 (shared_data_files) shape upgrades when migrating
-            # past v3. We expect at least the v2→v3 event present.
+            # v2→v4 (shared_data_files) shape-upgrade events when migrating
+            # past v3. Both events emit with old_version=2 (the starting
+            # version); differentiate by added_keys content. R3 acceptance
+            # audit gate on R1.1 — the pre-fix v4 gate of
+            # `3 <= current < _VERSION` silently dropped the v4 event for
+            # v2 lockfiles.
             self.assertGreaterEqual(len(migration), 1)
-            v2_to_v3 = [e for e in migration if e.get("old_version") == 2]
-            self.assertEqual(len(v2_to_v3), 1)
-            ev = v2_to_v3[0]
+            v3_events = [
+                e for e in migration
+                if e.get("old_version") == 2
+                and "artifacts" in (e.get("added_keys") or [])
+            ]
+            self.assertEqual(len(v3_events), 1)
+            ev = v3_events[0]
             self.assertEqual(ev["new_version"], lockfile._VERSION)
             self.assertIn("added_keys", ev)
             self.assertIn("artifacts", ev["added_keys"])
             self.assertIn("deprecations", ev["added_keys"])
+            v4_events = [
+                e for e in migration
+                if e.get("old_version") == 2
+                and "shared_data_files" in (e.get("added_keys") or [])
+            ]
+            self.assertEqual(len(v4_events), 1)
 
     def test_g4_no_event_when_emit_fn_none(self) -> None:
         # Default emit_fn=None must produce no exception and no event.
