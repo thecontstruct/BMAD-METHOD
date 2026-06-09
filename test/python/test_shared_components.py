@@ -874,6 +874,41 @@ class TestGroupHArtifactPath:
             == f"{self.DEFAULT_IA}/sprint-status.yaml"
         )
 
+    def test_h15_explicit_none_props_degrade_to_empty_string(self):
+        """H-15 (R3 acceptance audit, R1.2/R2-1 promoted): explicit None props
+        must NOT interpolate "None" into the path. Reproduces a silent data
+        corruption mode the original `if "K" in props:` check missed.
+        """
+        # kind=story with None story_key → fall through to epic+story → "" (no epic)
+        assert _artifact_path_render(kind="story", story_key=None) == ""
+        # kind=story with None epic / None story (no story_key) → ""
+        assert _artifact_path_render(kind="story", epic=None, story="2") == ""
+        assert _artifact_path_render(kind="story", epic="1", story=None) == ""
+        # kind=epic-key with None epic → ""
+        assert _artifact_path_render(kind="epic-key", epic=None) == ""
+        # kind=retro with None epic → ""
+        assert _artifact_path_render(kind="retro", epic=None) == ""
+        # kind=retro with epic + None date → unresolved {date} placeholder
+        assert (
+            _artifact_path_render(kind="retro", epic="10", date=None)
+            == f"{self.DEFAULT_IA}/epic-10-retro-" + "{date}.md"
+        )
+
+    def test_h16_explicit_empty_string_props_degrade_to_empty_string(self):
+        """H-16 (R3 acceptance audit, R1.2/R2-1 promoted): explicit "" props
+        must NOT produce "{ia}/.md" or "epic-" path fragments.
+        """
+        assert _artifact_path_render(kind="story", story_key="") == ""
+        assert _artifact_path_render(kind="story", epic="", story="2") == ""
+        assert _artifact_path_render(kind="story", epic="1", story="") == ""
+        assert _artifact_path_render(kind="epic-key", epic="") == ""
+        assert _artifact_path_render(kind="retro", epic="") == ""
+        # Empty date falls back to the unresolved placeholder.
+        assert (
+            _artifact_path_render(kind="retro", epic="10", date="")
+            == f"{self.DEFAULT_IA}/epic-10-retro-" + "{date}.md"
+        )
+
     def test_h14_source_change_invalidates_consumer_cache(self, tmp_path):
         """H-14: changes to artifact_path.py source bust every consumer's cache.
 

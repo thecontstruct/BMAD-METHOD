@@ -42,23 +42,32 @@ def render(ctx, **props):
     pa = config.get("planning_artifacts", "_bmad-output/planning-artifacts")
     kind = props.get("kind", "")
 
+    # Truthy checks (not `in props`) so explicit None / "" props degrade to the
+    # missing-prop branch instead of interpolating "None" / "" into the path.
+    # R3 acceptance audit promoted R1.2/R2-1 — silent string corruption when a
+    # template variable resolves to None or empty would emit e.g. "{ia}/None.md".
     if kind == "story":
-        if "story_key" in props:
-            return f"{ia}/{props['story_key']}.md"
-        if "epic" in props and "story" in props:
-            return f"{ia}/{props['epic']}-{props['story']}-*.md"
+        story_key = props.get("story_key")
+        if story_key:
+            return f"{ia}/{story_key}.md"
+        epic = props.get("epic")
+        story = props.get("story")
+        if epic and story:
+            return f"{ia}/{epic}-{story}-*.md"
         return ""  # missing required prop
     if kind == "sprint-status":
         return f"{ia}/sprint-status.yaml"
     if kind == "epic-key":
-        if "epic" not in props:
+        epic = props.get("epic")
+        if not epic:
             return ""
-        return f"epic-{props['epic']}"
+        return f"epic-{epic}"
     if kind == "retro":
-        if "epic" not in props:
+        epic = props.get("epic")
+        if not epic:
             return ""
-        date = props.get("date", "{date}")
-        return f"{ia}/epic-{props['epic']}-retro-{date}.md"
+        date = props.get("date") or "{date}"
+        return f"{ia}/epic-{epic}-retro-{date}.md"
     if kind in ("prd", "epics", "architecture", "ux"):
         return f"{pa}/*{kind}*.md"
     return ""  # unknown kind
