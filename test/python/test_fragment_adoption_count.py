@@ -9,6 +9,11 @@ byte-equivalent adoption gap (bmad-prfaq).
 Ratcheting baseline at story commit:
   - resolver-fallback adoption: 24 (= 23 pre-story + bmad-prfaq)
   - persistent-facts  adoption: 10 (= 9  pre-story + bmad-prfaq)
+
+Story 10.60 ratchet update:
+  - resolver-fallback: 24 → 23 (bmad-create-architecture.template.md dropped;
+    bmad-architecture.template.md follows upstream design with inline abbreviated
+    fallback, not the <<include>> fragment — legitimate structural divergence)
 """
 from __future__ import annotations
 
@@ -47,21 +52,31 @@ def _read(path: Path) -> str:
 
 
 def test_e1_resolver_fallback_adoption_ratchet() -> None:
-    """E-1: resolver-fallback include adoption >= 24 (Story 10.59 baseline)."""
+    """E-1: resolver-fallback include adoption >= 23 (Story 10.60 baseline).
+
+    Dropped from 24 to 23: bmad-create-architecture.template.md removed (Story 10.60
+    Path 2); replacement bmad-architecture.template.md uses upstream's abbreviated
+    inline fallback, not the <<include>> fragment.
+    """
     hits = [p for p in _all_templates() if RESOLVER_FALLBACK_INCLUDE_PREFIX in _read(p)]
-    assert len(hits) >= 24, (
+    assert len(hits) >= 23, (
         f"Resolver-fallback adoption regressed: found {len(hits)} templates including "
-        f"resolver-fallback.md, expected >= 24. Did a template hand-roll the Step 1 "
+        f"resolver-fallback.md, expected >= 23. Did a template hand-roll the Step 1 "
         f"fallback inline instead of using the include?"
     )
 
 
 def test_e2_persistent_facts_adoption_ratchet() -> None:
-    """E-2: persistent-facts include adoption >= 10 (Story 10.59 baseline)."""
+    """E-2: persistent-facts include adoption >= 9 (Story 10.60 baseline).
+
+    Dropped from 10 to 9: bmad-create-architecture.template.md removed (Story 10.60
+    Path 2); replacement bmad-architecture.template.md uses upstream's abbreviated
+    inline persistent_facts reference, not the <<include>> fragment.
+    """
     hits = [p for p in _all_templates() if PERSISTENT_FACTS_INCLUDE_PREFIX in _read(p)]
-    assert len(hits) >= 10, (
+    assert len(hits) >= 9, (
         f"Persistent-facts adoption regressed: found {len(hits)} templates including "
-        f"persistent-facts.md, expected >= 10. Did a template hand-roll the Step 3 "
+        f"persistent-facts.md, expected >= 9. Did a template hand-roll the Step 3 "
         f"body inline instead of using the include?"
     )
 
