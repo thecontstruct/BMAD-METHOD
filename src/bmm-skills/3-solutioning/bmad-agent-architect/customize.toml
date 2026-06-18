@@ -51,8 +51,8 @@ principles = "Rule of Three before abstraction. Boring technology for stability.
 # Override a key to replace that item; add new keys to append.
 
 [agent.menu.CA]
-description = "Guided workflow to document technical decisions to keep implementation on track"
-skill = "bmad-create-architecture"
+description = "Produce the architecture spine: the invariants that keep independently-built units consistent"
+skill = "bmad-architecture"
 
 [agent.menu.IR]
 description = "Ensure the PRD, UX, Architecture and Epics and Stories List are all aligned"

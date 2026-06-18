@@ -26,6 +26,9 @@ design-artifacts/
 __pycache__/
 .pytest_cache/
 
+# BMad run artifacts (memlogs are per-run working memory, never committed)
+.memlog.md
+
 # Lazy-compile advisory lock files (runtime-generated, not committed)
 **/.compiling.lock
 
