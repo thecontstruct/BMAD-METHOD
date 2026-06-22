@@ -4,7 +4,7 @@
   "entries": [
     {
       "artifacts": [],
-      "compiled_hash": "19562dcb4a79aeae393e38bfe2bb9f846d7b6a1e0254558c1ae5c7a3c748a5f5",
+      "compiled_hash": "f9b1d99b645015c43169d28de731493498621424210b5b9a9f42244384896a6d",
       "components": [],
       "deprecations": [],
       "fragments": [
@@ -12,12 +12,17 @@
           "hash": "3294252ca3c457e6a32da5482494ff9e384aaa198841525ac140413bb45135b0",
           "path": "core/variant-skill/fragments/note.cursor.template.md",
           "resolved_from": "variant"
+        },
+        {
+          "hash": "21f9fc259ef6102ff68571210517fb41190b867704404e4dfa5d9e701ddd02e5",
+          "path": "core/variant-skill/fragments/sub-agent-activation.cursor.template.md",
+          "resolved_from": "variant"
         }
       ],
       "glob_inputs": [],
       "shared_data_files": [],
       "skill": "variant-skill",
-      "source_hash": "d6916dc6e16247c1ac84cc2ae57908bca00b418c31c73dd6e2110792e5611658",
+      "source_hash": "c5d05c84be43b015c3ebea56906d212d6d2844396782cf8159a0b7fdeb18147f",
       "variables": [
         {
           "name": "user_name",

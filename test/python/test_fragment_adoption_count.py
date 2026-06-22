@@ -106,3 +106,57 @@ def test_e4_bmad_prfaq_carries_both_includes() -> None:
     assert '<<include path="_shared/fragments/persistent-facts.md">>' in body, (
         "bmad-prfaq.template.md is missing the persistent-facts include — Story 10.59 Edit 2 regressed."
     )
+
+
+# ---------------------------------------------------------------------------
+# Story 10.61 — Sub-agent activation fragment adoption ratchet
+# ---------------------------------------------------------------------------
+
+_SHARED_FRAGMENTS = REPO_ROOT / "src" / "_shared" / "fragments"
+
+_SUB_AGENT_INCLUDE_PREFIX = '<<include path="_shared/fragments/sub-agent-activation.template.md"'
+
+_IN_SCOPE_CONSUMERS: list[Path] = [
+    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "step-03-implement.template.md",
+    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "step-04-review.template.md",
+    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "step-oneshot.template.md",
+    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-code-review" / "step-02-review.template.md",
+]
+
+_OLD_BOILERPLATE_SNIPPETS: list[str] = [
+    "If no sub-agents are available, implement directly.",
+    "If no sub-agents are available, generate three review prompt files",
+    "If no sub-agents are available, write the changed files to a review prompt file",
+    "If subagents are not available, generate prompt files",
+]
+
+
+class TestSubAgentActivationFragment:
+    """Story 10.61 — sub-agent-activation fragment existence and adoption."""
+
+    def test_fragment_files_exist(self) -> None:
+        for suffix in ("", ".claudecode", ".cursor"):
+            p = _SHARED_FRAGMENTS / f"sub-agent-activation{suffix}.template.md"
+            assert p.exists(), f"Fragment missing: {p.relative_to(REPO_ROOT)}"
+
+    def test_all_consumers_carry_include(self) -> None:
+        missing = [
+            str(p.relative_to(REPO_ROOT))
+            for p in _IN_SCOPE_CONSUMERS
+            if _SUB_AGENT_INCLUDE_PREFIX not in _read(p)
+        ]
+        assert not missing, (
+            f"Consumers missing sub-agent-activation include: {missing}. "
+            "Each must contain `<<include path=\"_shared/fragments/sub-agent-activation.template.md\" ...>>`."
+        )
+
+    def test_no_consumer_has_old_boilerplate(self) -> None:
+        offenders: list[str] = []
+        for p in _IN_SCOPE_CONSUMERS:
+            body = _read(p)
+            for snippet in _OLD_BOILERPLATE_SNIPPETS:
+                if snippet in body:
+                    offenders.append(f"{p.relative_to(REPO_ROOT)}: found {snippet!r}")
+        assert not offenders, (
+            f"Consumers still contain hand-rolled sub-agent boilerplate: {offenders}"
+        )

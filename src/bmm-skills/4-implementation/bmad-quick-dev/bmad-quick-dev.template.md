@@ -1,6 +1,16 @@
 ---
 name: bmad-quick-dev
 description: 'Implements any user intent, requirement, story, bug fix or change request by producing clean working code artifacts that follow the project''s existing architecture, patterns and conventions. Use when the user wants to build, fix, tweak, refactor, add or modify any code, component or feature.'
+artifacts:
+  - path: step-03-implement.md
+    source: step-03-implement.template.md
+    kind: step-template
+  - path: step-04-review.md
+    source: step-04-review.template.md
+    kind: step-template
+  - path: step-oneshot.md
+    source: step-oneshot.template.md
+    kind: step-template
 ---
 
 # Quick Dev New Preview Workflow — <TodaysDate />

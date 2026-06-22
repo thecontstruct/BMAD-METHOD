@@ -6,8 +6,8 @@ artifacts:
     source: steps/step-01-gather-context.md
     kind: scaffold-verbatim
   - path: steps/step-02-review.md
-    source: steps/step-02-review.md
-    kind: scaffold-verbatim
+    source: step-02-review.template.md
+    kind: step-template
   - path: steps/step-03-triage.md
     source: steps/step-03-triage.md
     kind: scaffold-verbatim

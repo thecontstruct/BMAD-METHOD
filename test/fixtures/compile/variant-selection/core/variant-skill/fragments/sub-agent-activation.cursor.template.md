@@ -1,0 +1,1 @@
+- **Inline (Cursor):** Cursor's Composer Agent has no native child-agent dispatch primitive. Execute the action inline in the current agent context: {{spawn_action}} If the inline action is unavailable, then: {{fallback_action}}

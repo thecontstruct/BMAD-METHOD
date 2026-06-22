@@ -1,0 +1,2 @@
+- **Preferred — sub-agent:** {{spawn_action}}
+- **Fallback — inline** (for runtimes without sub-agent support, e.g. Copilot, Codex, local Ollama, older Claude): {{fallback_action}}

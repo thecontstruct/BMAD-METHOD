@@ -418,6 +418,16 @@ class TestVariantSelectionFixtures(unittest.TestCase):
             out = Path(tmp) / "variant-skill" / "SKILL.md"
             self.assertEqual(out.read_bytes(), self._expected("universal-SKILL.md"))
 
+    def test_sub_agent_activation_variants_distinct(self) -> None:
+        # AC-14 (Story 10.61): universal, claudecode, and cursor expected outputs are
+        # all byte-distinct (the sub-agent-activation fragment has truly different text).
+        universal = self._expected("universal-SKILL.md")
+        claudecode = self._expected("claudecode-SKILL.md")
+        cursor = self._expected("cursor-SKILL.md")
+        self.assertNotEqual(universal, claudecode, "universal and claudecode SKILL.md must differ")
+        self.assertNotEqual(universal, cursor, "universal and cursor SKILL.md must differ")
+        self.assertNotEqual(claudecode, cursor, "claudecode and cursor SKILL.md must differ")
+
 
 class TestCliErrorBoundary(unittest.TestCase):
     """Story 1.4 AC 6 — CLI catches raw OS / encoding exceptions."""
