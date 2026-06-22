@@ -19,6 +19,14 @@ Story 1.3 will wire in variable interpolation, Story 1.4 multi-IDE
 directory-convention module discovery for install-phase mode
 (`lockfile_root` not None); per-skill mode (`lockfile_root=None`)
 preserves Story 1.2 hardcoded-`core` routing for backward compat.
+Story 10.25: FR-3 multi-artifact frontmatter — `kind: scaffold-verbatim`
+copies bytes verbatim; `kind: step-template` (Story 10.63) runs the full
+parse + resolve + component-dispatch pipeline on the step file, sharing
+the root template's `ResolveContext` and `CompileCache`. All step-templates
+in a skill compile in a single `runner.run_compile_batch` call (one Python
+subprocess round-trip per skill regardless of root count); token indices
+are rebased per-root so the combined invocation buffer has unique keys.
+FR-1.7 applies to each root's included fragments, not to the root body.
 This module routes every filesystem/hash/time concern through `io`.
 """
 
@@ -27,7 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterable, Literal
 
 from . import errors, io, lockfile, parser, resolver, toml_merge, variants
@@ -58,10 +66,15 @@ class EnrichedInvocation:
 
 @dataclass(frozen=True)
 class Artifact:
-    """Story 10.25: FR-3 multi-artifact frontmatter declaration."""
+    """Story 10.25: FR-3 multi-artifact frontmatter declaration.
+
+    kind="scaffold-verbatim" copies source bytes verbatim.
+    kind="step-template" (Story 10.63) runs the full parse + resolve +
+    component-dispatch pipeline; source must end with '.template.md'.
+    """
     path: str    # install-dir-relative POSIX path
     source: str  # skill_dir-relative POSIX path
-    kind: Literal["scaffold-verbatim"]
+    kind: Literal["scaffold-verbatim", "step-template"]
 
 
 def _extract_artifacts_from_frontmatter(source: str) -> "list[Artifact]":
@@ -109,17 +122,180 @@ def _extract_artifacts_from_frontmatter(source: str) -> "list[Artifact]":
                 f"frontmatter `artifacts:` entry must be a dict, got {type(entry).__name__!r}"
             )
         kind = entry.get("kind")
-        if kind != "scaffold-verbatim":
+        if kind not in ("scaffold-verbatim", "step-template"):
             raise errors.CompilerError(
                 f"frontmatter artifact `kind` {kind!r} is not supported"
-                " (only 'scaffold-verbatim' is valid in Epic 10 scope)"
+                " (valid kinds: 'scaffold-verbatim', 'step-template')"
+            )
+        _source = str(entry["source"])
+        if kind == "step-template" and not _source.endswith(".template.md"):
+            raise errors.CompilerError(
+                f"step-template source {_source!r} must end with '.template.md'; "
+                "rename the source file or change kind to scaffold-verbatim"
             )
         result.append(Artifact(
             path=str(entry["path"]),
-            source=str(entry["source"]),
-            kind="scaffold-verbatim",
+            source=_source,
+            kind=kind,
         ))
     return result
+
+
+def _resolve_step_template_source(
+    skill_dir: "io.PurePosixPath",
+    declared_source: str,
+    target_ide: "str | None",
+) -> "tuple[io.PurePosixPath, str | None]":
+    """Select the best IDE variant for a step-template source file.
+
+    Mirrors root-template variant selection in _compile_core. Lives here
+    rather than in resolver.py or variants.py because both modules are
+    frozen for Story 10.63. Returns (resolved_path, bare_ide_name_or_None).
+    bare_ide_name is "cursor", "claudecode", or None for the universal variant.
+    """
+    stem = declared_source[: -len(variants.TEMPLATE_SUFFIX)]
+
+    try:
+        all_entries = io.list_files_sorted(str(skill_dir))
+    except Exception:
+        all_entries = []
+
+    candidates: list[io.PurePosixPath] = []
+    for entry in all_entries:
+        name = entry.name
+        if name == declared_source:
+            candidates.append(entry)
+        elif name.endswith(variants.TEMPLATE_SUFFIX):
+            m = variants._IDE_SUFFIX_RE.match(name)
+            if m and m.group("base") == stem:
+                candidates.append(entry)
+
+    selected = variants.select_variant(candidates, target_ide)
+
+    if selected is None:
+        _found_ides: list[str] = []
+        for c in candidates:
+            m_ide = variants._IDE_SUFFIX_RE.match(c.name)
+            if m_ide:
+                _found_ides.append(m_ide.group("ide"))
+        _found_ides.sort()
+        if not candidates:
+            raise errors.CompilerError(
+                f"STEP_TEMPLATE_NO_VARIANT: no '*.template.md' found for "
+                f"step-template source {declared_source!r} in '{skill_dir}'",
+                hint=f"Create '{declared_source}' in the skill directory.",
+            )
+        raise errors.CompilerError(
+            f"STEP_TEMPLATE_NO_VARIANT: no universal '*.template.md' found for "
+            f"step-template source {declared_source!r}. "
+            f"Found step-template variants for: {', '.join(_found_ides)}. "
+            f"Use --tools <ide> to select one.",
+            hint=f"Create '{declared_source}' as a universal fallback or use --tools <ide>.",
+        )
+
+    m_check = variants._IDE_SUFFIX_RE.match(selected.name)
+    bare_ide: str | None = None
+    if m_check and m_check.group("ide") in variants.KNOWN_IDES:
+        bare_ide = m_check.group("ide")
+
+    return selected, bare_ide
+
+
+def _process_step_template(
+    artifact: "Artifact",
+    context: "resolver.ResolveContext",
+    cache: "resolver.CompileCache",
+    target_ide: "str | None",
+    skill_posix: "io.PurePosixPath",
+    lockfile_root: "io.PathLike | None",
+    token_offset: int,
+) -> "tuple[list, list[EnrichedInvocation], list[EnrichedInvocation], str | None, str, str, int]":
+    """Process one step-template artifact through the full compile pipeline.
+
+    Each step-template is a compile root (parallel to SKILL.md), not a
+    fragment. FR-1.7 applies to fragments included BY the step-template
+    (dep_tree[1:]), not to the step-template body itself (dep_tree[0]).
+
+    Token indices in the returned nodes and invocations are rebased by
+    token_offset so the combined invocation list across all roots has unique
+    buffer keys (DN-TOKEN-INDEX-REMAP r1). The caller accumulates offsets:
+    pass (max_token_index + 1) as the next step-template's token_offset.
+
+    Returns (enriched_flat_nodes, compile_invocations, jit_invocations,
+             bare_ide_name, source_text, source_hash, max_token_index).
+    """
+    # Path safety: reject unsafe artifact.path before any filesystem work (AC-14).
+    _path_segs = artifact.path.split("/")
+    if (
+        artifact.path.startswith("/")
+        or any(seg == ".." for seg in _path_segs)
+        or (len(_path_segs[0]) >= 2 and _path_segs[0][1] == ":")
+    ):
+        raise errors.CompilerError(
+            f"artifact path {artifact.path!r} is not a safe relative POSIX path"
+        )
+
+    # Variant selection on step-template source (DN-VARIANT-METADATA-LOCKED r1).
+    source_path, bare_ide = _resolve_step_template_source(
+        skill_posix, artifact.source, target_ide
+    )
+
+    # Read, parse, resolve through the shared ResolveContext and CompileCache.
+    step_source = io.read_template(str(source_path))
+    step_relative_path = f"{skill_posix.name}/{source_path.name}"
+    step_parsed = parser.parse(step_source, step_relative_path)
+    step_flat, step_dep_tree = resolver.resolve(
+        step_parsed,
+        context,
+        cache,
+        root_src=step_relative_path,
+        root_path=source_path,
+        root_source=step_source,
+    )
+
+    # FR-1.7 on fragments included by this step-template (dep_tree[1:] only;
+    # dep_tree[0] is the step-template body itself — component tags allowed).
+    _fragment_body_scan(step_dep_tree, cache)
+
+    # Component discovery for this step-template root.
+    enriched, compile_invs, jit_invs = _discover_components(
+        step_flat, skill_posix, install_root=lockfile_root
+    )
+
+    # Rebase token indices by offset so the combined invocation list across all
+    # roots has unique buffer keys (DN-TOKEN-INDEX-REMAP r1).
+    rebased_enriched: list[Any] = []
+    rebased_compile: list[EnrichedInvocation] = []
+    rebased_jit: list[EnrichedInvocation] = []
+    _max_ti = token_offset - 1
+
+    for node in enriched:
+        if isinstance(node, EnrichedInvocation):
+            new_ti = node.token_index + token_offset
+            new_inv = replace(node, token_index=new_ti)
+            rebased_enriched.append(new_inv)
+            if new_ti > _max_ti:
+                _max_ti = new_ti
+            if new_inv.render_mode == "compile":
+                rebased_compile.append(new_inv)
+            else:
+                rebased_jit.append(new_inv)
+        else:
+            rebased_enriched.append(node)
+
+    # Fallback max_ti when the step-template has no component invocations.
+    if _max_ti < token_offset:
+        _max_ti = token_offset + max(len(step_flat) - 1, 0)
+
+    return (
+        rebased_enriched,
+        rebased_compile,
+        rebased_jit,
+        bare_ide,
+        step_source,
+        io.hash_text(step_source),
+        _max_ti,
+    )
 
 
 def _strip_string_and_comment_tokens(source: str) -> str:
@@ -655,8 +831,10 @@ def _compile_core(
     str,                                 # lockfile_path
     io.PurePosixPath,                    # output_path (computed pre-render for explain)
     str | None,                          # target_ide (passed through unchanged from caller)
-    list[tuple[str, dict[str, Any]]],   # _toml_layers (NEW [10]) — [(layer_name, raw_dict)]
-    list[str],                           # _toml_layer_paths (NEW [11]) — parallel paths list
+    list[tuple[str, dict[str, Any]]],   # _toml_layers [10] — [(layer_name, raw_dict)]
+    list[str],                           # _toml_layer_paths [11] — parallel paths list
+    list,                                # _artifacts [12] — list[Artifact] (Story 10.25: FR-3)
+    resolver.ResolveContext,             # context [13] — shared by step-templates (Story 10.63)
 ]:
     """Story 4.2: shared compile core for compile_skill + explain_skill.
 
@@ -764,7 +942,17 @@ def _compile_core(
     root_base_path: io.PurePosixPath | None = None
     if root_resolved_from == "user-full-skill":
         _base_entries = io.list_files_sorted(skill_dir)
-        _base_templates = [e for e in _base_entries if e.name.endswith(".template.md")]
+        # Story 10.63: prefer files starting with "<basename>." so step-template
+        # source files colocated in the skill dir do not appear as root candidates.
+        # Fall back to all .template.md files for skills whose root template uses
+        # a name different from the skill directory basename (e.g. input.template.md).
+        _base_root_candidates = [
+            e for e in _base_entries
+            if e.name.endswith(".template.md") and e.name.startswith(basename + ".")
+        ]
+        _base_templates = _base_root_candidates or [
+            e for e in _base_entries if e.name.endswith(".template.md")
+        ]
         _base_template = variants.select_variant(_base_templates, target_ide)
         if _base_template is not None and io.is_file(str(_base_template)):
             root_base_path = _base_template
@@ -781,7 +969,17 @@ def _compile_core(
         relative_path = str(template_path.relative_to(override_root))
     else:
         all_entries = io.list_files_sorted(skill_dir)
-        all_templates = [e for e in all_entries if e.name.endswith(".template.md")]
+        # Story 10.63: prefer files starting with "<basename>." so step-template
+        # source files colocated in the skill dir do not appear as root candidates.
+        # Fall back to all .template.md files for skills whose root template uses
+        # a name different from the skill directory basename (e.g. input.template.md).
+        _root_candidates = [
+            e for e in all_entries
+            if e.name.endswith(".template.md") and e.name.startswith(basename + ".")
+        ]
+        all_templates = _root_candidates or [
+            e for e in all_entries if e.name.endswith(".template.md")
+        ]
         template_entry = variants.select_variant(all_templates, target_ide)
         if template_entry is None:
             _detected_ides_set: set[str] = set()
@@ -972,6 +1170,7 @@ def _compile_core(
         _toml_layers,       # [10] — list[tuple[str, dict[str, Any]]]
         _toml_layer_paths,  # [11] — list[str]
         _artifacts,         # [12] — list[Artifact] (Story 10.25: FR-3)
+        context,            # [13] — ResolveContext, shared by step-templates (Story 10.63)
     )
 
 
@@ -1028,6 +1227,7 @@ def compile_skill(
         _,          # toml_layers — unused in compile mode
         _,          # toml_layer_paths — unused in compile mode
         artifacts,  # list[Artifact] (Story 10.25: FR-3)
+        context,    # ResolveContext — shared by step-templates (Story 10.63)
     ) = _compile_core(
         skill_dir, install_dir, target_ide,
         lockfile_root=lockfile_root,
@@ -1037,19 +1237,21 @@ def compile_skill(
         toml_warning_sink=toml_warning_sink,
     )
 
-    # Story 8.5: fragment-body scan, component discovery, dispatch, and assembly.
+    # Story 8.5 / Story 10.63: root template fragment-body scan and component discovery.
+    # Step-templates (if any) are secondary compile roots sharing the same
+    # ResolveContext and CompileCache; all roots dispatch through one combined
+    # runner.run_compile_batch call (DN-DISPATCH-SHAPE r1).
     _fragment_body_scan(dep_tree, cache)
 
     skill_posix = io.to_posix(skill_dir)
-    # Story 10.58: thread lockfile_root → _discover_components so it can probe
-    # <install_root>/_shared/components/<snake>.py as a fallback. Per-skill
-    # probe still wins (intentional shadowing permitted); shared is consulted
-    # only when the per-skill file is absent.
-    enriched_flat_nodes, compile_invocations, _jit_invocations = _discover_components(
+    # Story 10.58: thread lockfile_root → _discover_components for _shared/ fallback.
+    enriched_flat_nodes, _root_compile_invs, _root_jit_invs = _discover_components(
         flat_nodes, skill_posix, install_root=lockfile_root
     )
 
-    # Build ctx_dict for ComponentRunner.
+    # Build ctx_dict for ComponentRunner. Shared across ALL roots in this skill
+    # (DN-CTX-SKILL-ID r1): same component + same props + same ctx_dict → same
+    # ComponentCache entry regardless of which root (SKILL.md or step-template) invoked it.
     _current_module = skill_posix.parent.name if lockfile_root is not None else "core"
     skill_id = f"{_current_module}/{basename}"
     if lockfile_root is not None:
@@ -1064,22 +1266,17 @@ def compile_skill(
         "render_mode": "compile",
     }
 
-    # Story 10.56: attach git context once per batch (ctx.git.branch, commit_sha, etc.).
+    # Story 10.56: attach git context once per batch.
     from .git_context import build_git_ctx  # lazy import — same pattern as cache.py
     ctx_dict["git"] = build_git_ctx(cwd=str(skill_posix))
 
     # Story 10.57: single scan — names list reused for both cache key and lockfile records.
-    # All non-.py, non-excluded files in components/ contribute to every component's
-    # cache key. Stored under private key "_data_files_hash" (not for component use).
     _data_file_names: list[str] = _list_data_files(skill_posix / "components")
     ctx_dict["_data_files_hash"] = _compute_data_files_hash(
         skill_posix / "components", names=_data_file_names
     )
 
-    # Story 10.58: scan _shared/components/ for non-.py data files. Independent
-    # namespace from per-skill _data_files_hash so per-skill changes do NOT
-    # over-invalidate cross-skill consumers (DN-2). Per-skill mode
-    # (lockfile_root=None): defaults to hash("[]") — see cache key contract.
+    # Story 10.58: scan _shared/components/ for non-.py data files.
     if lockfile_root is not None:
         _shared_components_dir = io.to_posix(lockfile_root) / "_shared" / "components"
         _shared_data_file_names: list[str] = _list_data_files(_shared_components_dir)
@@ -1090,55 +1287,76 @@ def compile_skill(
         _shared_data_file_names = []
         ctx_dict["_shared_data_files_hash"] = io.hash_text("[]")
 
-    # Story 10.52: construct cache for compile-mode component reuse (ARC-OQ-3).
-    # Cache is only used when lockfile_root is known (install phase). Per-skill
-    # standalone compiles (lockfile_root=None) run uncached to preserve test isolation.
+    # Story 10.52: per-skill ComponentCache for compile-mode reuse (install phase only).
     _component_cache = None
     if lockfile_root is not None:
         from .cache import ComponentCache  # lazy import
         _cache_root = str(io.to_posix(lockfile_root) / "_bmad" / "cache")
         _component_cache = ComponentCache(_cache_root)
 
-    # Dispatch compile-mode components (atomic batch). Raises ComponentBatchError on any
-    # per-component failure; no writes below if it raises (FR-6.1 atomicity).
     if component_runner is not None:
         runner = component_runner
     else:
         from .component_runner import ComponentRunner  # lazy: see top-of-module note
         runner = ComponentRunner(emit_fn=emit_fn, cache=_component_cache)
-    buffer: dict[int, str] = runner.run_compile_batch(compile_invocations, ctx_dict)
 
+    # Story 10.63: process step-template artifacts. Each is a compile root with
+    # its own parse + resolve + fragment-scan + discover pass, sharing the root's
+    # ResolveContext and CompileCache so a fragment included by multiple roots is
+    # parsed only once (cache hit). Token indices are rebased by root so the
+    # combined invocation buffer has unique keys (DN-TOKEN-INDEX-REMAP r1).
+    _step_template_arts = [a for a in artifacts if a.kind == "step-template"]
+    _scaffold_verbatim_arts = [a for a in artifacts if a.kind == "scaffold-verbatim"]
+
+    # Initial offset: conservative upper bound on root token index space.
+    _token_offset = len(flat_nodes)
+    # Each step-result tuple: (enriched_nodes, compile_invs, jit_invs, bare_ide, source_text, source_hash, artifact)
+    _step_results: list[tuple] = []
+    for _st_art in _step_template_arts:
+        _st_en, _st_ci, _st_ji, _st_var, _st_src, _st_hash, _st_max_ti = _process_step_template(
+            _st_art, context, cache, tid, skill_posix, lockfile_root, _token_offset
+        )
+        _step_results.append((_st_en, _st_ci, _st_ji, _st_var, _st_src, _st_hash, _st_art))
+        _token_offset = _st_max_ti + 1
+
+    # Combined invocation list: root compile invocations + all step-template invocations.
+    # Single runner.run_compile_batch call serves all roots (DN-DISPATCH-SHAPE r1).
+    _combined_compile_invs: list[EnrichedInvocation] = list(_root_compile_invs)
+    for _sr in _step_results:
+        _combined_compile_invs.extend(_sr[1])  # index 1 = compile_invocations
+
+    # Dispatch compile-mode components (atomic batch). Raises ComponentBatchError on any
+    # failure across ANY root; no writes below if it raises (FR-6.1 + AC-18 atomicity).
+    buffer: dict[int, str] = runner.run_compile_batch(_combined_compile_invs, ctx_dict)
+
+    # Per-root assembly: each root uses the shared buffer; rebased indices prevent conflicts.
     rendered = _assemble_nodes(enriched_flat_nodes, buffer)
+    _step_rendered: list[str] = [_assemble_nodes(_sr[0], buffer) for _sr in _step_results]
 
-    # Build per-token component records for the lockfile (document token order, AC-11).
+    # Build component records per root with parent attribution (DN-COMPONENT-PARENT-KEY r1).
+    # components[].parent = "SKILL.md" for root; "<artifact.path>" for step-templates.
     source_text_cache: dict[str, str] = {}
     def _get_component_source(abs_path: str) -> str:
         if abs_path not in source_text_cache:
             source_text_cache[abs_path] = io.read_template(abs_path)
         return source_text_cache[abs_path]
 
-    # Story 10.58: derive shared-components root for lockfile path detection.
+    # Story 10.58: shared-components root for lockfile path detection.
     _shared_root_str: str | None = None
     if lockfile_root is not None:
         _shared_root_str = str(io.to_posix(lockfile_root) / "_shared" / "components")
 
-    component_records: list[dict[str, Any]] = []
-    for inv in (n for n in enriched_flat_nodes if isinstance(n, EnrichedInvocation)):
+    def _build_comp_rec(inv: EnrichedInvocation, parent: str) -> "dict[str, Any]":
         src = _get_component_source(inv.component_abs_path)
-        # Story 10.58: when the component resolved via _shared/ fallback, record
-        # `_shared/components/<snake>.py` in the lockfile so drift detection
-        # finds the actual file (per spec backward-compat matrix row 3).
-        _resolved_abs_posix = str(io.to_posix(inv.component_abs_path))
-        if (
-            _shared_root_str is not None
-            and _resolved_abs_posix.startswith(_shared_root_str + "/")
-        ):
-            _comp_path = "_shared/components/" + _resolved_abs_posix[len(_shared_root_str) + 1:]
-        else:
-            _comp_path = parser.component_name_to_path(inv.original.name)
-        component_records.append({
+        _rab = str(io.to_posix(inv.component_abs_path))
+        _cp = (
+            "_shared/components/" + _rab[len(_shared_root_str) + 1:]
+            if _shared_root_str is not None and _rab.startswith(_shared_root_str + "/")
+            else parser.component_name_to_path(inv.original.name)
+        )
+        return {
             "name": inv.original.name,
-            "path": _comp_path,
+            "path": _cp,
             "source_hash": io.hash_text(src),
             "render_mode": inv.render_mode,
             "props": dict(inv.original.props),
@@ -1152,15 +1370,40 @@ def compile_skill(
                 None if inv.render_mode == "compile" else 1
             ),
             "data_files": _data_file_names,  # Story 10.57: non-.py assets in components/
-        })
+            "parent": parent,                 # Story 10.63: DN-COMPONENT-PARENT-KEY r1
+        }
 
+    component_records: list[dict[str, Any]] = [
+        _build_comp_rec(inv, "SKILL.md")
+        for inv in enriched_flat_nodes
+        if isinstance(inv, EnrichedInvocation)
+    ]
+    for _sr in _step_results:
+        _st_art_ref = _sr[6]
+        component_records.extend(
+            _build_comp_rec(inv, _st_art_ref.path)
+            for inv in _sr[0]  # enriched_flat_nodes (rebased)
+            if isinstance(inv, EnrichedInvocation)
+        )
+
+    # Atomic write barrier: ALL writes happen AFTER all renders complete.
+    # Any exception above (scan, discover, batch, assemble) leaves the install
+    # dir untouched — FR-6.1 atomicity extended to all roots (AC-18).
+    install_posix = io.to_posix(install_dir)
     io.write_text(str(output_path), rendered)
 
-    # Story 10.25: FR-3 artifact emission — copy scaffold-verbatim artifacts.
-    # skill_posix and _current_module are already set above; install_posix is new here.
-    install_posix = io.to_posix(install_dir)
+    # Step-template output writes (Story 10.63).
+    for _i, _sr in enumerate(_step_results):
+        _st_art_ref = _sr[6]
+        if lockfile_root is not None:
+            _step_dest = install_posix / _current_module / basename / _st_art_ref.path
+        else:
+            _step_dest = install_posix / basename / _st_art_ref.path
+        io.write_text(str(_step_dest), _step_rendered[_i])
+
+    # Story 10.25: FR-3 scaffold-verbatim artifact emission (unchanged).
     artifacts_records: list[dict[str, Any]] = []
-    for artifact in artifacts:
+    for artifact in _scaffold_verbatim_arts:
         # Path safety: source escape guard (raises OverrideOutsideRootError on escape).
         source_abs = io.ensure_within_root(skill_posix / artifact.source, skill_posix)
         # Path safety: path must be non-absolute POSIX without .. segments.
@@ -1173,18 +1416,28 @@ def compile_skill(
             raise errors.CompilerError(
                 f"artifact path {artifact.path!r} is not a safe relative POSIX path"
             )
-        # Determine output path (mirrors SKILL.md path logic).
         if lockfile_root is not None:
             artifact_dest = install_posix / _current_module / basename / artifact.path
         else:
             artifact_dest = install_posix / basename / artifact.path
-        # Read (CRLF→LF normalized), write, hash.
         content = io.read_template(str(source_abs))
         io.write_text(str(artifact_dest), content)
         artifacts_records.append({
             "hash": io.hash_text(content),
             "kind": artifact.kind,
             "path": str(io.to_posix(artifact.path)),
+        })
+
+    # Story 10.63: step-template artifact records (additive within existing artifacts[]).
+    # kind: "step-template"; includes source_hash and variant for drift detection.
+    for _i, _sr in enumerate(_step_results):
+        _st_art_ref = _sr[6]
+        artifacts_records.append({
+            "hash": io.hash_text(_step_rendered[_i]),
+            "kind": "step-template",
+            "path": str(io.to_posix(_st_art_ref.path)),
+            "source_hash": _sr[5],   # source_hash
+            "variant": _sr[3],       # bare IDE name or None
         })
 
     lockfile.write_skill_entry(
@@ -1198,7 +1451,7 @@ def compile_skill(
         target_ide=tid,
         cache=cache,
         components=component_records,
-        artifacts=artifacts_records,  # Story 10.25: FR-3
+        artifacts=artifacts_records,  # Story 10.25/10.63: scaffold-verbatim + step-template records
         deprecations=deprecations,    # Story 10.27: FR-13
         shared_data_files=_shared_data_file_names,  # Story 10.58: v3→v4 field
         emit_fn=emit_fn,
@@ -1253,6 +1506,7 @@ def explain_skill(
         _toml_layers,
         _toml_layer_paths,
         _,  # artifacts — unused in explain mode (Story 10.25)
+        _,  # context — unused in explain mode (Story 10.63)
     ) = _compile_core(
         skill_dir, install_dir, target_ide,
         lockfile_root=lockfile_root,

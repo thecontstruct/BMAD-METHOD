@@ -513,5 +513,224 @@ class TestLockfileIntegration(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
 
 
+STEP_TEMPLATE_FIXTURES = COMPILE_FIXTURES / "step-template-resolution"
+STEP_TEMPLATE_SKILL = STEP_TEMPLATE_FIXTURES / "core" / "step-template-skill"
+_ST_LOCK_FILE = STEP_TEMPLATE_FIXTURES / "_bmad" / "_config" / "bmad.lock"
+_ST_LOCK_LOCK = STEP_TEMPLATE_FIXTURES / "_bmad" / "_config" / ".bmad.lock.lock"
+
+
+class TestStepTemplateFixtures(unittest.TestCase):
+    """Story 10.63 AC-2 through AC-19: step-template engine extension end-to-end."""
+
+    def tearDown(self) -> None:
+        _ST_LOCK_LOCK.unlink(missing_ok=True)
+
+    def _expected(self, name: str) -> bytes:
+        return (STEP_TEMPLATE_FIXTURES / "expected" / name).read_bytes()
+
+    def _out(self, tmp: str, name: str) -> Path:
+        return Path(tmp) / "step-template-skill" / name
+
+    # AC-2: step-template resolved through full pipeline (no component)
+    def test_step_template_resolves_includes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(STEP_TEMPLATE_SKILL, Path(tmp))
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            step3 = self._out(tmp, "step-03.md")
+            self.assertTrue(step3.is_file(), f"expected {step3} to exist")
+            self.assertEqual(step3.read_bytes(), self._expected("universal-step-03.md"))
+
+    # AC-3: source-side variant resolution (step-02 universal / cursor / claudecode)
+    def test_step_template_variant_selected_by_target_ide(self) -> None:
+        cases = [
+            (None,          "universal-step-02.md"),
+            ("cursor",      "cursor-step-02.md"),
+            ("claudecode",  "claudecode-step-02.md"),
+            ("vscode",      "universal-step-02.md"),  # unknown IDE → universal
+        ]
+        for tools, expected_file in cases:
+            with self.subTest(tools=tools), tempfile.TemporaryDirectory() as tmp:
+                result = _run_cli_tools(STEP_TEMPLATE_SKILL, Path(tmp), tools=tools)
+                self.assertEqual(result.returncode, 0,
+                                 msg=f"tools={tools!r} stderr={result.stderr!r}")
+                step2 = self._out(tmp, "step-02.md")
+                self.assertEqual(step2.read_bytes(), self._expected(expected_file),
+                                 msg=f"tools={tools!r} step-02.md mismatch")
+
+    # AC-4: include-side variant resolution (step-03 fragment note universal / cursor / claudecode)
+    def test_step_template_include_variant_resolves_per_target_ide(self) -> None:
+        cases = [
+            (None,         "universal-step-03.md"),
+            ("cursor",     "cursor-step-03.md"),
+            ("claudecode", "claudecode-step-03.md"),
+        ]
+        for tools, expected_file in cases:
+            with self.subTest(tools=tools), tempfile.TemporaryDirectory() as tmp:
+                result = _run_cli_tools(STEP_TEMPLATE_SKILL, Path(tmp), tools=tools)
+                self.assertEqual(result.returncode, 0,
+                                 msg=f"tools={tools!r} stderr={result.stderr!r}")
+                step3 = self._out(tmp, "step-03.md")
+                self.assertEqual(step3.read_bytes(), self._expected(expected_file),
+                                 msg=f"tools={tools!r} step-03.md mismatch")
+
+    # AC-5: undeclared step file not engine-emitted
+    def test_undeclared_step_file_not_engine_emitted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(STEP_TEMPLATE_SKILL, Path(tmp))
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            # step-99-legacy.md is NOT declared — engine must not emit it
+            legacy = self._out(tmp, "step-99-legacy.md")
+            self.assertFalse(legacy.exists(),
+                             f"step-99-legacy.md should not be engine-emitted but found at {legacy}")
+
+    # AC-13: STEP_TEMPLATE_NO_VARIANT errors report helpful messages
+    def test_step_template_variant_probe_miss_reports_helpful_error(self) -> None:
+        # Case 1: no .template.md at all for declared source
+        with tempfile.TemporaryDirectory() as tmp_skill, tempfile.TemporaryDirectory() as tmp_out:
+            skill_dir = Path(tmp_skill) / "core" / "probe-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "probe-skill.template.md").write_text(
+                "---\nname: probe-skill\nartifacts:\n"
+                "  - kind: step-template\n    source: missing.template.md\n    path: out.md\n---\n# Skill\n",
+                encoding="utf-8",
+            )
+            result = _run_cli(skill_dir, Path(tmp_out))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("STEP_TEMPLATE_NO_VARIANT", result.stderr)
+            self.assertIn("missing.template.md", result.stderr)
+
+        # Case 2: only IDE-specific variants exist, no universal, no --tools
+        with tempfile.TemporaryDirectory() as tmp_skill, tempfile.TemporaryDirectory() as tmp_out:
+            skill_dir = Path(tmp_skill) / "core" / "probe-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "probe-skill.template.md").write_text(
+                "---\nname: probe-skill\nartifacts:\n"
+                "  - kind: step-template\n    source: step.template.md\n    path: out.md\n---\n# Skill\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "step.cursor.template.md").write_text("# Cursor\n", encoding="utf-8")
+            (skill_dir / "step.claudecode.template.md").write_text("# Claude\n", encoding="utf-8")
+            result = _run_cli(skill_dir, Path(tmp_out))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("STEP_TEMPLATE_NO_VARIANT", result.stderr)
+            # Should mention found variants
+            self.assertIn("cursor", result.stderr.lower())
+            self.assertIn("claudecode", result.stderr.lower())
+
+    # AC-14: path traversal in artifact.path rejected before any write
+    def test_step_template_path_traversal_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_skill, tempfile.TemporaryDirectory() as tmp_out:
+            skill_dir = Path(tmp_skill) / "core" / "escape-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "escape-skill.template.md").write_text(
+                "---\nname: escape-skill\nartifacts:\n"
+                "  - kind: step-template\n    source: step.template.md\n    path: ../escape.md\n---\n# Skill\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "step.template.md").write_text("# Step\n", encoding="utf-8")
+            result = _run_cli(skill_dir, Path(tmp_out))
+            self.assertNotEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            # No files written to install dir
+            self.assertEqual(list(Path(tmp_out).rglob("*.md")), [])
+
+    # AC-15: component invocation inside step-template body works
+    def test_component_invocation_in_step_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(STEP_TEMPLATE_SKILL, Path(tmp))
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            step4 = self._out(tmp, "step-04.md")
+            self.assertTrue(step4.is_file(), f"expected {step4}")
+            self.assertEqual(step4.read_bytes(), self._expected("universal-step-04.md"))
+
+    # AC-16: FR-1.7 enforced on fragments included by step-templates
+    def test_fr_1_7_enforced_on_step_template_fragments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_skill, tempfile.TemporaryDirectory() as tmp_out:
+            skill_dir = Path(tmp_skill) / "core" / "bad-frag-skill"
+            skill_dir.mkdir(parents=True)
+            frags = skill_dir / "fragments"
+            frags.mkdir()
+            (skill_dir / "bad-frag-skill.template.md").write_text(
+                "---\nname: bad-frag-skill\nartifacts:\n"
+                "  - kind: step-template\n    source: step.template.md\n    path: step.md\n---\n# Skill\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "step.template.md").write_text(
+                '# Step\n<<include path="fragments/bad.md">>\n',
+                encoding="utf-8",
+            )
+            # Fragment contains a component tag — violates FR-1.7
+            (frags / "bad.md").write_text(
+                "# Fragment\n<DateBanner />\n",
+                encoding="utf-8",
+            )
+            result = _run_cli(skill_dir, Path(tmp_out))
+            self.assertNotEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+            self.assertIn("Component tags are prohibited in fragment files", result.stderr)
+
+    # AC-17: variant + component composition
+    def test_step_template_variant_plus_component_composes(self) -> None:
+        cases = [
+            (None,         "universal-step-05.md"),
+            ("cursor",     "cursor-step-05.md"),
+            ("claudecode", "claudecode-step-05.md"),
+        ]
+        for tools, expected_file in cases:
+            with self.subTest(tools=tools), tempfile.TemporaryDirectory() as tmp:
+                result = _run_cli_tools(STEP_TEMPLATE_SKILL, Path(tmp), tools=tools)
+                self.assertEqual(result.returncode, 0,
+                                 msg=f"tools={tools!r} stderr={result.stderr!r}")
+                step5 = self._out(tmp, "step-05.md")
+                self.assertEqual(step5.read_bytes(), self._expected(expected_file),
+                                 msg=f"tools={tools!r} step-05.md mismatch")
+
+    # AC-18: component failure in step-template aborts whole skill (atomic FR-6.1)
+    def test_step_template_component_failure_atomic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_skill, tempfile.TemporaryDirectory() as tmp_out:
+            skill_dir = Path(tmp_skill) / "core" / "fail-skill"
+            skill_dir.mkdir(parents=True)
+            comps = skill_dir / "components"
+            comps.mkdir()
+            (skill_dir / "fail-skill.template.md").write_text(
+                "---\nname: fail-skill\nartifacts:\n"
+                "  - kind: step-template\n    source: step.template.md\n    path: step.md\n---\n# Skill\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "step.template.md").write_text(
+                "# Step\n<FailingComponent />\n",
+                encoding="utf-8",
+            )
+            (comps / "failing_component.py").write_text(
+                'RENDER_MODE = "compile"\n\ndef render(ctx, **props):\n    raise RuntimeError("boom")\n',
+                encoding="utf-8",
+            )
+            result = _run_cli(skill_dir, Path(tmp_out))
+            self.assertNotEqual(result.returncode, 0, msg="expected nonzero exit on component error")
+            # No files written — atomicity preserved
+            all_out = list(Path(tmp_out).rglob("*"))
+            self.assertEqual(
+                [f for f in all_out if f.is_file()], [],
+                msg=f"Expected no files written on component error, found: {all_out}",
+            )
+
+    # AC-19: lockfile component records carry parent attribution
+    def test_lockfile_component_records_have_parent(self) -> None:
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _run_cli_tools(STEP_TEMPLATE_SKILL, Path(tmp))
+            self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr!r}")
+        # Lockfile is written to STEP_TEMPLATE_FIXTURES/_bmad/_config/bmad.lock
+        lf_data = json.loads(_ST_LOCK_FILE.read_text(encoding="utf-8"))
+        entry = next(
+            (e for e in lf_data["entries"] if e["skill"] == "step-template-skill"),
+            None,
+        )
+        self.assertIsNotNone(entry, "step-template-skill entry not found in lockfile")
+        parents = {c.get("parent") for c in entry.get("components", [])}
+        self.assertIn("SKILL.md", parents,
+                      f"expected parent='SKILL.md' in components, got parents={parents}")
+        self.assertIn("step-04.md", parents,
+                      f"expected parent='step-04.md' in components, got parents={parents}")
+
+
 if __name__ == "__main__":
     unittest.main()

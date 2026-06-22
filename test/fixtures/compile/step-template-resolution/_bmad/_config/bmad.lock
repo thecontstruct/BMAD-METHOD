@@ -1,0 +1,95 @@
+{
+  "bmad_version": "1.0.0",
+  "compiled_at": "1.0.0",
+  "entries": [
+    {
+      "artifacts": [
+        {
+          "hash": "f8dcd0e575e669fd95f63056d3fad149c4b717c53ea8160bc74ed58644c79cea",
+          "kind": "step-template",
+          "path": "step-02.md",
+          "source_hash": "f8dcd0e575e669fd95f63056d3fad149c4b717c53ea8160bc74ed58644c79cea",
+          "variant": null
+        },
+        {
+          "hash": "0b1e52de4096099eb4e42bfb964e9e46945847d7f419e3f0b208fd268974d24d",
+          "kind": "step-template",
+          "path": "step-03.md",
+          "source_hash": "0bfd47bf37f9c106ac35b8b59828b16a64c15744bc87b20a113324f1d6760406",
+          "variant": null
+        },
+        {
+          "hash": "6904a847cf271ed73d3d05cbaebc826fbe1e53e501b4a2dc69b8997ce36c1cc3",
+          "kind": "step-template",
+          "path": "step-04.md",
+          "source_hash": "e0f8277081c380358aaee1ca3a2358d0bb1b6dc07be4a6dc827fc630a2fd0053",
+          "variant": null
+        },
+        {
+          "hash": "641e3da6b9ab0322c337cf72e309a14e7d273f79031fca5b3d8582254862ac8c",
+          "kind": "step-template",
+          "path": "step-05.md",
+          "source_hash": "3ce5d69b64c4394d7114a7b1c3db771401d589462f7762f750e01823a42febbf",
+          "variant": null
+        }
+      ],
+      "compiled_hash": "49621005f575b7b6e609e4b28d6b2599ba930c14e275a2aaeebd636fa7b034a7",
+      "components": [
+        {
+          "compiled_hash": "35fb33d1a76509c0f22cf2c989fd6f38847b37cf4445f4812451418b9273bd18",
+          "data_files": [],
+          "name": "ToolsList",
+          "parent": "SKILL.md",
+          "path": "components/tools_list.py",
+          "props": {},
+          "props_hash": "44136fa355b3678a",
+          "render_mode": "compile",
+          "sentinel_format_version": null,
+          "source_hash": "4a306ef87300b9c28638fda33fa7989342aa8f603d6b9c0b900d8c449c28c1ca"
+        },
+        {
+          "compiled_hash": "35fb33d1a76509c0f22cf2c989fd6f38847b37cf4445f4812451418b9273bd18",
+          "data_files": [],
+          "name": "ToolsList",
+          "parent": "step-04.md",
+          "path": "components/tools_list.py",
+          "props": {},
+          "props_hash": "44136fa355b3678a",
+          "render_mode": "compile",
+          "sentinel_format_version": null,
+          "source_hash": "4a306ef87300b9c28638fda33fa7989342aa8f603d6b9c0b900d8c449c28c1ca"
+        },
+        {
+          "compiled_hash": "3c6f1e8353827d6388737f60cec46641f0e782d09ec8ffc41d61faaf6c3964aa",
+          "data_files": [],
+          "name": "ToolsList",
+          "parent": "step-05.md",
+          "path": "components/tools_list.py",
+          "props": {
+            "tools": "universal"
+          },
+          "props_hash": "df45cc25e2e59962",
+          "render_mode": "compile",
+          "sentinel_format_version": null,
+          "source_hash": "4a306ef87300b9c28638fda33fa7989342aa8f603d6b9c0b900d8c449c28c1ca"
+        }
+      ],
+      "deprecations": [],
+      "fragments": [],
+      "glob_inputs": [],
+      "shared_data_files": [],
+      "skill": "step-template-skill",
+      "source_hash": "ff6b7bef7af99ef52d100f1d32f71088484542db50e7d873b998f2dc1a987c6f",
+      "variables": [
+        {
+          "name": "user_name",
+          "source": "bmad-config",
+          "source_path": "_bmad/core/config.yaml",
+          "value_hash": "eb97d409396a3e5392936dad92b909da6f08d8c121a45e1f088fe9768b0c0339"
+        }
+      ],
+      "variant": null
+    }
+  ],
+  "version": 4
+}
