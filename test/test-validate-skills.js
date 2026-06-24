@@ -295,6 +295,31 @@ test_tpl02_missing_def_render();
 test_tpl02_missing_render_error_fallback();
 test_tpl02_empty_components_skip();
 
+console.log(`\n${colors.cyan}--- SKILL-06 deprecation exemption cases (upstream c9813c68) ---${colors.reset}`);
+
+const SKILL06_FIXTURES_DIR = path.join(__dirname, 'fixtures/validate-skills');
+
+function hasSkill06TriggerFinding(skillName) {
+  const findings = validateSkill(path.join(SKILL06_FIXTURES_DIR, skillName));
+  return findings.some((f) => f.rule === 'SKILL-06' && /trigger phrase/i.test(f.detail));
+}
+
+record(
+  'SKILL-06: deprecated skill is exempt from trigger-phrase requirement',
+  hasSkill06TriggerFinding('deprecated-shim') === false,
+  'Expected no SKILL-06 trigger finding for a DEPRECATED skill',
+);
+record(
+  'SKILL-06: active skill missing trigger phrase is still flagged',
+  hasSkill06TriggerFinding('missing-trigger') === true,
+  'Expected a SKILL-06 trigger finding for a non-deprecated skill without "Use when"',
+);
+record(
+  'SKILL-06: active skill with "Use when" trigger is not flagged',
+  hasSkill06TriggerFinding('with-trigger') === false,
+  'Expected no SKILL-06 trigger finding when description contains "Use when"',
+);
+
 console.log('');
 console.log(`${colors.cyan}========================================${colors.reset}`);
 console.log(`Test Results:`);
