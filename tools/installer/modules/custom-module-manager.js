@@ -11,6 +11,18 @@ function quoteCustomRef(ref) {
   return `"${ref}"`;
 }
 
+function isLocalSourcePath(input) {
+  return (
+    input.startsWith('/') ||
+    input.startsWith('./') ||
+    input.startsWith('../') ||
+    input.startsWith('.\\') ||
+    input.startsWith('..\\') ||
+    input.startsWith('~') ||
+    path.win32.isAbsolute(input)
+  );
+}
+
 /**
  * Manages custom modules installed from user-provided sources.
  * Supports any Git host (GitHub, GitLab, Bitbucket, self-hosted) and local file paths.
@@ -83,13 +95,7 @@ class CustomModuleManager {
         // Avoid consuming the @ in `git@host:owner/repo` — `before` wouldn't end with a path separator
         // in that case. Require that the @ comes after the host/path, not inside the auth segment.
         // Rule: the @ is a version suffix only if `before` looks like a complete URL or local path.
-        const beforeLooksLikeRepo =
-          before.startsWith('/') ||
-          before.startsWith('./') ||
-          before.startsWith('../') ||
-          before.startsWith('~') ||
-          /^https?:\/\//i.test(before) ||
-          /^git@[^:]+:.+/.test(before);
+        const beforeLooksLikeRepo = isLocalSourcePath(before) || /^https?:\/\//i.test(before) || /^git@[^:]+:.+/.test(before);
         if (beforeLooksLikeRepo) {
           versionSuffix = candidate;
           trimmed = before;
@@ -97,8 +103,8 @@ class CustomModuleManager {
       }
     }
 
-    // Local path detection: starts with /, ./, ../, or ~
-    if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../') || trimmed.startsWith('~')) {
+    // Local path detection: POSIX, Windows, relative, or home-relative.
+    if (isLocalSourcePath(trimmed)) {
       if (versionSuffix) {
         return {
           type: 'local',
