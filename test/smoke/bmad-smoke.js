@@ -46,10 +46,19 @@ function assert(condition, testName, errorMessage = '') {
 }
 
 function checkPython3() {
-  const result = spawnSync('python3', ['--version'], { stdio: 'pipe' });
-  if (result.status !== 0) {
-    console.log(`${colors.yellow}SKIP: python3 not available — skipping smoke test${colors.reset}`);
-    process.exit(0);
+  // Use tools/python-env.js so the smoke test handles both a hand-managed
+  // python3 ≥ 3.11 and the uv-fallback path the fork's validators rely on.
+  // If neither is available, the helper throws PYTHON_ENV_UNAVAILABLE — catch
+  // that as "python3 unavailable" and skip the test.
+  try {
+    const { resolvePythonInterpreter } = require('../../tools/python-env');
+    resolvePythonInterpreter();
+  } catch (error) {
+    if (error.code === 'PYTHON_ENV_UNAVAILABLE') {
+      console.log(`${colors.yellow}SKIP: ${error.message.split('\n')[0]}${colors.reset}`);
+      process.exit(0);
+    }
+    throw error;
   }
 }
 

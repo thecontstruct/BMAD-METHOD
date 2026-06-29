@@ -212,8 +212,14 @@ async function main() {
 
       // Step 3: spawn python compile.py --install-phase against the tmp install dir.
       const compileScript = path.join(REPO_ROOT, 'src', 'scripts', 'compile.py');
-      const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
-      const result = spawnSync(pythonBin, [compileScript, '--install-phase', '--install-dir', tmpDir], {
+      const { resolvePythonInterpreter, resolvePythonInvocation } = require('../tools/python-env');
+      const pyInterp = resolvePythonInterpreter();
+      const pyInv = resolvePythonInvocation({
+        interpreter: pyInterp,
+        scriptArgs: [compileScript, '--install-phase', '--install-dir', tmpDir],
+        withDeps: ['pyyaml'],
+      });
+      const result = spawnSync(pyInv.cmd, pyInv.args, {
         encoding: 'utf8',
         cwd: REPO_ROOT,
       });

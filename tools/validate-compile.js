@@ -25,9 +25,26 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
 const { validateSkill } = require('./validate-skills');
+const { resolvePythonInterpreter, resolvePythonInvocation } = require('./python-env');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const LOCK_PATH = path.join(PROJECT_ROOT, 'src', '_bmad', '_config', 'bmad.lock');
+
+// Resolve Python once at module load. Stories 10.27+ require Python ≥ 3.11
+// (e.g. `from enum import StrEnum` in src/scripts/bmad_compile/errors.py).
+// python-env.js falls through to `uv run --python 3.13 python3` when no
+// qualifying interpreter is on PATH — see docs/how-to/python-environment.md.
+const PY_INTERPRETER = resolvePythonInterpreter();
+function spawnCompile(args, options = {}) {
+  // --with pyyaml: src/scripts/bmad_compile/engine.py lazy-imports yaml during
+  // skill processing (see _extract_artifacts_from_frontmatter, line 102). When
+  // we fall through to `uv run`, the ephemeral venv doesn't have pyyaml unless
+  // we pass --with explicitly. When the interpreter is a real Python on PATH
+  // (with the dep already installed in .venv or system site-packages) --with is
+  // a no-op (resolvePythonInvocation only emits it for uv invocations).
+  const inv = resolvePythonInvocation({ interpreter: PY_INTERPRETER, scriptArgs: args, withDeps: ['pyyaml'] });
+  return spawnSync(inv.cmd, inv.args, options);
+}
 const COMPILE_PY = path.join(PROJECT_ROOT, 'src', 'scripts', 'compile.py');
 const SRC_PREFIX = 'src';
 
@@ -110,13 +127,11 @@ function sha256OfFile(filePath) {
 }
 
 function runCompile(skillSrcDir, tmpDir) {
-  const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
   // BH-1: 30s timeout — a hung compile.py should fail fast rather than burning the CI runner timeout.
-  const result = spawnSync(pythonBin, [COMPILE_PY, '--skill', skillSrcDir, '--install-dir', tmpDir], {
+  return spawnCompile([COMPILE_PY, '--skill', skillSrcDir, '--install-dir', tmpDir], {
     encoding: 'utf8',
     timeout: 30_000,
   });
-  return result;
 }
 
 function copyDirSync(src, dst) {
@@ -151,8 +166,7 @@ function validateOne(entry) {
       copyDirSync(skillSrcDir, skillInstallDir);
       copyDirSync(path.join(srcRoot, '_shared'), path.join(tmpDir, '_shared'));
       fs.mkdirSync(path.join(tmpDir, '_config'), { recursive: true });
-      const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
-      compileResult = spawnSync(pythonBin, [COMPILE_PY, `${module}/${skillBasename}`, '--install-dir', tmpDir], {
+      compileResult = spawnCompile([COMPILE_PY, `${module}/${skillBasename}`, '--install-dir', tmpDir], {
         encoding: 'utf8',
         timeout: 30_000,
       });

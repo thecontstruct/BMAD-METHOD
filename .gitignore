@@ -25,6 +25,11 @@ design-artifacts/
 # Python
 __pycache__/
 .pytest_cache/
+# uv-managed virtual environment (Story 10.27+ requires Python ≥3.11 for the
+# compile pipeline; uv handles dep resolution on demand via tools/python-env.js)
+.venv/
+venv/
+env/
 
 # BMad run artifacts (memlogs are per-run working memory, never committed)
 .memlog.md

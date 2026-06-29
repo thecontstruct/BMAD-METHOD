@@ -7,6 +7,17 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["mypy"]
 
+[dependency-groups]
+# Pinned so `uv sync` populates .venv with the test deps that
+# src/scripts/bmad_compile/engine.py lazy-imports (yaml) and that the
+# Python tests need at the top level (pytest). Without this, `uv run`
+# creates ephemeral per-invocation venvs without these deps, breaking
+# tools/python-env.js's fallback path.
+test = [
+    "pyyaml>=6.0",
+    "pytest>=8.0",
+]
+
 [tool.mypy]
 mypy_path = "src/scripts"
 
