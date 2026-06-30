@@ -7,7 +7,6 @@ deferred_work_file: '{implementation_artifacts}/deferred-work.md'
 ## RULES
 
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
-- Review subagents get NO conversation context.
 - All review subagents must run at the same model capability as the current session.
 
 ## INSTRUCTIONS
@@ -22,10 +21,16 @@ Do NOT `git add` anything — this is read-only inspection.
 
 ### Review
 
-<<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch two subagents without conversation context." fallback_action="generate two review prompt files in `{implementation_artifacts}` — one per reviewer role below — and HALT. Ask the human to run each in a separate session (ideally a different LLM) and paste back the findings.">>
+<<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch Blind Hunter and Edge Case Hunter in parallel without prior conversation context." fallback_action="generate two review prompt files in `{implementation_artifacts}` — one per reviewer role below — and HALT. Ask the human to run each in a separate session (ideally a different LLM) and paste back the findings.">>
 
-- **Blind hunter** — prompt: "Use the `bmad-review-adversarial-general` skill on `{diff_output}`."
-- **Edge case hunter** — prompt: "Use the `bmad-review-edge-case-hunter` skill on `{diff_output}`."
+- **Blind Hunter** — prompt:
+  > Invoke the `bmad-review-adversarial-general` skill on this diff:
+  >
+  > {diff_output}
+- **Edge Case Hunter** — prompt:
+  > Invoke the `bmad-review-edge-case-hunter` skill on this diff:
+  >
+  > {diff_output}
 
 ### Classify
 
