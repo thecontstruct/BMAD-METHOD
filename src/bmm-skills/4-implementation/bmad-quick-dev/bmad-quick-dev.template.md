@@ -22,9 +22,19 @@ artifacts:
     kind: step-template
 ---
 
-# Quick Dev New Preview Workflow — <TodaysDate />
+# Quick Dev New Preview Workflow
 
 **Goal:** Turn user intent into a hardened, reviewable artifact.
+
+## Session Context
+
+**Date:** <TodaysDate fmt="%Y-%m-%d" />
+
+<ProjectContext />
+
+## IDE Guidance
+
+<IdeNotes />
 
 **CRITICAL:** If a step says "read fully and follow step-XX", you read and follow step-XX. No exceptions.
 
