@@ -19,6 +19,26 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+// Story 10.65 / AC-7 Part 2 follow-up: route Python through the same uv-aware
+// resolver as tools/validate-compile.js and tools/installer/compiler/invoke-python.js.
+// Direct spawn('python3') picks up macOS-shipped Python 3.9 which lacks tomllib (3.11+).
+// Note: this entire test file is rewritten-or-deleted in Story 10.65 / AC-5 (Task 5.6)
+// — the python-env wiring is the stop-gap so the husky pre-commit hook can pass
+// independent of AC-5.
+const { resolvePythonInterpreter, resolvePythonInvocation } = require('../tools/python-env');
+const PY_INTERPRETER = resolvePythonInterpreter();
+function _py(args, opts = {}) {
+  // Args is the full Python argv (e.g. ['render.py', '--batch', ...]). The uv-aware
+  // resolver returns `{ cmd, args }` where cmd is the interpreter binary and args
+  // includes any `--with X` prefix for the uv fallback path. With `pyyaml` injected
+  // so engine.py's lazy yaml import resolves on the ephemeral uv venv.
+  const inv = resolvePythonInvocation({
+    interpreter: PY_INTERPRETER,
+    scriptArgs: args,
+    withDeps: ['pyyaml'],
+  });
+  return spawnSync(inv.cmd, inv.args, opts);
+}
 
 // ANSI color codes (same as other test files)
 const colors = {
@@ -89,7 +109,7 @@ try {
   const skillDst = makeSkillDir(tmpDir);
   fs.writeFileSync(path.join(skillDst, 'test-fixture.md'), 'Language: {{.communication_language}}\nStatus: {{.sprint_status}}\n', 'utf-8');
 
-  const result = spawnSync('python3', [path.join(skillDst, 'render.py')], {
+  const result = _py([path.join(skillDst, 'render.py')], {
     cwd: skillDst,
     encoding: 'utf-8',
   });
@@ -139,7 +159,7 @@ try {
   const skillDst2 = makeSkillDir(haltDir);
   fs.writeFileSync(path.join(skillDst2, 'test-fixture.md'), 'Language: {{.communication_language}}\n', 'utf-8');
 
-  const haltResult = spawnSync('python3', [path.join(skillDst2, 'render.py')], {
+  const haltResult = _py([path.join(skillDst2, 'render.py')], {
     cwd: skillDst2,
     encoding: 'utf-8',
   });
@@ -188,7 +208,7 @@ try {
     path.join(jitCompDir, 'fixture_banner.py'),
   );
 
-  const jitResult = spawnSync('python3', [path.join(jitSkillDir, 'render.py')], {
+  const jitResult = _py([path.join(jitSkillDir, 'render.py')], {
     cwd: jitSkillDir,
     env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
     encoding: 'utf-8',
@@ -224,7 +244,7 @@ try {
   fs.copyFileSync(RENDER_PY, path.join(noLockSkillDir, 'render.py'));
   fs.copyFileSync(path.join(JIT_FIXTURE_DIR, '_bmad', 'test-module', 'test-skill', 'SKILL.md'), path.join(noLockSkillDir, 'SKILL.md'));
 
-  const noLockResult = spawnSync('python3', [path.join(noLockSkillDir, 'render.py')], {
+  const noLockResult = _py([path.join(noLockSkillDir, 'render.py')], {
     cwd: noLockSkillDir,
     env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
     encoding: 'utf-8',
