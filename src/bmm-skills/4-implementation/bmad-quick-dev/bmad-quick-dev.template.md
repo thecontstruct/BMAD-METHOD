@@ -2,12 +2,21 @@
 name: bmad-quick-dev
 description: 'Implements any user intent, requirement, story, bug fix or change request by producing clean working code artifacts that follow the project''s existing architecture, patterns and conventions. Use when the user wants to build, fix, tweak, refactor, add or modify any code, component or feature.'
 artifacts:
+  - path: step-01-clarify-and-route.md
+    source: step-01-clarify-and-route.template.md
+    kind: scaffold-verbatim
+  - path: step-02-plan.md
+    source: step-02-plan.template.md
+    kind: scaffold-verbatim
   - path: step-03-implement.md
     source: step-03-implement.template.md
     kind: step-template
   - path: step-04-review.md
     source: step-04-review.template.md
     kind: step-template
+  - path: step-05-present.md
+    source: step-05-present.template.md
+    kind: scaffold-verbatim
   - path: step-oneshot.md
     source: step-oneshot.template.md
     kind: step-template
