@@ -875,16 +875,24 @@ class TestCycleDetectionCaseInsensitive(unittest.TestCase):
     """AC-12: cycle detection uses canonical key (os.path.normcase + abspath)."""
 
     def test_canonicalize_helper_is_platform_consistent(self) -> None:
-        # Unit test on _canonicalize_for_cycle helper. Platform-independent
-        # contract: Linux preserves case (different strings), Windows/macOS
-        # collapse case (same string).
+        # Unit test on _canonicalize_for_cycle helper. Platform-aware contract:
+        # - Linux: case-sensitive FS, normcase is identity → case variants are
+        #   distinct strings (assertNotEqual).
+        # - macOS APFS: case-PRESERVING (not case-INSENSITIVE); realpath of a
+        #   non-existent path preserves case → case variants remain distinct
+        #   strings (assertNotEqual). See Story 10.65 / AC-7 Part 2 for the
+        #   rationale (TPL-01 cycle detection still works on real case-variant
+        #   files via realpath succeeding for paths that exist on disk).
+        # - Windows: case-insensitive FS, normcase lowercases → case variants
+        #   collapse (assertEqual).
         from src.scripts.bmad_compile.resolver import _canonicalize_for_cycle
         a = _canonicalize_for_cycle(bmad_io.to_posix("/Foo/Bar"))
         b = _canonicalize_for_cycle(bmad_io.to_posix("/foo/bar"))
-        if sys.platform == "linux":
-            self.assertNotEqual(a, b)
+        if sys.platform == "win32":
+            self.assertEqual(a, b)  # normcase lowercases on Windows
         else:
-            self.assertEqual(a, b)
+            # Linux AND macOS preserve case for non-existent paths via realpath.
+            self.assertNotEqual(a, b)
 
     @unittest.skipUnless(sys.platform != "linux", "case-folding is no-op on Linux")
     def test_cycle_detected_via_case_variant_path(self) -> None:

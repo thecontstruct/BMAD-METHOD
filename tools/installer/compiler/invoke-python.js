@@ -6,17 +6,40 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const crypto = require('node:crypto');
 
+// Story 10.65 / AC-7 Part 2 follow-up: invoke python through the same uv-aware
+// resolver as tools/validate-compile.js. Direct spawn('python3') picks up the
+// macOS-shipped Python 3.9 which lacks `from enum import StrEnum` used by
+// bmad_compile.errors (fork Stories 10.27+). See python-env.js docs for the
+// resolution order: real interpreter on PATH → .venv → `uv run --python 3.13`.
+const { resolvePythonInterpreter, resolvePythonInvocation } = require('../../python-env');
+
 // Frozen for v1 — mirrors bmad_compile.variants.KNOWN_IDES
 const KNOWN_IDES = ['cursor', 'claudecode'];
 
+// Cached at module load — mirrors tools/validate-compile.js's PY_INTERPRETER pattern.
+const PY_INTERPRETER = resolvePythonInterpreter();
+
 /**
- * Spawn python3 and collect stdout/stderr, resolving with { code, stdout, stderr }.
+ * Spawn python3 (or `uv run --python 3.13 python3` if no 3.11+ on PATH) and
+ * collect stdout/stderr, resolving with { code, stdout, stderr, signal }.
+ *
+ * The interpreter + optional --with deps are resolved once at module load via
+ * python-env.js; see that module for the resolution order and rationale.
  */
 function _spawnPython(args, options = {}) {
+  // Compile.py lazy-imports yaml during skill processing (see engine.py:_extract_artifacts_from_frontmatter
+  // and errors.py:8 StrEnum). When the uv fallback path is used, the ephemeral venv
+  // doesn't have pyyaml unless we pass --with explicitly. --with is a no-op for direct
+  // interpreter invocations (real Python with deps already installed).
+  const inv = resolvePythonInvocation({
+    interpreter: PY_INTERPRETER,
+    scriptArgs: args,
+    withDeps: ['pyyaml'],
+  });
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
-    const proc = spawn('python3', args, {
+    const proc = spawn(inv.cmd, inv.args, {
       ...options,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
