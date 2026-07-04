@@ -1,7 +1,6 @@
-"""Story 8.6 unit tests: JIT-time sentinel resolution in render.py."""
+"""Story 8.6 unit tests: JIT-time sentinel resolution."""
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import os
@@ -13,20 +12,14 @@ from unittest.mock import patch
 
 BMAD_ROOT = Path(__file__).resolve().parent.parent.parent
 _SCRIPTS = str(BMAD_ROOT / "src" / "scripts")
-_RENDER_PY = str(
-    BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "render.py"
-)
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
-spec = importlib.util.spec_from_file_location("render_86", _RENDER_PY)
-_render_mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(_render_mod)
-
-_resolve_jit_sentinels = _render_mod._resolve_jit_sentinels
-_JIT_SENTINEL_RE = _render_mod._JIT_SENTINEL_RE
-
-from bmad_compile.component_runner import MockComponentRunner
+from bmad_compile.component_runner import (
+    MockComponentRunner,
+    _JIT_SENTINEL_RE,
+    _resolve_jit_sentinels,
+)
 from bmad_compile.errors import ComponentError
 
 # ── constants ─────────────────────────────────────────────────────────────────

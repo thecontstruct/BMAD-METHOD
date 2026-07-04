@@ -16,14 +16,12 @@ _SCRIPTS = str(BMAD_ROOT / "src" / "scripts")
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
-_RENDER_DIR = str(BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev")
-if _RENDER_DIR not in sys.path:
-    sys.path.insert(0, _RENDER_DIR)
-
-import render  # noqa: E402
-from render import _JIT_BATCH_WORKERS, _resolve_jit_sentinels  # noqa: E402
-from bmad_compile.component_runner import MockComponentRunner  # noqa: E402
-from bmad_compile.errors import ComponentError  # noqa: E402
+from bmad_compile.component_runner import (
+    MockComponentRunner,
+    _JIT_BATCH_WORKERS,
+    _resolve_jit_sentinels,
+)
+from bmad_compile.errors import ComponentError
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +129,7 @@ class TestSingleComponentNoExecutor(unittest.TestCase):
             mock_runner = MagicMock()
             mock_runner.run_jit.return_value = "solo-out"
 
-            with patch("render.ThreadPoolExecutor") as mock_pool:
+            with patch("bmad_compile.component_runner.ThreadPoolExecutor") as mock_pool:
                 result = _resolve_jit_sentinels(
                     _sentinel("Solo", "dddd000000000004"),
                     root, "sk", "mod", _runner=mock_runner,
@@ -144,7 +142,7 @@ class TestSingleComponentNoExecutor(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = _make_root(td, "sk", "mod", [])
             content = "no sentinels here"
-            with patch("render.ThreadPoolExecutor") as mock_pool:
+            with patch("bmad_compile.component_runner.ThreadPoolExecutor") as mock_pool:
                 result = _resolve_jit_sentinels(content, root, "sk", "mod")
             mock_pool.assert_not_called()
             self.assertEqual(result, content)

@@ -5,8 +5,15 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
+import posixpath
 import re
 import sys
+
+# io_mod is the bmad_compile.io module (not the stdlib io). Imported at module
+# load with an alias to avoid shadowing the stdlib `io` import above, which is
+# still needed by other consumers in this file.
+import bmad_compile.io as io_mod
 import tokenize
 import traceback
 import types
@@ -358,3 +365,245 @@ class MockComponentRunner(ComponentRunner):
         if isinstance(self._jit_result, BaseException):
             raise self._jit_result
         return self._jit_result
+
+
+# =============================================================================
+# JIT sentinel resolution (Story 10.65 / AC-5; extracted from
+# src/bmm-skills/4-implementation/bmad-quick-dev/render.py)
+# =============================================================================
+
+_JIT_SENTINEL_RE = re.compile(
+    r'<!--\s*BMAD-JIT:(?P<name>[A-Z][A-Za-z0-9]+):(?P<hash>[0-9a-f]{16})\s*-->'
+)
+_JIT_BATCH_WORKERS: int = 4
+
+
+def _emit_jit_event(event: dict) -> None:
+    """Emit a component_error NDJSON event to stderr (JIT runtime — not compile stdout).
+    Uses sort_keys for deterministic output; flush=True ensures delivery before exceptions.
+    try/except prevents emit errors from propagating into the render pipeline."""
+    try:
+        print(json.dumps(event, sort_keys=True), file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def _build_jit_ctx_config(root: str) -> dict:
+    """Four-layer central config merge for JIT ctx.config.
+    Uses bmad_compile.toml_merge.merge_layers — not the local _deep_merge."""
+    from bmad_compile.toml_merge import merge_layers, load_toml_file
+    bmad_dir = posixpath.join(root, "_bmad")
+    return merge_layers(
+        load_toml_file(posixpath.join(bmad_dir, "config.toml")),
+        load_toml_file(posixpath.join(bmad_dir, "config.user.toml")),
+        load_toml_file(posixpath.join(bmad_dir, "custom", "config.toml")),
+        load_toml_file(posixpath.join(bmad_dir, "custom", "config.user.toml")),
+    )
+
+
+def _resolve_jit_sentinels(
+    content: str,
+    root: str,
+    skill_name: str,
+    module_name: str,
+    _runner=None,  # test injection: pre-built ComponentRunner-compatible instance
+) -> str:
+    matches = list(_JIT_SENTINEL_RE.finditer(content))
+    if not matches:
+        return content
+
+    try:
+        from bmad_compile.component_runner import ComponentRunner
+        from bmad_compile.errors import ComponentError
+    except ImportError as exc:
+        _emit_jit_event({
+            "kind": "component_error", "component": "<all>", "mode": "jit",
+            "props": {}, "exit_code": None, "stderr": str(exc),
+            "phase": "jit", "reason": "bmad_compile_unavailable",
+        })
+        return _JIT_SENTINEL_RE.sub(
+            lambda m: f"<!-- BMAD-ERROR:{m.group('name')} -->", content
+        )
+
+    try:
+        ctx_config = _build_jit_ctx_config(root)
+    except Exception as exc:
+        print(
+            f"_resolve_jit_sentinels: JIT ctx_config failed ({exc}); using empty config",
+            file=sys.stderr,
+        )
+        ctx_config = {}
+
+    if sys.version_info < (3, 11):
+        _emit_jit_event({
+            "kind": "component_error", "component": "<all>", "mode": "jit",
+            "props": {}, "exit_code": None, "stderr": "",
+            "phase": "jit", "reason": "python_version_too_old",
+        })
+        return _JIT_SENTINEL_RE.sub(
+            lambda m: f"<!-- BMAD-ERROR:{m.group('name')} -->", content
+        )
+
+    lockfile_path = posixpath.join(root, "_bmad", "_config", "bmad.lock")
+    if not os.path.isfile(lockfile_path):
+        _emit_jit_event({
+            "kind": "component_error", "component": "<all>", "mode": "jit",
+            "props": {}, "exit_code": None, "stderr": "", "phase": "jit",
+            "reason": "lockfile_absent",
+        })
+        return _JIT_SENTINEL_RE.sub(
+            lambda m: f"<!-- BMAD-ERROR:{m.group('name')} -->", content
+        )
+
+    try:
+        # Story 10.65 AC-5: route through bmad_compile.io per the io-boundary rule;
+        # strip the UTF-8 BOM manually (read_template preserves BOM).
+        raw = io_mod.read_template(lockfile_path)
+        lockfile_data = json.loads(raw.lstrip("\ufeff"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        _emit_jit_event({
+            "kind": "component_error", "component": "<all>",
+            "mode": "jit", "props": {}, "exit_code": None,
+            "stderr": str(exc), "phase": "jit",
+            "reason": "lockfile_malformed",
+        })
+        return _JIT_SENTINEL_RE.sub(
+            lambda m: f"<!-- BMAD-ERROR:{m.group('name')} -->", content
+        )
+
+    raw_entries = lockfile_data.get("entries")
+    entries_list = raw_entries if isinstance(raw_entries, list) else []
+    skill_entry = None
+    for entry in entries_list:
+        if isinstance(entry, dict) and entry.get("skill") == skill_name:
+            skill_entry = entry
+            break
+
+    seen_keys: dict[tuple[str, str], None] = {}
+    for m in matches:
+        key = (m.group("name"), m.group("hash"))
+        if key not in seen_keys:
+            seen_keys[key] = None
+    unique_pairs = list(seen_keys.keys())
+
+    if skill_entry is None:
+        for (name, _) in unique_pairs:
+            _emit_jit_event({
+                "kind": "component_error", "component": name,
+                "mode": "jit", "props": {}, "exit_code": None,
+                "stderr": "", "phase": "jit",
+                "reason": "lockfile_entry_missing",
+            })
+        return _JIT_SENTINEL_RE.sub(
+            lambda m: f"<!-- BMAD-ERROR:{m.group('name')} -->", content
+        )
+
+    raw_comps = skill_entry.get("components")
+    comps_list = raw_comps if isinstance(raw_comps, list) else []
+
+    installed_component_dir = posixpath.join(
+        root, "_bmad", "components", module_name, skill_name
+    )
+    ctx_dict = {
+        "config": ctx_config,
+        "skill_id": f"{module_name}/{skill_name}",
+        "skill_source_root": installed_component_dir,
+        "render_mode": "jit",
+    }
+    runner = _runner if _runner is not None else ComponentRunner(emit_fn=_emit_jit_event)
+
+    _replacements: dict[tuple[str, str], str] = {}
+
+    runnable: list[tuple[str, str, dict, str]] = []
+    for (name, hash_) in unique_pairs:
+        sentinel_key = (name, hash_)
+        comp = next(
+            (c for c in comps_list
+             if isinstance(c, dict) and c.get("name") == name and c.get("props_hash") == hash_),
+            None,
+        )
+        if comp is None:
+            _emit_jit_event({
+                "kind": "component_error", "component": name,
+                "mode": "jit", "props": {}, "exit_code": None,
+                "stderr": "", "phase": "jit",
+                "reason": "lockfile_entry_missing",
+            })
+            _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
+            continue
+        props_val = comp.get("props")
+        props_dict = props_val if isinstance(props_val, dict) else {}
+        path_val = comp.get("path")
+        if not isinstance(path_val, str) or not path_val:
+            _emit_jit_event({
+                "kind": "component_error", "component": name, "mode": "jit",
+                "props": props_dict, "exit_code": None, "stderr": "",
+                "phase": "jit", "reason": "component_file_missing",
+            })
+            _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
+            continue
+        filename = posixpath.basename(path_val)
+        installed_path = posixpath.join(installed_component_dir, filename)
+        if not os.path.isfile(installed_path):
+            _emit_jit_event({
+                "kind": "component_error", "component": name, "mode": "jit",
+                "props": props_dict, "exit_code": None, "stderr": "",
+                "phase": "jit", "reason": "component_file_missing",
+            })
+            _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
+            continue
+        runnable.append((name, hash_, props_dict, installed_path))
+
+    if len(runnable) <= 1:
+        for (name, hash_, props_dict, installed_path) in runnable:
+            sentinel_key = (name, hash_)
+            try:
+                _replacements[sentinel_key] = runner.run_jit(
+                    installed_path, ctx_dict, props_dict, component_name=name
+                )
+            except ComponentError as exc:
+                fb = exc.render_error_fallback
+                _replacements[sentinel_key] = (
+                    fb if isinstance(fb, str) else f"<!-- BMAD-ERROR:{name} -->"
+                )
+            except Exception as exc:
+                _emit_jit_event({
+                    "kind": "component_error", "component": name, "mode": "jit",
+                    "props": props_dict, "exit_code": None, "stderr": str(exc),
+                    "phase": "jit", "reason": "runner_unexpected_error",
+                })
+                _replacements[sentinel_key] = f"<!-- BMAD-ERROR:{name} -->"
+    else:
+        def _run_one(name: str, hash_: str, props_dict: dict, installed_path: str) -> tuple:
+            sk = (name, hash_)
+            try:
+                return sk, runner.run_jit(
+                    installed_path, ctx_dict, props_dict, component_name=name
+                )
+            except ComponentError as exc:
+                fb = exc.render_error_fallback
+                return sk, (fb if isinstance(fb, str) else f"<!-- BMAD-ERROR:{name} -->")
+            except Exception as exc:
+                _emit_jit_event({
+                    "kind": "component_error", "component": name, "mode": "jit",
+                    "props": props_dict, "exit_code": None, "stderr": str(exc),
+                    "phase": "jit", "reason": "runner_unexpected_error",
+                })
+                return sk, f"<!-- BMAD-ERROR:{name} -->"
+
+        with ThreadPoolExecutor(max_workers=_JIT_BATCH_WORKERS) as executor:
+            future_map = {
+                executor.submit(_run_one, n, h, p, ip): (n, h)
+                for (n, h, p, ip) in runnable
+            }
+            for future in as_completed(future_map):
+                key, val = future.result()
+                _replacements[key] = val
+
+    def _repl(m: re.Match) -> str:
+        key = (m.group("name"), m.group("hash"))
+        if key in _replacements:
+            return _replacements[key]
+        return f"<!-- BMAD-ERROR:{m.group('name')} -->"
+
+    return _JIT_SENTINEL_RE.sub(_repl, content)
