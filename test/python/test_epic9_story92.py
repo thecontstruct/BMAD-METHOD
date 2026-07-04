@@ -15,6 +15,10 @@ BMAD_ROOT = Path(__file__).resolve().parent.parent.parent
 REF_COMPS = BMAD_ROOT / "src" / "core-skills" / "bmad-reference-components" / "components"
 SHARED_COMPS = BMAD_ROOT / "src" / "_shared" / "components"
 QD_COMPS = BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "components"
+# Post-DN-FOLLOWUP-II (2026-07-03): bmad-quick-dev's local todays_date.py
+# was lifted to _shared/components/. The local copy is gone; consumers
+# resolve via the shared fallback.
+SHARED_COMPS = BMAD_ROOT / "src" / "_shared" / "components"
 
 _SCRIPTS = str(BMAD_ROOT / "src" / "scripts")
 if _SCRIPTS not in sys.path:
@@ -156,11 +160,16 @@ class TestProjectContextComponent(unittest.TestCase):
 class TestQuickDevMigration(unittest.TestCase):
 
     def test_j_todays_date_renders_via_run_jit(self):
-        """TodaysDate at quick-dev path returns today's ISO date via run_jit."""
+        """TodaysDate at the shared-components path returns today's ISO date via run_jit.
+
+        Post-DN-FOLLOWUP-II: bmad-quick-dev's local todays_date.py was lifted to
+        _shared/components/todays_date.py. The render still happens via run_jit
+        with the shared path as the resolved source.
+        """
         import datetime
         runner = ComponentRunner()
         result = runner.run_jit(
-            str(QD_COMPS / "todays_date.py"),
+            str(SHARED_COMPS / "todays_date.py"),
             _CTX_EMPTY,
             {},
             component_name="TodaysDate",
@@ -168,20 +177,24 @@ class TestQuickDevMigration(unittest.TestCase):
         self.assertEqual(result, datetime.date.today().isoformat())
 
     def test_k_todays_date_copies_byte_identical(self):
-        """Quick-dev's todays_date.py is content-identical to the reference component.
+        """todays_date.py is content-identical between the reference and shared copies.
+
+        Post-DN-FOLLOWUP-II: the bmad-quick-dev local copy was lifted to shared;
+        only bmad-reference-components' local copy remains. Until its own
+        SHA-pin-lift lands, the two remaining copies must stay byte-identical.
 
         Uses read_text(encoding='utf-8') rather than read_bytes() to normalise line
         endings (CRLF vs LF) on Windows, so the comparison is platform-safe.
         """
         import hashlib
         ref_text = (REF_COMPS / "todays_date.py").read_text(encoding="utf-8")
-        qd_text = (QD_COMPS / "todays_date.py").read_text(encoding="utf-8")
+        shared_text = (SHARED_COMPS / "todays_date.py").read_text(encoding="utf-8")
         ref_hash = hashlib.sha256(ref_text.encode("utf-8")).hexdigest()
-        qd_hash = hashlib.sha256(qd_text.encode("utf-8")).hexdigest()
+        shared_hash = hashlib.sha256(shared_text.encode("utf-8")).hexdigest()
         self.assertEqual(
-            ref_hash, qd_hash,
-            "todays_date.py diverged between reference and quick-dev copies. "
-            "Keep them in sync or use a shared location.",
+            ref_hash, shared_hash,
+            "todays_date.py diverged between reference and shared copies. "
+            "Keep them in sync or complete the next SHA-pin-lift.",
         )
 
 

@@ -521,7 +521,13 @@ class TestGroupESHAPins:
 
     def test_e6_no_basename_collision_outside_allowlist(self):
         """E-6: no _shared/components/<f>.py shares basename with a pinned
-        component file, except for the per-basename allowlist (todays_date.py)."""
+        component file, except for the per-basename allowlist (todays_date.py).
+
+        Post-DN-FOLLOWUP-II: bmad-quick-dev's local todays_date.py was lifted
+        to _shared/components/ (DN-FOLLOWUP-II closed 2026-07-03). The only
+        remaining collision is bmad-reference-components' local copy, which
+        is still on the allowlist until its own SHA-pin-lift story lands.
+        """
         # Per-basename allowlist — see DN-1 (Phil's revised constraint):
         # pinned skill keeps its local copy; the lifted version in _shared/
         # serves new/unpinned consumers only. Any OTHER name collision must fail.
@@ -548,16 +554,15 @@ class TestGroupESHAPins:
             f"allowlist {sorted(ALLOWLIST)} (DN-1=C triple-copy state)."
         )
 
-    def test_e7_todays_date_triple_copy_byte_identical(self):
-        """E-7: sha256(_shared) == sha256(bmad-quick-dev) == sha256(bmad-reference-components).
+    def test_e7_todays_date_double_copy_byte_identical(self):
+        """E-7: sha256(_shared) == sha256(bmad-reference-components).
 
-        Divergence guard for the DN-1=C triple-copy state. Any of the three
-        drifting apart during the pin-window is a correctness bug.
+        Divergence guard for the post-DN-FOLLOWUP-II double-copy state (Story
+        10.65 lifted the bmad-quick-dev local copy to _shared/components/).
+        bmad-reference-components still keeps a local copy (not yet lifted).
         """
         paths = [
             _REPO / "src" / "_shared" / "components" / "todays_date.py",
-            _REPO / "src" / "bmm-skills" / "4-implementation"
-            / "bmad-quick-dev" / "components" / "todays_date.py",
             _REPO / "src" / "core-skills" / "bmad-reference-components"
             / "components" / "todays_date.py",
         ]
@@ -567,8 +572,8 @@ class TestGroupESHAPins:
         assert len(set(hashes)) == 1, (
             "todays_date.py copies have DIVERGED:\n"
             + "\n".join(f"  {p.relative_to(_REPO)}: {h}" for p, h in zip(paths, hashes))
-            + "\nPer DN-1=C, all three copies MUST stay byte-identical until "
-            + "DN-FOLLOWUP-G lifts the pinned-skill copies."
+            + "\nThe remaining copies MUST stay byte-identical until the next "
+            + "SHA-pin-lift removes bmad-reference-components' local copy."
         )
 
 
