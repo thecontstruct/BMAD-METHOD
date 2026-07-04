@@ -484,7 +484,7 @@ class TestGroupCLockfileV4:
 # stability is enforced by the existing JS test suite, not by this file.
 _PINNED_SKILLS: dict[str, str] = {
     "src/core-skills/bmad-help/SKILL.md":
-        "a766c6bd76bcfc4a49a683417440d39978a2e10bb5618dfd469fff03f96b4b4d",
+        "718077d741e20d9c94f3c2b7827047f2d18a90b85c3cc2eecd449e28b7b0d642",
     "src/bmm-skills/4-implementation/bmad-quick-dev/SKILL.md":
         "e58119e55ba1c5f39ec931a19cb1cc9e2a28040292a7a105ee0118f49d8b77f3",
     "src/core-skills/bmad-customize/bmad-customize.template.md":

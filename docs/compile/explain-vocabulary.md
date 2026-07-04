@@ -48,7 +48,7 @@ Wraps the root template plus every fragment the resolver visited via `<<include 
 ```xml
 <Include src="bmad-help/bmad-help.template.md"
          resolved-from="base"
-         hash="a766c6bd76bcfc4a49a683417440d39978a2e10bb5618dfd469fff03f96b4b4d">
+         hash="718077d741e20d9c94f3c2b7827047f2d18a90b85c3cc2eecd449e28b7b0d642">
 ...fragment content...
 </Include>
 ```
