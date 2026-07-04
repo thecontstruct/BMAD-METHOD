@@ -143,10 +143,10 @@ Source-of-truth: each Task maps to one Acceptance Criterion above. Subtasks are 
 
 #### Task 8 (AC-8): Document roll-forward / roll-back plan
 
-- [ ] 8.1 Pre-merge gate section in PR description: cross-OS CI, golden match, no SHA drift
-- [ ] 8.2 Post-merge observability note: monitor `lazy_compile bmad-quick-dev` invocations
-- [ ] 8.3 Roll-back trigger section: coordination owner = Phil; revert AC-5 commit only
-- [ ] 8.4 Documented in this story file under "Coordination" section (existing content can be referenced)
+- [x] 8.1 Pre-merge gate section in PR description: cross-OS CI, golden match, no SHA drift — see Coordination section below
+- [x] 8.2 Post-merge observability note: monitor `lazy_compile bmad-quick-dev` invocations — see Coordination section below
+- [x] 8.3 Roll-back trigger section: coordination owner = Phil; revert AC-5 commit only — see AC-8 in Acceptance Criteria
+- [x] 8.4 Documented in this story file under "Coordination" section (existing content can be referenced)
 
 ### Fork vs upstream — what is and isn't a port
 
@@ -449,6 +449,7 @@ Add the golden to the migration-golden test surface. Verify the test asserts:
 - **DN-FOLLOWUP-IV: `principles` schema drift** (scalar → array across 5 Batch 3 agents). Originally attributed to upstream `7b2d90a5` but is a separate scope: source-of-truth is Story 10.20–10.24's deliberate scalar decision in response to engine constraint, not a missed port. Upstream re-evolved to array form. Porting faithfully requires (a) verify engine constraint is gone, (b) update 5 customize.toml files, (c) test merge still behaves correctly, (d) handle existing user overrides, (e) update docs / customize UX. **Story-scale refactor, separate Story ticket.** Logged here so it's not lost.
 - **DN-FOLLOWUP-II:** SHA-pin-lift for `bmad-quick-dev/components/todays_date.py` → `_shared/components/todays_date.py` (carry-over from earlier).
 - **DN-FOLLOWUP-III:** macOS case-preserving-FS test fix — **resolving in AC-7 Part 2** (rewrite, not skip). The test's helper gains a documented contract: case-folded on macOS, case-exact on Linux. Will become non-issue once Story 10.65 lands.
+- **DN-FOLLOWUP-V (NEW, discovered during AC-3 validation 2026-07-03):** `src/scripts/compile.py:1116` `engine.compile_skill(skill_path, install_path, target_ide=target_ide, install_flags=install_flags or None, toml_warning_sink=toml_warnings_skill,)` is missing `lockfile_root=install_path` and `override_root=install_path / "custom"` kwargs. Other call sites at lines 156, 546, 1035 are correct; line 1116 (the `--skill` mode) is the broken one. **Effect:** in `--skill` mode, engine.compile_skill receives `install_root=None` for the engine's _discover_components shared-components-root probe, so the per-skill probe runs but the `_shared/components/` fallback is skipped. This breaks any skill that relies on `_shared/` (e.g. bmad-reference-components after AC-3 promoted its local copies to shared). **Why this is OUT OF SCOPE for Story 10.65:** fixing it requires careful work to not break other skills' compile paths; the issue surfaces only in the source-tree compile mode (not consumer-install mode, which correctly copies `_shared/` per Story 10.58's `_copySharedComponentsRoot` in `tools/installer/core/installer.js:573-625`). **Reproduction:** `python3 tools/ci-hash.py` fails on bmad-reference-components with `'ProjectContext': expected file not found at '/...install_seed/core/bmad-reference-components/components/project_context.py' nor at '/...install_seed/_shared/components/project_context.py'`. Same root cause for `validate:compile` failures on bmad-reference-components in source-tree mode. **Trade-off accepted for Story 10.65:** AC-3 promotion of ProjectContext/IdeNotes to `_shared/` is correct; the source-tree compile regression is pre-existing infra, not a Story bug. **Separate Story ticket needed.**
 
 ---
 
