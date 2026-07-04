@@ -77,7 +77,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
 
 ## Paths
 
-- `sprint_status` = `{implementation_artifacts}/sprint-status.yaml`
+- `sprint_status` = `<!-- BMAD-JIT:ArtifactPath:afb2b6c1efd75e2a -->`
 - `epics_file` = `{planning_artifacts}/epics.md`
 - `prd_file` = `{planning_artifacts}/prd.md`
 - `architecture_file` = `{planning_artifacts}/architecture.md`

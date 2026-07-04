@@ -26,7 +26,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
 - `story_location_absolute` = `{implementation_artifacts}`
 - `epics_location` = `{planning_artifacts}`
 - `epics_pattern` = `*epic*.md`
-- `status_file` = `{implementation_artifacts}/sprint-status.yaml`
+- `status_file` = `<ArtifactPath kind="sprint-status" />`
 
 ## Input Files
 

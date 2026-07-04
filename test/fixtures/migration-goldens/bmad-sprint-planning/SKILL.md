@@ -73,7 +73,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
 - `story_location_absolute` = `{implementation_artifacts}`
 - `epics_location` = `{planning_artifacts}`
 - `epics_pattern` = `*epic*.md`
-- `status_file` = `{implementation_artifacts}/sprint-status.yaml`
+- `status_file` = `<!-- BMAD-JIT:ArtifactPath:afb2b6c1efd75e2a -->`
 
 ## Input Files
 

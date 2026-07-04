@@ -75,7 +75,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
 ## Paths
 
 - `story_file` = `` (explicit story path; auto-discovered if empty)
-- `sprint_status` = `{implementation_artifacts}/sprint-status.yaml`
+- `sprint_status` = `<!-- BMAD-JIT:ArtifactPath:afb2b6c1efd75e2a -->`
 
 ## Execution
 

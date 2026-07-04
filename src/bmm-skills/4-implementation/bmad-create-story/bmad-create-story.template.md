@@ -30,7 +30,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
 <<include path="_shared/fragments/workflow-activation.md" config_path="{project-root}/_bmad/bmm/config.yaml" skill_kind="workflow">>
 ## Paths
 
-- `sprint_status` = `{implementation_artifacts}/sprint-status.yaml`
+- `sprint_status` = `<ArtifactPath kind="sprint-status" />`
 - `epics_file` = `{planning_artifacts}/epics.md`
 - `prd_file` = `{planning_artifacts}/prd.md`
 - `architecture_file` = `{planning_artifacts}/architecture.md`

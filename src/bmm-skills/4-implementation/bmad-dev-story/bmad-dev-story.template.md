@@ -28,7 +28,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
 ## Paths
 
 - `story_file` = `` (explicit story path; auto-discovered if empty)
-- `sprint_status` = `{implementation_artifacts}/sprint-status.yaml`
+- `sprint_status` = `<ArtifactPath kind="sprint-status" />`
 
 ## Execution
 

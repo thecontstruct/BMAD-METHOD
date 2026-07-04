@@ -83,7 +83,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
 
 ## Paths
 
-- `sprint_status_file` = `{implementation_artifacts}/sprint-status.yaml`
+- `sprint_status_file` = `<!-- BMAD-JIT:ArtifactPath:afb2b6c1efd75e2a -->`
 
 ## Input Files
 
