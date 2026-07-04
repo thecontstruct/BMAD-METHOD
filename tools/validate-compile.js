@@ -134,6 +134,46 @@ function runCompile(skillSrcDir, tmpDir) {
   });
 }
 
+/**
+ * Detect whether a skill template references any component that lives ONLY in
+ * _shared/components/ (not in the skill's local components/). Such skills must
+ * use positional compile layout so engine._discover_components can find the
+ * shared component via its install_root/_shared/components/ fallback probe.
+ *
+ * Story 10.65 DN-FOLLOWUP-V: surfaced when ProjectContext/IdeNotes were
+ * promoted from bmad-reference-components to _shared/components/. Without this
+ * detection, validate-compile's --skill mode skips the _shared/ probe and
+ * reports 'component ... not found'.
+ *
+ * @param {string} skillSrcDir - absolute path to the skill's source dir
+ * @param {string} skillBasename - skill directory basename (e.g. 'bmad-reference-components')
+ * @returns {boolean} true if any `<Foo />` invocation resolves to a shared-only component
+ */
+function _usesSharedComponents(skillSrcDir, skillBasename) {
+  const templatePath = path.join(skillSrcDir, `${skillBasename}.template.md`);
+  if (!fs.existsSync(templatePath)) return false;
+  const templateText = fs.readFileSync(templatePath, 'utf8');
+  // Match <ComponentName /> tags (PascalCase identifier, with optional leading slash).
+  const componentRefs = [...templateText.matchAll(/<([A-Z][A-Za-z0-9]+)\s*\/>/g)].map((m) => m[1]);
+  if (componentRefs.length === 0) return false;
+  const localComponentsDir = path.join(skillSrcDir, 'components');
+  const sharedComponentsDir = path.join(PROJECT_ROOT, SRC_PREFIX, '_shared', 'components');
+  for (const name of componentRefs) {
+    const sharedFile = path.join(sharedComponentsDir, `${_toSnakeCase(name)}.py`);
+    const localFile = path.join(localComponentsDir, `${_toSnakeCase(name)}.py`);
+    const inShared = fs.existsSync(sharedFile);
+    const inLocal = fs.existsSync(localFile);
+    // 'shared-only' = in shared but NOT in local (local SHA-pin collisions don't count).
+    if (inShared && !inLocal) return true;
+  }
+  return false;
+}
+
+/** Convert PascalCase to snake_case for component filename lookup. */
+function _toSnakeCase(name) {
+  return name.replaceAll(/([A-Z])/g, (_, c, i) => (i === 0 ? c.toLowerCase() : '_' + c.toLowerCase()));
+}
+
 function copyDirSync(src, dst) {
   fs.mkdirSync(dst, { recursive: true });
   for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
@@ -150,15 +190,21 @@ function validateOne(entry) {
   const skillBasename = path.basename(skillSrcDir);
   // Story 10.12: skills with _shared/ fragments require positional compile layout.
   const usesSharedFragments = (entry.fragments || []).some((f) => typeof f.path === 'string' && f.path.startsWith('_shared/'));
+  // Story 10.65 / DN-FOLLOWUP-V: skills using components that live in _shared/components/
+  // also require positional compile layout, so the engine's _discover_components fallback
+  // probe can find them (the per-skill mode skips the _shared/ probe).
+  const usesSharedComponents = _usesSharedComponents(skillSrcDir, skillBasename);
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmad-validate-'));
 
   try {
     let compileResult;
     let compiledSkillDir;
 
-    if (usesSharedFragments) {
+    if (usesSharedFragments || usesSharedComponents) {
       // Positional compile: lay out <module>/<skill>/ + _shared/ in tmpDir so
-      // _discover_module_roots() can find _shared fragments.
+      // _discover_module_roots() can find _shared fragments AND the engine's
+      // _discover_components shared-components-root probe can resolve shared
+      // components (Story 10.58 fallback; Story 10.65 DN-FOLLOWUP-V surface).
       const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
       const relToSrc = path.relative(srcRoot, skillSrcDir);
       const module = relToSrc.startsWith('bmm-skills') ? 'bmm' : 'core';

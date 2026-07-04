@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 BMAD_ROOT = Path(__file__).resolve().parent.parent.parent
 REF_COMPS = BMAD_ROOT / "src" / "core-skills" / "bmad-reference-components" / "components"
+SHARED_COMPS = BMAD_ROOT / "src" / "_shared" / "components"
 QD_COMPS = BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "components"
 
 _SCRIPTS = str(BMAD_ROOT / "src" / "scripts")
@@ -75,7 +76,7 @@ class TestIdeNotesComponent(unittest.TestCase):
         ctx = {**_CTX_EMPTY, "config": config, "render_mode": "compile"}
         runner = ComponentRunner()
         return runner.run_jit(
-            str(REF_COMPS / "ide_notes.py"),
+            str(SHARED_COMPS / "ide_notes.py"),
             ctx, {},
             component_name="IdeNotes",
         )
@@ -116,7 +117,7 @@ class TestProjectContextComponent(unittest.TestCase):
     def _run(self, ctx=None):
         runner = ComponentRunner()
         return runner.run_jit(
-            str(REF_COMPS / "project_context.py"),
+            str(SHARED_COMPS / "project_context.py"),
             ctx or _CTX_FULL,
             {},
             component_name="ProjectContext",

@@ -167,7 +167,14 @@ function resolvePythonInvocation(opts = {}) {
   const scriptArgs = opts.scriptArgs || [];
   const withDeps = opts.withDeps || [];
 
-  if (interpreter.kind === 'python') {
+  // When caller specifies `withDeps`, route through `uv run --with` even if a
+  // real Python interpreter is available. The real-Python path would otherwise
+  // ignore withDeps and rely on the caller having pre-installed them — but a
+  // project-local .venv set up via `uv sync` without `--group test` lacks
+  // pyyaml/pytest, leading to ModuleNotFoundError at first import inside
+  // src/scripts/bmad_compile/engine.py. uv's ephemeral venv honors --with
+  // unconditionally; cost is ~36ms per invocation (cached after first).
+  if (interpreter.kind === 'python' && withDeps.length === 0) {
     return { cmd: interpreter.binary, args: [...scriptArgs] };
   }
 
@@ -179,7 +186,10 @@ function resolvePythonInvocation(opts = {}) {
     args.push('--with', dep);
   }
   args.push('python3', ...scriptArgs);
-  return { cmd: interpreter.binary, args };
+  // When interpreter.kind === 'python' but withDeps forced the uv form,
+  // override cmd to 'uv' (interpreter.binary is the .venv python, not uv).
+  const cmd = interpreter.kind === 'python' ? 'uv' : interpreter.binary;
+  return { cmd, args };
 }
 
 module.exports = {
