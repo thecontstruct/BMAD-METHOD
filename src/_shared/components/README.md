@@ -22,7 +22,7 @@ Per-skill probe wins; intentional shadowing is permitted. A skill that
 wants to override a shared primitive can drop a same-named file in its
 own `components/`.
 
-## DN-8 criteria — when to lift a component here
+## Criteria for lifting a component here
 
 A component qualifies for `_shared/components/` lift only if all of:
 
@@ -51,13 +51,14 @@ Failing any criterion → keep the component per-skill.
 
 - `todays_date.py` — lifted byte-identical from
   `bmad-quick-dev/components/` + `bmad-reference-components/components/`.
-  Pinned copies stay in place until DN-FOLLOWUP-G (post-pin-lift cleanup).
+  Pinned copies stay in place pending a cleanup pass once all consumers
+  have migrated to the shared location.
 - `artifact_path.py` — JIT component encoding BMAD-domain path-derivation
   logic (story spec paths, sprint-status keys, epic keys, retro filenames,
-  planning-artifact globs). Consumer adoption tracked as DN-FOLLOWUP-I.
+  planning-artifact globs).
 
 ## Limits
 
-- Flat directory only — no subdirectories (DN-FOLLOWUP-E).
+- Flat directory only — no subdirectories.
 - Per-component data-file declaration not yet supported — skill-level
-  over-invalidation is acceptable for now (DN-FOLLOWUP-B).
+  over-invalidation is acceptable for now.

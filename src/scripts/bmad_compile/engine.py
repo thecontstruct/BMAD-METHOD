@@ -519,16 +519,15 @@ def _discover_components(
 
     Returns (enriched_flat_nodes, compile_invocations, jit_invocations).
 
-    Story 10.58: when install_root is provided, components missing under
+    When install_root is provided, components missing under
     skill_source_root/components/ fall back to install_root/_shared/components/
-    (per-skill probe wins; intentional shadowing permitted). Per DN-8
-    duplicate-identification criteria, a component qualifies for _shared/
-    lift only if it is: (1) referenced by >=2 inter-skill consumers, (2)
-    byte-identical or semantically identical, (3) absent from any SHA-pinned
-    skill OR pinned-keeps-local with the lifted version serving unpinned
-    consumers, (4) a render-time primitive (component-tag-invoked), (5)
-    stable surface (same render signature + RENDER_MODE), (6) genuinely
-    cross-cutting in domain semantics. See Story 10.58 spec for full criteria.
+    (per-skill probe wins; intentional shadowing permitted). A component
+    qualifies for _shared/ lift only if it is: (1) referenced by >=2
+    inter-skill consumers, (2) byte-identical or semantically identical,
+    (3) absent from any SHA-pinned skill OR pinned-keeps-local with the
+    lifted version serving unpinned consumers, (4) a render-time primitive
+    (component-tag-invoked), (5) stable surface (same render signature +
+    RENDER_MODE), (6) genuinely cross-cutting in domain semantics.
     """
     import os as _os
 

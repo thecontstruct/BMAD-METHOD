@@ -127,11 +127,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # DN-R2-6 (Phil Option C 2026-05-08): no `pip install` step is needed because
-      # src/scripts/compile.py is stdlib-only (per the Python compiler architecture
-      # established in Stories 5.1–5.5b — no pyyaml, no requests, no third-party deps).
-      # If a future story adds a non-stdlib Python import, this job MUST be updated to
-      # `pip install -r <requirements>` between Setup Python and Validate compile hashes.
+      # No `pip install` step needed: the compile pipeline is stdlib-only
+      # (no pyyaml, requests, or third-party deps). If a future change adds a
+      # non-stdlib import, add a `pip install -r <requirements>` step here.
       - name: Setup Python
         uses: actions/setup-python@v5
         with:

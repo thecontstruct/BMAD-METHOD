@@ -31,11 +31,7 @@ def render(ctx, **props):
           bmad-dev-story.template.md:149; bmad-retrospective.template.md:200,
           1352,1356,1362-1364; bmad-code-review/steps/step-01-gather-context.md:
           38-39; bmad-quick-dev/step-01-clarify-and-route.md:42-67 (pinned ref).
-        - Consumer-side template migration tracked as DN-FOLLOWUP-I — NOT in
-          Story 10.58 scope. Component sits awaiting adoption like
-          _shared/fragments/ did before all migrators adopted them.
-
-    See DN-8 criteria #4 (render-time primitive) and #6 (cross-cutting domain).
+        - Skills adopt this component independently as they migrate.
     """
     config = getattr(ctx, "config", None) or {}
     ia = config.get("implementation_artifacts", "_bmad-output/implementation-artifacts")
