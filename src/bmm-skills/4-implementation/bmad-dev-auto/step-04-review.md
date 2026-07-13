@@ -26,7 +26,9 @@ The review layers are `{workflow.review_layers}`, resolved during activation.
 
 Skip every layer whose `instruction` is empty or missing — that is how an override disables a default layer — and every layer whose `when` condition (if present) does not hold in the current context. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
 
-Execute all remaining layers in parallel wherever their execution methods allow: substitute the runtime placeholders (e.g. `{diff_output}`) into each layer's `instruction`, then follow it verbatim.
+Runtime placeholders: `{diff_output}` is the diff constructed above. `{verbatim_intent}` is the invocation intent exactly as this run received it at step-01; if the run started from an existing spec file rather than a fresh intent, it is the spec's `<intent-contract>` block instead.
+
+Execute all remaining layers in parallel wherever their execution methods allow: substitute the runtime placeholders (e.g. `{diff_output}`) into each layer's `instruction`, then follow it verbatim. Parallel means several blocking calls awaited together in this turn — never backgrounded or detached, never ending the turn to await results (see SKILL.md → Subagents). Spawn every reviewer subagent before reading or reacting to any of their output; begin collection and triage only once all are launched.
 
 ### Classify
 
@@ -62,7 +64,7 @@ Execute all remaining layers in parallel wherever their execution methods allow:
 5. Process findings in cascading order. If intent_gap exists, lower findings are moot; follow the intent_gap branch below. If bad_spec exists, lower findings are moot since code will be re-derived. If neither exists, process patch and defer normally. Before each bad_spec loopback, read `{spec_file}` frontmatter `review_loop_iteration` (missing means `0`), increment it by 1, and write it back. If it exceeds 5, append the triage-log entry for this pass with `addressed_findings: none`, then HALT with status `blocked` and blocking condition `review repair loop exceeded 5 iterations (non-convergence)`.
    - **intent_gap** — Root cause is inside `<intent-contract>`. Revert code changes. Append the triage-log entry for this pass with `addressed_findings: none`, then HALT with status `blocked`, blocking condition `intent gap in intent contract`, and include the intent-gap findings.
    - **bad_spec** — Root cause is outside `<intent-contract>`. Do not modify content inside `<intent-contract>`. Before reverting code: extract KEEP instructions for positive preservation (what worked well and must survive re-derivation). Revert code changes. Read the `## Spec Change Log` in `{spec_file}` and strictly respect all logged constraints when amending the sections outside `<intent-contract>` that contain the root cause. Append a new change-log entry recording: the triggering finding, what was amended, the known-bad state avoided, and the KEEP instructions. Append the triage-log entry for this pass, listing every bad_spec finding that triggered the spec amendment and implementation loopback under `addressed_findings`. Read fully and follow `./step-03-implement.md` to re-derive the code, then this step will run again.
-   - **patch** — Auto-fix. These are the only findings that survive loopbacks. After auto-fixing, append the triage-log entry for this pass, listing every patch fixed in this pass under `addressed_findings`.
+   - **patch** — Auto-fix. These are the only findings that survive loopbacks. If the step-03 implementation subagent can be re-engaged with its context intact, send it all patch findings in one synchronous message — for each: the file, what is wrong, and what the fix must do. If it cannot be re-engaged, apply the patches yourself. Then re-run the commands in `{spec_file}`'s `## Verification` section (or perform its manual checks); if verification fails and the failure cannot be fixed, HALT with status `blocked` and blocking condition `patch verification failed`. Append the triage-log entry for this pass, listing every patch fixed in this pass under `addressed_findings`.
    - **defer** — Append one new entry to `{deferred_work_file}` using this format. Do not modify existing entries or look for duplicates.
      ```markdown
      - source_spec: `{spec_file}`
@@ -77,11 +79,11 @@ Prepare `Auto Run Result` details:
 - Summary of implemented change
 - Files changed with one-line descriptions
 - Review findings breakdown: patches applied, items deferred, items rejected
-- Follow-up review recommendation: `true` when the final review pass made review-driven changes significant enough to benefit from an independent follow-up review; otherwise `false`. Use judgment, not a fixed numeric threshold. Base the judgment on the final pass's triage log and fixes, including patched-finding volume, consequence/severity, breadth, behavior/API/security/data impact, and implementation complexity. Many low-severity patched findings can be significant by volume. Do not recommend follow-up for only a few localized low-consequence fixes.
+- Follow-up review recommendation: count only this pass's findings triaged `patch` — never defer or reject. `true` if any patched finding was `high` severity, or if `3 × medium count + 1 × low count` is 5 or more; otherwise `false`. Record the patched counts by severity and the score.
 - Verification performed, including command outcomes or manual inspection notes
 - Any residual risks
 
-Set `{spec_file}` frontmatter `followup_review_recommended` from the judgment above.
+Set `{spec_file}` frontmatter `followup_review_recommended` from the computation above.
 
 If version control is available, commit. Do not push.
 
