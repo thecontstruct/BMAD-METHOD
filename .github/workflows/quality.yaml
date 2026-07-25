@@ -167,6 +167,40 @@ jobs:
       - name: Run E2E lifecycle test
         run: npm run test:e2e
 
+  fork-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for fork-specific content
+        run: |
+          # Patterns that indicate fork-specific or private content.
+          # Checked against src/ only (installable content) — .github/, test/,
+          # and tools/ are excluded (dev infrastructure may retain implementation
+          # notes; this file itself contains the pattern strings).
+          patterns=(
+            'Phil M\b'
+            'Phil Mahncke'
+            'DN-FOLLOWUP-'
+            'axonify'
+            '/Users/philmahncke'
+          )
+          found=0
+          for pat in "${patterns[@]}"; do
+            hits=$(git grep -rn --perl-regexp -- "$pat" -- src/ 2>/dev/null || true)
+            if [ -n "$hits" ]; then
+              echo "Fork-specific pattern found: $pat"
+              echo "$hits"
+              found=1
+            fi
+          done
+          if [ "$found" -eq 1 ]; then
+            echo "Remove or generalize fork-specific content before contributing upstream."
+            exit 1
+          fi
+          echo "No fork-specific content found."
+
   docs-gate:
     runs-on: ubuntu-latest
     steps:
