@@ -15,10 +15,9 @@ BMAD_ROOT = Path(__file__).resolve().parent.parent.parent
 REF_COMPS = BMAD_ROOT / "src" / "core-skills" / "bmad-reference-components" / "components"
 SHARED_COMPS = BMAD_ROOT / "src" / "_shared" / "components"
 QD_COMPS = BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "components"
-# Post-DN-FOLLOWUP-II (2026-07-03): bmad-quick-dev's local todays_date.py
-# was lifted to _shared/components/. The local copy is gone; consumers
-# resolve via the shared fallback.
-SHARED_COMPS = BMAD_ROOT / "src" / "_shared" / "components"
+# Post-DN-FOLLOWUP-II: bmad-quick-dev's local todays_date.py was lifted to
+# _shared/components/. bmad-reference-components' local copy is also lifted
+# (same story). All consumers resolve via the shared fallback.
 
 _SCRIPTS = str(BMAD_ROOT / "src" / "scripts")
 if _SCRIPTS not in sys.path:
@@ -46,7 +45,7 @@ class TestTodaysDateComponent(unittest.TestCase):
     def _run(self, props=None, ctx=None):
         runner = ComponentRunner()
         return runner.run_jit(
-            str(REF_COMPS / "todays_date.py"),
+            str(SHARED_COMPS / "todays_date.py"),
             ctx or _CTX_EMPTY,
             props or {},
             component_name="TodaysDate",
@@ -176,25 +175,21 @@ class TestQuickDevMigration(unittest.TestCase):
         )
         self.assertEqual(result, datetime.date.today().isoformat())
 
-    def test_k_todays_date_copies_byte_identical(self):
-        """todays_date.py is content-identical between the reference and shared copies.
+    def test_k_todays_date_skill_local_copy_removed(self):
+        """bmad-reference-components' local todays_date.py is gone after DN-FOLLOWUP-II.
 
-        Post-DN-FOLLOWUP-II: the bmad-quick-dev local copy was lifted to shared;
-        only bmad-reference-components' local copy remains. Until its own
-        SHA-pin-lift lands, the two remaining copies must stay byte-identical.
-
-        Uses read_text(encoding='utf-8') rather than read_bytes() to normalise line
-        endings (CRLF vs LF) on Windows, so the comparison is platform-safe.
+        The lift is complete: only _shared/components/todays_date.py exists.
+        The skill-local copy under bmad-reference-components/components/ must not
+        be re-added without also updating the engine to shadow the shared copy.
         """
-        import hashlib
-        ref_text = (REF_COMPS / "todays_date.py").read_text(encoding="utf-8")
-        shared_text = (SHARED_COMPS / "todays_date.py").read_text(encoding="utf-8")
-        ref_hash = hashlib.sha256(ref_text.encode("utf-8")).hexdigest()
-        shared_hash = hashlib.sha256(shared_text.encode("utf-8")).hexdigest()
-        self.assertEqual(
-            ref_hash, shared_hash,
-            "todays_date.py diverged between reference and shared copies. "
-            "Keep them in sync or complete the next SHA-pin-lift.",
+        self.assertFalse(
+            (REF_COMPS / "todays_date.py").exists(),
+            "Skill-local todays_date.py should have been removed by DN-FOLLOWUP-II. "
+            "If re-added, ensure _shared/components/todays_date.py stays canonical.",
+        )
+        self.assertTrue(
+            (SHARED_COMPS / "todays_date.py").exists(),
+            "Shared todays_date.py must exist as the canonical source.",
         )
 
 
