@@ -107,10 +107,10 @@ function checkSkillCount(tmpDir) {
     return fs.statSync(path.join(skillsDir, name)).isDirectory();
   });
   const count = entries.length;
-  if (count !== 46) {
+  if (count !== 48) {
     console.log(`  ${colors.dim}Found ${count} skills: ${entries.sort().join(', ')}${colors.reset}`);
   }
-  assert(count === 46, `exactly 46 skills installed (got ${count})`);
+  assert(count === 48, `exactly 48 skills installed (got ${count})`);
 }
 
 function checkKeySkills(tmpDir) {
