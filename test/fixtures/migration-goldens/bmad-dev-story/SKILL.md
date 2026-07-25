@@ -193,7 +193,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
     </check>
 
     <action>Store the found story_key (e.g., "1-2-user-authentication") for later status updates</action>
-    <action>Find matching story file in {implementation_artifacts} using story_key pattern: {story_key}.md</action>
+    <action>Find matching story file: <!-- BMAD-JIT:ArtifactPath:aac89650e36f3d44 --></action>
     <action>Read COMPLETE story file from discovered path</action>
 
     <anchor id="task_check" />

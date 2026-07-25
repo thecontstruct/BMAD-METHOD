@@ -36,7 +36,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
 - `architecture_file` = `{planning_artifacts}/architecture.md`
 - `ux_file` = `{planning_artifacts}/*ux*.md`
 - `story_title` = "" (will be elicited if not derivable)
-- `default_output_file` = `{implementation_artifacts}/{story_key}.md`
+- `default_output_file` = `<ArtifactPath kind="story" story_key="{story_key}" />`
 
 ## Input Files
 
@@ -225,7 +225,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
   Business context and value - Success criteria <!-- Previous story analysis for context continuity -->
   <check if="story_num > 1">
     <action>Find {previous_story_num}: scan {implementation_artifacts} for the story file in epic {epic_num} with the highest story number less than {story_num}</action>
-    <action>Load previous story file: {implementation_artifacts}/{epic_num}-{previous_story_num}-*.md</action> **PREVIOUS STORY INTELLIGENCE:** -
+    <action>Load previous story file: <ArtifactPath kind="story" epic="{epic_num}" story="{previous_story_num}" /></action> **PREVIOUS STORY INTELLIGENCE:** -
   Dev notes and learnings from previous story - Review feedback and corrections needed - Files that were created/modified and their
   patterns - Testing approaches that worked/didn't work - Problems encountered and solutions found - Code patterns established <action>Extract
   all learnings that could impact current story implementation</action>

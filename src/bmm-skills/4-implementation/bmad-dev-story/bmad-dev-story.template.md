@@ -146,7 +146,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
     </check>
 
     <action>Store the found story_key (e.g., "1-2-user-authentication") for later status updates</action>
-    <action>Find matching story file in {implementation_artifacts} using story_key pattern: {story_key}.md</action>
+    <action>Find matching story file: <ArtifactPath kind="story" story_key="{story_key}" /></action>
     <action>Read COMPLETE story file from discovered path</action>
 
     <anchor id="task_check" />

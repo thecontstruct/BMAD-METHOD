@@ -83,7 +83,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
 - `architecture_file` = `{planning_artifacts}/architecture.md`
 - `ux_file` = `{planning_artifacts}/*ux*.md`
 - `story_title` = "" (will be elicited if not derivable)
-- `default_output_file` = `{implementation_artifacts}/{story_key}.md`
+- `default_output_file` = `<!-- BMAD-JIT:ArtifactPath:aac89650e36f3d44 -->`
 
 ## Input Files
 
@@ -272,7 +272,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
   Business context and value - Success criteria <!-- Previous story analysis for context continuity -->
   <check if="story_num > 1">
     <action>Find {previous_story_num}: scan {implementation_artifacts} for the story file in epic {epic_num} with the highest story number less than {story_num}</action>
-    <action>Load previous story file: {implementation_artifacts}/{epic_num}-{previous_story_num}-*.md</action> **PREVIOUS STORY INTELLIGENCE:** -
+    <action>Load previous story file: <!-- BMAD-JIT:ArtifactPath:ee1565422c47b4e9 --></action> **PREVIOUS STORY INTELLIGENCE:** -
   Dev notes and learnings from previous story - Review feedback and corrections needed - Files that were created/modified and their
   patterns - Testing approaches that worked/didn't work - Problems encountered and solutions found - Code patterns established <action>Extract
   all learnings that could impact current story implementation</action>

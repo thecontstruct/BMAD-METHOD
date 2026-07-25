@@ -197,7 +197,7 @@ Amelia (Developer): "Before we start the team discussion, let me review all the 
 Charlie (Senior Dev): "Good idea - those dev notes always have gold in them."
 </output>
 
-<action>For each story in epic {epic_number}, read the complete story file from {implementation_artifacts}/{epic_number}-{story_num}-*.md</action>
+<action>For each story in epic {epic_number}, read the complete story file from <ArtifactPath kind="story" epic="{epic_number}" story="{story_num}" /></action>
 
 <action>Extract and analyze from each story:</action>
 
@@ -1350,11 +1350,11 @@ Amelia (Developer): "See you all when prep work is done. Meeting adjourned!"
 - Commitments and next steps
 
 <action>Format retrospective document as readable markdown with clear sections</action>
-<action>Set filename: {implementation_artifacts}/epic-{epic_number}-retro-{date}.md</action>
+<action>Set filename: <ArtifactPath kind="retro" epic="{epic_number}" date="{date}" /></action>
 <action>Save retrospective document</action>
 
 <output>
-✅ Retrospective document saved: {implementation_artifacts}/epic-{epic_number}-retro-{date}.md
+✅ Retrospective document saved: <ArtifactPath kind="retro" epic="{epic_number}" date="{date}" />
 </output>
 
 <action>Update {sprint_status_file} to mark retrospective as completed</action>
@@ -1408,7 +1408,7 @@ Retrospective document was saved successfully, but {sprint_status_file} may need
 
 - Epic {epic_number}: {epic_title} reviewed
 - Retrospective Status: completed
-- Retrospective saved: {implementation_artifacts}/epic-{epic_number}-retro-{date}.md
+- Retrospective saved: <ArtifactPath kind="retro" epic="{epic_number}" date="{date}" />
 
 **Commitments Made:**
 
@@ -1418,7 +1418,7 @@ Retrospective document was saved successfully, but {sprint_status_file} may need
 
 **Next Steps:**
 
-1. **Review retrospective summary**: {implementation_artifacts}/epic-{epic_number}-retro-{date}.md
+1. **Review retrospective summary**: <ArtifactPath kind="retro" epic="{epic_number}" date="{date}" />
 
 2. **Execute preparation sprint** (Est: {prep_days} days)
    - Complete {critical_count} critical path items
