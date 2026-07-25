@@ -225,5 +225,58 @@ class TestLoadTomlFileMultiBom(unittest.TestCase):
             self.assertEqual(load_toml_file(path), {})
 
 
+class TestScalarToArrayCoercion(unittest.TestCase):
+    """DN-FOLLOWUP-IV: agent.principles scalar → single-element array coercion."""
+
+    def test_scalar_principles_coerced_to_array(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "scalar.toml")
+            Path(path).write_text(
+                '[agent]\nprinciples = "Ship the smallest thing."\n',
+                encoding="utf-8",
+            )
+            result = load_toml_file(path)
+            self.assertEqual(result["agent"]["principles"], ["Ship the smallest thing."])
+
+    def test_array_principles_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "array.toml")
+            Path(path).write_text(
+                '[agent]\nprinciples = ["TDD first.", "No shortcuts."]\n',
+                encoding="utf-8",
+            )
+            result = load_toml_file(path)
+            self.assertEqual(result["agent"]["principles"], ["TDD first.", "No shortcuts."])
+
+    def test_scalar_principles_merges_as_append(self) -> None:
+        """After coercion, scalar-origin principles merge via the array-append rule."""
+        base = {"agent": {"principles": "Base principle."}}
+        override = {"agent": {"principles": ["Override principle."]}}
+        # Simulate coercion that load_toml_file applies at load time.
+        from src.scripts.bmad_compile.toml_merge import _coerce_scalar_array_keys
+        _coerce_scalar_array_keys(base)
+        result = merge_layers(base, override)
+        self.assertEqual(
+            result["agent"]["principles"],
+            ["Base principle.", "Override principle."],
+        )
+
+    def test_missing_agent_table_is_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "no_agent.toml")
+            Path(path).write_text('name = "bare"\n', encoding="utf-8")
+            result = load_toml_file(path)
+            self.assertEqual(result, {"name": "bare"})
+
+    def test_non_string_principles_unchanged(self) -> None:
+        """A non-string, non-list principles value (rare) is left alone."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "int.toml")
+            # TOML doesn't support integer principles in practice, but guard the coercion.
+            Path(path).write_text('[agent]\nprinciples = 42\n', encoding="utf-8")
+            result = load_toml_file(path)
+            self.assertEqual(result["agent"]["principles"], 42)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -240,6 +240,32 @@ def merge_layers(*layers: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+# Keys whose values must always be lists.  Scalars are wrapped in a
+# single-element list so downstream merge and template rendering never
+# see a bare string where an array is expected.
+# Encoded as (parent_table_key, leaf_key) tuples; only one level of
+# nesting is needed for the current schema.
+_SCALAR_TO_ARRAY_KEYS: frozenset[tuple[str, str]] = frozenset({
+    ("agent", "principles"),
+})
+
+
+def _coerce_scalar_array_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Wrap scalar values for known always-array keys into single-element lists.
+
+    Mutates *data* in-place and returns it.  Only touches keys listed in
+    _SCALAR_TO_ARRAY_KEYS; leaves every other key untouched.
+    """
+    for table_key, leaf_key in _SCALAR_TO_ARRAY_KEYS:
+        table = data.get(table_key)
+        if not isinstance(table, dict):
+            continue
+        val = table.get(leaf_key)
+        if isinstance(val, str):
+            table[leaf_key] = [val]
+    return data
+
+
 def load_toml_file(path: str) -> dict[str, Any]:
     """Read and parse a TOML file. Returns {} if file does not exist.
 
@@ -253,6 +279,9 @@ def load_toml_file(path: str) -> dict[str, Any]:
     - TOCTOU: if `read_bytes` raises `FileNotFoundError` (file removed after
       `is_file` returned True), return `{}` rather than propagating — same
       result as if the file never existed. Both cases are "no layer to merge".
+
+    DN-FOLLOWUP-IV: scalar values for keys in _SCALAR_TO_ARRAY_KEYS are
+    coerced to single-element arrays before returning.
     """
     if not io.is_file(path):
         return {}
@@ -267,7 +296,7 @@ def load_toml_file(path: str) -> dict[str, Any]:
         text = content_bytes.decode("utf-8-sig")
         while text.startswith("﻿"):
             text = text[1:]
-        return tomllib.loads(text)
+        return _coerce_scalar_array_keys(tomllib.loads(text))
     except tomllib.TOMLDecodeError as exc:
         _msg = str(exc)
         _line_m = re.search(r'line (\d+)', _msg)
