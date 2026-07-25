@@ -935,3 +935,71 @@ class TestGroupHArtifactPath:
         cache.put(old_src, {}, ctx, "old-output")
         # Changing the source text alone must miss.
         assert cache.get(new_src, {}, ctx) is None
+
+
+# ===========================================================================
+# Group I — DN-FOLLOWUP-V: shared_root kwarg decouples _shared/ discovery
+# ===========================================================================
+
+class TestGroupISharedRootKwarg:
+    """DN-FOLLOWUP-V: compile_skill(shared_root=X) enables _shared/ fallback
+    without activating lockfile_root side-effects (module-prefixed output,
+    lockfile in shared_root/_config/).
+    """
+
+    def test_i1_shared_root_resolves_component_in_skill_mode(self, tmp_path):
+        """I-1: per-skill mode (lockfile_root=None) + shared_root → component resolved."""
+        # Skill lives at an arbitrary path (simulates --skill <external-path>).
+        skill_dir = tmp_path / "external" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "my-skill.template.md").write_text("# X\n<Foo />\n")
+
+        install_dir = tmp_path / "install"
+        install_dir.mkdir()
+        shared = install_dir / "_shared" / "components"
+        shared.mkdir(parents=True)
+        (shared / "foo.py").write_text(
+            "RENDER_MODE = 'compile'\ndef render(ctx, **props): return 'FROM-SHARED'\n"
+        )
+
+        # No lockfile_root — per-skill mode. shared_root provides _shared/.
+        engine.compile_skill(skill_dir, install_dir, shared_root=install_dir)
+
+        # Output is flat (not module-prefixed) — lockfile_root side-effect NOT active.
+        out = install_dir / "my-skill" / "SKILL.md"
+        assert out.is_file(), f"expected SKILL.md at {out}"
+        assert "FROM-SHARED" in out.read_text("utf-8")
+
+    def test_i2_without_shared_root_component_not_found(self, tmp_path):
+        """I-2: per-skill mode without shared_root → MissingComponentError (regression guard)."""
+        skill_dir = tmp_path / "external" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "my-skill.template.md").write_text("# X\n<Foo />\n")
+
+        install_dir = tmp_path / "install"
+        install_dir.mkdir()
+        (install_dir / "_shared" / "components").mkdir(parents=True)
+        (install_dir / "_shared" / "components" / "foo.py").write_text(
+            "RENDER_MODE = 'compile'\ndef render(ctx, **props): return 'FROM-SHARED'\n"
+        )
+
+        # No shared_root → _shared/ not probed → MissingComponentError raised.
+        import pytest
+        with pytest.raises(errors.CompilerError):
+            engine.compile_skill(skill_dir, install_dir)
+
+    def test_i3_output_path_stays_flat_with_shared_root(self, tmp_path):
+        """I-3: shared_root does not activate module-prefixed output layout."""
+        skill_dir = tmp_path / "any" / "dir" / "flat-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "flat-skill.template.md").write_text("hello\n")
+
+        install_dir = tmp_path / "install"
+        install_dir.mkdir()
+
+        engine.compile_skill(skill_dir, install_dir, shared_root=install_dir)
+
+        # Flat layout: install_dir/<skill>/SKILL.md (no module prefix).
+        assert (install_dir / "flat-skill" / "SKILL.md").is_file()
+        # Module-prefixed path must NOT exist.
+        assert not (install_dir / "dir" / "flat-skill" / "SKILL.md").exists()

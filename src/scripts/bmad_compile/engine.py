@@ -209,6 +209,7 @@ def _process_step_template(
     skill_posix: "io.PurePosixPath",
     lockfile_root: "io.PathLike | None",
     token_offset: int,
+    shared_root: "io.PathLike | None" = None,
 ) -> "tuple[list, list[EnrichedInvocation], list[EnrichedInvocation], str | None, str, str, int]":
     """Process one step-template artifact through the full compile pipeline.
 
@@ -258,8 +259,10 @@ def _process_step_template(
     _fragment_body_scan(step_dep_tree, cache)
 
     # Component discovery for this step-template root.
+    # DN-FOLLOWUP-V: shared_root decouples _shared/ discovery from lockfile_root.
+    _discovery_root = shared_root if shared_root is not None else lockfile_root
     enriched, compile_invs, jit_invs = _discover_components(
-        step_flat, skill_posix, install_root=lockfile_root
+        step_flat, skill_posix, install_root=_discovery_root
     )
 
     # Rebase token indices by offset so the combined invocation list across all
@@ -817,6 +820,7 @@ def _compile_core(
     lockfile_root: io.PathLike | None,
     override_root: io.PathLike | None,
     install_flags: dict[str, str] | None,
+    shared_root: io.PathLike | None = None,
     explain_mode: bool = False,
     toml_warning_sink: list[dict[str, Any]] | None = None,
 ) -> tuple[
@@ -1181,6 +1185,7 @@ def compile_skill(
     lockfile_root: io.PathLike | None = None,
     override_root: io.PathLike | None = None,
     install_flags: dict[str, str] | None = None,
+    shared_root: io.PathLike | None = None,
     toml_warning_sink: list[dict[str, Any]] | None = None,
     emit_fn: "Callable[[dict], None] | None" = None,
     component_runner: "Any | None" = None,
@@ -1232,6 +1237,7 @@ def compile_skill(
         lockfile_root=lockfile_root,
         override_root=override_root,
         install_flags=install_flags,
+        shared_root=shared_root,
         explain_mode=False,
         toml_warning_sink=toml_warning_sink,
     )
@@ -1244,8 +1250,12 @@ def compile_skill(
 
     skill_posix = io.to_posix(skill_dir)
     # Story 10.58: thread lockfile_root → _discover_components for _shared/ fallback.
+    # DN-FOLLOWUP-V: shared_root (when set) decouples _shared/ discovery from
+    # lockfile_root so --skill mode can resolve _shared/ without forcing
+    # module-prefixed output path layout or writing to lockfile_root/_config/.
+    _discover_install_root = shared_root if shared_root is not None else lockfile_root
     enriched_flat_nodes, _root_compile_invs, _root_jit_invs = _discover_components(
-        flat_nodes, skill_posix, install_root=lockfile_root
+        flat_nodes, skill_posix, install_root=_discover_install_root
     )
 
     # Build ctx_dict for ComponentRunner. Shared across ALL roots in this skill
@@ -1313,7 +1323,8 @@ def compile_skill(
     _step_results: list[tuple] = []
     for _st_art in _step_template_arts:
         _st_en, _st_ci, _st_ji, _st_var, _st_src, _st_hash, _st_max_ti = _process_step_template(
-            _st_art, context, cache, tid, skill_posix, lockfile_root, _token_offset
+            _st_art, context, cache, tid, skill_posix, lockfile_root, _token_offset,
+            shared_root=shared_root,
         )
         _step_results.append((_st_en, _st_ci, _st_ji, _st_var, _st_src, _st_hash, _st_art))
         _token_offset = _st_max_ti + 1
@@ -1476,6 +1487,7 @@ def explain_skill(
     lockfile_root: io.PathLike | None = None,
     override_root: io.PathLike | None = None,
     install_flags: dict[str, str] | None = None,
+    shared_root: io.PathLike | None = None,
 ) -> tuple[
     list[Any],
     list[resolver.ResolvedFragment],
@@ -1511,6 +1523,7 @@ def explain_skill(
         lockfile_root=lockfile_root,
         override_root=override_root,
         install_flags=install_flags,
+        shared_root=shared_root,
         explain_mode=True,
     )
     # Zip the parallel lists into 3-tuples: (layer_name, layer_path, raw_dict).

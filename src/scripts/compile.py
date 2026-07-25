@@ -1096,12 +1096,12 @@ def main(argv: list[str] | None = None) -> int:
     # probe must mirror that — using `skill_path.parent.name` here would fire
     # on a non-effective path and miss the override the engine actually picks
     # up at fragments/core/<skill>/SKILL.template.md.
-    # DN-FOLLOWUP-V-prime: when --install-dir points to an existing _bmad root
-    # whose _shared/ subtree should be available for fragment resolution, the
-    # engine still skips _shared/ discovery because lockfile_root=None. Fixing
-    # this requires engine changes (lockfile_root side-effects the output path
-    # and fragment path recording, both of which break when skill_dir is
-    # external to install_dir). Deferred as a Story-scale engine change.
+    # DN-FOLLOWUP-V: shared_root=install_path is passed below so the engine's
+    # _discover_components can probe install_path/_shared/components/ without
+    # activating lockfile_root's side-effects (module-prefixed output paths,
+    # lockfile written to install_path/_config/). Output layout remains flat
+    # (<install_dir>/<skill>/SKILL.md) and lockfile still derives from
+    # scenario_root/_bmad/_config/bmad.lock (per-skill behavior preserved).
     _per_skill_override_root = skill_path.parent.parent / "_bmad" / "custom"
     _full_skill_override = (
         _per_skill_override_root / "fragments" / "core" / skill_path.name / "SKILL.template.md"
@@ -1122,6 +1122,7 @@ def main(argv: list[str] | None = None) -> int:
             engine.compile_skill(
                 skill_path, install_path, target_ide=target_ide,
                 install_flags=install_flags or None,
+                shared_root=install_path,
                 toml_warning_sink=toml_warnings_skill,
             )
         except CompilerError as e:
