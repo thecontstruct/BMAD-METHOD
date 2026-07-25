@@ -55,16 +55,37 @@ function escapeAnnotation(str) {
   return String(str).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
 }
 
+/**
+ * Search bmm-skills/ for a skill directory by name, including one level of
+ * subdirectories (e.g. 1-analysis/research/<skill>).
+ */
+function _findInBmmSkills(bmmSkillsRoot, skillName) {
+  if (!fs.existsSync(bmmSkillsRoot)) return null;
+  for (const cat of fs.readdirSync(bmmSkillsRoot, { withFileTypes: true })) {
+    if (!cat.isDirectory()) continue;
+    const direct = path.join(bmmSkillsRoot, cat.name, skillName);
+    if (fs.existsSync(direct)) return direct;
+    // One level deeper — handles subdirs like research/, v6-shims/, etc.
+    const catDir = path.join(bmmSkillsRoot, cat.name);
+    for (const sub of fs.readdirSync(catDir, { withFileTypes: true })) {
+      if (!sub.isDirectory()) continue;
+      const nested = path.join(catDir, sub.name, skillName);
+      if (fs.existsSync(nested)) return nested;
+    }
+  }
+  return null;
+}
+
 function reconstructSkillSrcDir(entry) {
   const fragments = entry.fragments;
   if (!Array.isArray(fragments) || fragments.length === 0) {
     // Story 9.2: fragment-less skills (e.g. simple flat-template skills with no fragments/ dir)
     // fall back to locating the source directory by skill name in standard locations.
     const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
-    const candidates = [path.join(srcRoot, 'core-skills', entry.skill)];
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
+    const coreCandidate = path.join(srcRoot, 'core-skills', entry.skill);
+    if (fs.existsSync(coreCandidate)) return coreCandidate;
+    const bmmMatch = _findInBmmSkills(path.join(srcRoot, 'bmm-skills'), entry.skill);
+    if (bmmMatch) return bmmMatch;
     throw new Error(`bmad.lock entry for skill "${entry.skill}" has no fragments[]; cannot reconstruct source directory.`);
   }
   // Story 10.12: skills whose fragments are all in _shared/ cannot use fragment-path
@@ -74,14 +95,8 @@ function reconstructSkillSrcDir(entry) {
     const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
     const coreCandidate = path.join(srcRoot, 'core-skills', entry.skill);
     if (fs.existsSync(coreCandidate)) return coreCandidate;
-    const bmmSkillsRoot = path.join(srcRoot, 'bmm-skills');
-    if (fs.existsSync(bmmSkillsRoot)) {
-      for (const cat of fs.readdirSync(bmmSkillsRoot, { withFileTypes: true })) {
-        if (!cat.isDirectory()) continue;
-        const candidate = path.join(bmmSkillsRoot, cat.name, entry.skill);
-        if (fs.existsSync(candidate)) return candidate;
-      }
-    }
+    const bmmMatch = _findInBmmSkills(path.join(srcRoot, 'bmm-skills'), entry.skill);
+    if (bmmMatch) return bmmMatch;
     throw new Error(
       `bmad.lock entry for skill "${entry.skill}": uses _shared fragments but source not found in core-skills/ or bmm-skills/.`,
     );
@@ -118,6 +133,21 @@ function reconstructSkillSrcDir(entry) {
   const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
   if (resolved !== srcRoot && !resolved.startsWith(srcRoot + path.sep)) {
     throw new Error(`bmad.lock entry for skill "${entry.skill}": fragment path "${fragPath}" escapes src/ (resolved to "${resolved}").`);
+  }
+  if (fs.existsSync(resolved)) return resolved;
+  // Install-dir module names (core/, bmm/) differ from source dirs (core-skills/, bmm-skills/).
+  // Try the source-dir alias when the install-dir path doesn't exist on disk.
+  const MODULE_ALIASES = { core: 'core-skills', bmm: 'bmm-skills' };
+  const firstSeg = segments[0];
+  if (firstSeg in MODULE_ALIASES) {
+    const altSegments = [MODULE_ALIASES[firstSeg], ...segments.slice(1, fragIdx)];
+    const altResolved = path.join(srcRoot, ...altSegments);
+    if (fs.existsSync(altResolved)) return altResolved;
+    // For bmm-skills, also search one level deeper (e.g. research/ subdir).
+    if (firstSeg === 'bmm') {
+      const bmmMatch = _findInBmmSkills(path.join(srcRoot, 'bmm-skills'), segments[1]);
+      if (bmmMatch) return bmmMatch;
+    }
   }
   return resolved;
 }

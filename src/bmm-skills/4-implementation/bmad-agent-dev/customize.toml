@@ -52,7 +52,6 @@ principles = [
   "Code comments explain why, not what — no AI workflow metadata, planning refs, or story tracking in source code.",
   "Generated code must be production-ready: clean, minimal, and free of AI-generated noise.",
 ]
->>>>>>> 5c9a1c2a (fix(bmm): suppress epic/story comments and AI slop in generated code (#2544))
 
 # Capabilities menu keyed by code. Each entry has `description` and one of
 # `skill` (invokes a registered skill) or `prompt` (executes text directly).
