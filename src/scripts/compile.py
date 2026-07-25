@@ -1091,11 +1091,17 @@ def main(argv: list[str] | None = None) -> int:
     target_ide = args.tools.lower().strip() if args.tools else None
     target_ide = target_ide or None  # "" → None
 
-    # Per-skill mode: engine hardcodes current_module="core" (engine.py:128-130
-    # for the lockfile_root=None branch; preserves Story 1.2 behavior). The
-    # warning probe must mirror that — using `skill_path.parent.name` here
-    # would fire on a non-effective path and miss the override the engine
-    # actually picks up at fragments/core/<skill>/SKILL.template.md.
+    # Per-skill mode: engine hardcodes current_module="core" (engine.py
+    # lockfile_root=None branch; preserves Story 1.2 behavior). The warning
+    # probe must mirror that — using `skill_path.parent.name` here would fire
+    # on a non-effective path and miss the override the engine actually picks
+    # up at fragments/core/<skill>/SKILL.template.md.
+    # DN-FOLLOWUP-V-prime: when --install-dir points to an existing _bmad root
+    # whose _shared/ subtree should be available for fragment resolution, the
+    # engine still skips _shared/ discovery because lockfile_root=None. Fixing
+    # this requires engine changes (lockfile_root side-effects the output path
+    # and fragment path recording, both of which break when skill_dir is
+    # external to install_dir). Deferred as a Story-scale engine change.
     _per_skill_override_root = skill_path.parent.parent / "_bmad" / "custom"
     _full_skill_override = (
         _per_skill_override_root / "fragments" / "core" / skill_path.name / "SKILL.template.md"
