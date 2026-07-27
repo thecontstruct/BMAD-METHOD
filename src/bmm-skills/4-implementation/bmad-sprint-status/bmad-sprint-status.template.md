@@ -191,7 +191,7 @@ If the command targets a story, set `story_key={next_story_id}` when prompted.</
   </check>
 
   <check if="choice == 4">
-    <action>Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.</action>
+    <action><<include path="_shared/fragments/on-complete.md">></action>
     <action>Exit workflow</action>
   </check>
 </step>
@@ -264,7 +264,7 @@ If the command targets a story, set `story_key={next_story_id}` when prompted.</
 
 <template-output>is_valid = true</template-output>
 <template-output>message = "sprint-status.yaml valid: metadata complete, all statuses recognized"</template-output>
-<action>Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.</action>
+<action><<include path="_shared/fragments/on-complete.md">></action>
 </step>
 
 </workflow>

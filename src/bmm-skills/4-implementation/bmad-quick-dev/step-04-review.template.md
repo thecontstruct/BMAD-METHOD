@@ -26,9 +26,9 @@ The review layers are `{workflow.review_layers}`, resolved during activation.
 
 Skip every layer whose `instruction` is empty or missing — that is how an override disables a default layer — and every layer whose `when` condition (if present) does not hold in the current context. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
 
-Execute all remaining layers in parallel wherever their execution methods allow: substitute the runtime placeholders (e.g. `{diff_output}`) into each layer's `instruction`, then follow it verbatim. Parallel means several blocking calls awaited together in this turn — never backgrounded or detached, never ending the turn to await results. When running layers as subagents, spawn every reviewer before reading or reacting to any of their output; begin collection and triage only once all are launched.
+<<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch each active layer's reviewer as a parallel subagent without conversation context. Spawn all before reading any output; begin collection and triage only once all are launched." fallback_action="generate one review prompt file per layer in `{implementation_artifacts}` and HALT. Ask the human to run each in a separate session (ideally a different LLM) and paste back the findings.">>
 
-If a layer's instruction requires subagents and none are available, generate one review prompt file per such layer in `{implementation_artifacts}` and HALT. Ask the human to run each in a separate session (ideally a different LLM) and paste back the findings.
+Substitute the runtime placeholders (e.g. `{diff_output}`) into each layer's `instruction`, then follow it verbatim. Parallel means several blocking calls awaited together in this turn — never backgrounded or detached, never ending the turn to await results.
 
 ### Classify
 

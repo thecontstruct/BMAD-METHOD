@@ -249,7 +249,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
 
 <action>Report workflow completion to user with personalized message: "Correct Course workflow complete, {user_name}!"</action>
 <action>Remind user of success criteria and next steps for Developer agent</action>
-<action>Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.</action>
+<action><<include path="_shared/fragments/on-complete.md">></action>
 </step>
 
 </workflow>

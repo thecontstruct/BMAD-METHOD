@@ -21,7 +21,7 @@ failed_layers: '' # set at runtime: comma-separated list of layers that failed o
 
    If no layer is active, HALT with status `blocked` and blocking condition `no active review layers`.
 
-3. Execute all active layers in parallel wherever their execution methods allow: substitute the runtime placeholders (`{diff_output}`, `{spec_file}`) into each layer's `instruction`, then follow it verbatim. If a layer's instruction requires subagents and subagents are not available, generate prompt files in `{implementation_artifacts}` for each such layer and HALT. Ask the user to run each in a separate session (ideally a different LLM) and paste back the findings. When findings are pasted, treat them as those layers' findings and resume from this point.
+3. <<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch parallel subagents without conversation context." fallback_action="generate prompt files in `{implementation_artifacts}` for each layer and HALT. Ask the user to run each in a separate session (ideally a different LLM) and paste back the findings. When findings are pasted, resume from this point.">> Substitute the runtime placeholders (`{diff_output}`, `{spec_file}`) into each layer's `instruction`, then follow it verbatim.
 
 4. **Layer failure handling**: If any layer fails, times out, or returns empty results, append the layer's `name` to `{failed_layers}` (comma-separated) and proceed with findings from the remaining layers.
 

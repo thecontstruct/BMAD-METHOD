@@ -13,21 +13,40 @@ description: 'One iteration of an unattended development loop. Use when invoked 
 
 To HALT with a final status and optional blocking condition:
 
-1. If `{spec_file}` is known and exists, update `status` in frontmatter and append missing result details under `## Auto Run Result`.
-2. If `{spec_file}` is unknown or missing, create `{implementation_artifacts}/bmad-dev-auto-result-<slug-or-timestamp>.md` with:
-   ```markdown
-   ---
-   status: <final status>
-   ---
+1. **Folder+id dispatch** (`{spec_folder}` and `{story_id}` are set): the write-back always lands at the id-keyed story spec. The `{implementation_artifacts}` fallback in step 2 below is never used in this mode, even for halts before planning starts.
+   - If `{spec_file}` is still empty, resolve it now:
+     - **Entry not resolved** (`stories.yaml` is missing/unparseable, or `{story_id}` has no matching entry): use the fixed slug segment `unresolved`: `{spec_file}` = `{spec_folder}/stories/{story_id}-unresolved.md`.
+     - **Ambiguous on-disk match** (the halt is `ambiguous story file match` — more than one file already matches `{spec_folder}/stories/{story_id}-*.md`): use the fixed slug segment `ambiguous` instead of deriving from the title, so the write-back neither creates a third title-derived candidate nor risks silently landing on one of the existing ambiguous files: `{spec_file}` = `{spec_folder}/stories/{story_id}-ambiguous.md`.
+     - **Otherwise** (the entry was resolved and no ambiguous on-disk match exists): derive `{spec_file}` = `{spec_folder}/stories/{story_id}-{slug}.md`, where `{slug}` is a kebab-case slug from `title` (and `description` if needed) with no `{story_id}` prefix — the same derivation step-01's Route uses.
+   - If `{spec_file}` exists on disk, update `status` in frontmatter and append missing result details under `## Auto Run Result`.
+   - If it does not exist, create it as a skeletal story spec:
+     ```markdown
+     ---
+     status: <final status>
+     ---
 
-   # BMad Dev Auto Result
+     # <entry title, or "Story {story_id}" if the entry could not be resolved or the on-disk match was ambiguous>
 
-   Status: <final status>
-   Blocking condition: <blocking condition, if any>
-   ```
-3. Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete`
-4. If the resolved `workflow.on_complete` is non-empty, follow it as the final instruction before exiting.
-5. Stop the workflow.
+     ## Auto Run Result
+
+     Status: <final status>
+     Blocking condition: <blocking condition, if any>
+     ```
+2. **Otherwise:**
+   - If `{spec_file}` is known and exists, update `status` in frontmatter and append missing result details under `## Auto Run Result`.
+   - If `{spec_file}` is unknown or missing, create `{implementation_artifacts}/bmad-dev-auto-result-<slug-or-timestamp>.md` with:
+     ```markdown
+     ---
+     status: <final status>
+     ---
+
+     # BMad Dev Auto Result
+
+     Status: <final status>
+     Blocking condition: <blocking condition, if any>
+     ```
+3. <<include path="_shared/fragments/on-complete.md">>
+4. Stop the workflow.
 
 ## Subagents
 
@@ -42,6 +61,7 @@ A specification is "Ready for Development" when:
 - **Actionable**: Every task has a file path and specific action.
 - **Logical**: Tasks ordered by dependency.
 - **Testable**: All ACs use Given/When/Then.
+- **Surface-anchored**: ACs observe the outermost surface the intent references — never a more internal proxy for it (e.g. the API response, not the database row behind it).
 - **Complete**: No placeholders or TBDs.
 - **Sufficient**: No known requirement, acceptance, dependency, or implementation gaps remain unresolved.
 - **Coherent**: No unresolved ambiguities or internal contradictions.
@@ -59,14 +79,7 @@ A specification is "Ready for Development" when:
 
 Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`
 
-**If the script fails**, resolve the `workflow` block yourself by reading these three files in base → team → user order and applying the same structural merge rules as the resolver:
-
-1. `{skill-root}/customize.toml` — defaults
-2. `{project-root}/_bmad/custom/{skill-name}.toml` — team overrides
-3. `{project-root}/_bmad/custom/{skill-name}.user.toml` — personal overrides
-
-Any missing file is skipped. Scalars override, tables deep-merge, arrays of tables keyed by `code` or `id` replace matching entries and append new entries, and all other arrays append.
-
+<<include path="_shared/fragments/resolver-fallback.md" skill_kind="workflow">>
 ### Step 2: Execute Prepend Steps
 
 Execute each entry in `{workflow.activation_steps_prepend}` in order before proceeding.

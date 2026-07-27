@@ -23,9 +23,11 @@ Implement the clarified intent directly.
 
 The review layers for this route are `{workflow.oneshot_review_layers}`, resolved during activation.
 
-Skip every layer whose `instruction` is empty or missing, and every layer whose `when` condition (if present) does not hold. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`. Execute all remaining layers in parallel wherever their execution methods allow, following each layer's `instruction` verbatim after substituting any runtime placeholders.
+Skip every layer whose `instruction` is empty or missing, and every layer whose `when` condition (if present) does not hold. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
 
-If a layer's instruction requires subagents and none are available, generate one review prompt file per such layer in `{implementation_artifacts}` and HALT. Ask the human to run each in a separate session and paste back the findings.
+<<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch each active layer's reviewer as a parallel subagent without conversation context." fallback_action="generate one review prompt file per layer in `{implementation_artifacts}` and HALT. Ask the human to run each in a separate session and paste back the findings.">>
+
+Execute all remaining layers following each layer's `instruction` verbatim after substituting any runtime placeholders.
 
 ### Classify
 
@@ -77,6 +79,4 @@ Workflow complete.
 
 ## On Complete
 
-Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete`
-
-If the resolved `workflow.on_complete` is non-empty, follow it as the final terminal instruction before exiting.
+<<include path="_shared/fragments/on-complete.md">>

@@ -453,7 +453,7 @@ Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {ski
       <action>Suggest checking {sprint_status} to see project progress</action>
     </check>
     <action>Remain flexible - allow user to choose their own path or ask for other assistance</action>
-  <action>Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.</action>
+  <action><<include path="_shared/fragments/on-complete.md">></action>
   </step>
 
 </workflow>

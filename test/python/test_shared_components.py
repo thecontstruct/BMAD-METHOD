@@ -521,17 +521,13 @@ class TestGroupESHAPins:
 
     def test_e6_no_basename_collision_outside_allowlist(self):
         """E-6: no _shared/components/<f>.py shares basename with a pinned
-        component file, except for the per-basename allowlist (todays_date.py).
+        component file.
 
-        Post-DN-FOLLOWUP-II: bmad-quick-dev's local todays_date.py was lifted
-        to _shared/components/ (DN-FOLLOWUP-II closed 2026-07-03). The only
-        remaining collision is bmad-reference-components' local copy, which
-        is still on the allowlist until its own SHA-pin-lift story lands.
+        Post-full-lift: both bmad-quick-dev (2026-07-03) and bmad-reference-components
+        (2026-07-25) have had their local todays_date.py copies lifted to _shared/.
+        No per-skill copies remain, so the allowlist is now empty.
         """
-        # Per-basename allowlist — see DN-1 (Phil's revised constraint):
-        # pinned skill keeps its local copy; the lifted version in _shared/
-        # serves new/unpinned consumers only. Any OTHER name collision must fail.
-        ALLOWLIST = frozenset({"todays_date.py"})
+        ALLOWLIST: frozenset[str] = frozenset()
 
         shared_dir = _REPO / "src" / "_shared" / "components"
         shared_names = {p.name for p in shared_dir.glob("*.py")}
@@ -554,26 +550,23 @@ class TestGroupESHAPins:
             f"allowlist {sorted(ALLOWLIST)} (DN-1=C triple-copy state)."
         )
 
-    def test_e7_todays_date_double_copy_byte_identical(self):
-        """E-7: sha256(_shared) == sha256(bmad-reference-components).
+    def test_e7_todays_date_single_copy_in_shared(self):
+        """E-7: post-full-lift — only _shared/components/todays_date.py exists.
 
-        Divergence guard for the post-DN-FOLLOWUP-II double-copy state (Story
-        10.65 lifted the bmad-quick-dev local copy to _shared/components/).
-        bmad-reference-components still keeps a local copy (not yet lifted).
+        Both local copies lifted: bmad-quick-dev (2026-07-03) and
+        bmad-reference-components (2026-07-25). Engine resolves TodaysDate
+        via the _shared/ fallback probe.
         """
-        paths = [
-            _REPO / "src" / "_shared" / "components" / "todays_date.py",
-            _REPO / "src" / "core-skills" / "bmad-reference-components"
-            / "components" / "todays_date.py",
+        shared_copy = _REPO / "src" / "_shared" / "components" / "todays_date.py"
+        assert shared_copy.is_file(), f"missing canonical shared copy: {shared_copy}"
+        local_dirs = [
+            _REPO / "src" / "bmm-skills" / "4-implementation"
+            / "bmad-quick-dev" / "components",
+            _REPO / "src" / "core-skills" / "bmad-reference-components" / "components",
         ]
-        for p in paths:
-            assert p.is_file(), f"missing: {p}"
-        hashes = [_sha256_bytes(p) for p in paths]
-        assert len(set(hashes)) == 1, (
-            "todays_date.py copies have DIVERGED:\n"
-            + "\n".join(f"  {p.relative_to(_REPO)}: {h}" for p, h in zip(paths, hashes))
-            + "\nThe remaining copies MUST stay byte-identical until the next "
-            + "SHA-pin-lift removes bmad-reference-components' local copy."
+        stray = [d / "todays_date.py" for d in local_dirs if (d / "todays_date.py").is_file()]
+        assert not stray, (
+            f"Stray local copies of todays_date.py found (all should be lifted to _shared/): {stray}"
         )
 
 
@@ -658,12 +651,11 @@ class TestGroupFBackwardCompat:
 # ===========================================================================
 
 class TestGroupGTodaysDateLift:
-    """Verify the triple-copy state and shared-fallback behavior for todays_date.py."""
+    """Verify post-full-lift shared-fallback behavior for todays_date.py."""
 
-    def test_g1_triple_copy_byte_identical(self):
+    def test_g1_single_copy_in_shared(self):
         """G-1: covered by E-7 (re-asserted here for taxonomy completeness)."""
-        # Delegate to the canonical assertion.
-        TestGroupESHAPins().test_e7_todays_date_triple_copy_byte_identical()
+        TestGroupESHAPins().test_e7_todays_date_single_copy_in_shared()
 
     def test_g4_unpinned_consumer_resolves_to_shared(self, tmp_path):
         """G-4: synthetic skill with NO local todays_date.py resolves via _shared/."""
