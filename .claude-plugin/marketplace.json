@@ -24,12 +24,8 @@
         "./src/core-skills/bmad-party-mode",
         "./src/core-skills/bmad-shard-doc",
         "./src/core-skills/bmad-advanced-elicitation",
-        "./src/core-skills/bmad-editorial-review-prose",
-        "./src/core-skills/bmad-editorial-review-structure",
         "./src/core-skills/bmad-index-docs",
-        "./src/core-skills/bmad-review-adversarial-general",
-        "./src/core-skills/bmad-review-edge-case-hunter",
-        "./src/core-skills/bmad-review-verification-gap"
+        "./src/core-skills/bmad-review"
       ]
     },
     {

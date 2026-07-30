@@ -1,9 +1,4 @@
----
-name: bmad-review-verification-gap
-description: 'Review a code change for changed behavior that could regress without reliable verification catching it. Use when checking whether a change is adequately verified.'
----
-
-# Verification Gap Review
+# Verification-Gap Lens
 
 **Goal:** Find changed behavior that could break without reliable verification catching it. Ask one question — "if the behavior this change is supposed to produce broke where it's actually used, would verification fail?" Do not hunt for correctness bugs, but report genuine problems you notice while tracing verification.
 
@@ -13,7 +8,7 @@ The main verification gap shapes are:
 2. **Missing-adoption gap:** a place that should now use the new behavior doesn't; it handles the same case its own way, or not at all, and no test would flag the omission.
 3. **Broken-verification gap:** a test appears to cover the changed behavior, but would not actually protect it because it is skipped, flaky, not run in the normal verification path, or too weak to observe the regression.
 
-## Evidence Rules
+## Evidence rules
 
 - Read a test before claiming what it covers, runs, asserts, or misses.
 - Before claiming no test exists, search the whole repo by the symbol under test and by import references; expected file locations are not enough.
@@ -21,11 +16,11 @@ The main verification gap shapes are:
 - In a finding, say what you actually checked — "none of the tests I read cover this" — and show how far you looked. Say a test doesn't exist anywhere only when the symbol/import-reference search actually shows that.
 - Do not assign severity, confidence, priority, or ranking.
 
-## Review Sequence
+## Review sequence
 
 ### Step 1: Screen for behavioral change
 
-If the change is non-behavioral, stop here and output the clean result (see Output Format). Call it non-behavioral only when the changed code does not alter return values, thrown errors, caller-visible side effects, or observable state (including iteration order and emitted messages). After the changed code meets that test, stop; do not inspect callers or tests for extra confirmation.
+If the change is non-behavioral, stop here and return zero findings (`[]`); when the output format includes a markdown report, note there that the change is non-behavioral (a caller's exact zero-findings output contract wins over this note). Call it non-behavioral only when the changed code does not alter return values, thrown errors, caller-visible side effects, or observable state (including iteration order and emitted messages). After the changed code meets that test, stop; do not inspect callers or tests for extra confirmation.
 
 Common non-behavioral examples: formatting, comments, whitespace; pure renames; trivial getters/setters and pass-throughs; type-only or compiler-enforced changes with no runtime effect; etc.
 
@@ -70,37 +65,18 @@ Before writing a finding, re-open the specific tests or search results the findi
 
 Do not report: compiler/type-checker-enforced cases; behavior already verified by an integration, contract, or e2e test; implementation-detail or mock-only tests; low coverage or a missing test file by itself; legacy untested code the change did not affect.
 
-Report genuine problems you noticed while tracing verification, even if they are not verification gaps. Put them under `Other findings` in the output. This permits reporting what you already reached, not extra hunting.
+Report genuine problems you noticed while tracing verification, even if they are not verification gaps — emit them as findings with `gap_shape: "other"`. This permits reporting what you already reached, not extra hunting.
 
-## OUTPUT FORMAT
+## Findings shape
 
-Emit each verification-gap finding as one block. No general advice, no severity or confidence.
+Emit each gap with the canonical fields plus this lens's extras:
 
-```markdown
-### <one-line title naming the gap>
+- `location` — the changed surface: the exact behavior or contract that changed, `file:line`
+- `trigger_condition` — the gap, in one line
+- `guard_snippet` — the missing verification: the precise assertion or check that's absent, optionally with the test shape that would close it, fit to the repo's own way of verifying — don't impose a generic test pyramid
+- `potential_consequence` — the concrete thing that ships wrong: the regression the checked evidence would not catch, or the site that should use the new behavior and doesn't, with why the tests you checked would not fail
+- `gap_shape` — `"regression-gap"`, `"missing-adoption-gap"`, `"broken-verification-gap"`, or `"other"`
+- `consumer` — the impacted consumer or site, named concretely with `file:line` (e.g. "the `createInvoice` mutation used by the billing dashboard at `billing/dashboard.ts:88`", not "callers of this function")
+- `evidence` — what you actually checked: what the relevant test asserts with `file:line`; or, if none, the symbol/import-reference searches run and their result; for a broken-verification gap, the apparent test and why it does not count
 
-- **Changed surface:** the exact behavior or contract that changed — `file:line`.
-- **Impacted consumer or site:** named concretely with `file:line` (e.g. "the `createInvoice` mutation used by the billing dashboard at `billing/dashboard.ts:88`," not "callers of this function").
-- **Existing test evidence:**
-  - `Regression gap`: what the relevant test actually asserts, with `file:line`; or, if none, the symbol/import-reference searches run and their result.
-  - `Missing-adoption gap`: tests for the impacted site, and whether any assert it adopts the new behavior.
-  - `Broken-verification gap`: the apparent test or verification path, and why it does not count.
-- **Missing verification:** the precise assertion or check that's absent.
-- **Demonstration:**
-  - `Regression gap` / `Broken-verification gap`: the concrete regression that would ship undetected, and why the tests you checked would not fail.
-  - `Missing-adoption gap`: the case the site mishandles by not adopting the new behavior, and that none of the tests you read assert adoption.
-- **Consequence:** the concrete thing that ships wrong — a regression the checked evidence would not catch, or a site that should use the new behavior and doesn't.
-- **Suggested test shape:** (optional) the kind of test that would close the gap, fit to the repo's own way of verifying — don't impose a generic test pyramid.
-```
-
-If you noticed genuine non-gap problems while tracing verification, append:
-
-```markdown
-## Other findings
-
-- <description only; no severity, confidence, priority, or ranking>
-```
-
-When you find no verification gaps and no other findings, output exactly this single line, not an empty response:
-
-`No verification gaps found.`
+For `gap_shape: "other"` findings the four canonical fields suffice (description only); `consumer` and `evidence` are optional. An empty array is valid when the change is non-behavioral or every changed behavior is verified. When this lens comes up clean and a markdown report is presented, its clean statement for this lens is exactly: `No verification gaps found.`

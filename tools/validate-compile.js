@@ -56,17 +56,18 @@ function escapeAnnotation(str) {
 }
 
 /**
- * Search bmm-skills/ for a skill directory by name, including one level of
- * subdirectories (e.g. 1-analysis/research/<skill>).
+ * Search a skills root (core-skills/ or bmm-skills/) for a skill directory by
+ * name, including one level of subdirectories (e.g. bmm-skills/1-analysis/
+ * research/<skill>, or core-skills/v6-shims/<skill>).
  */
-function _findInBmmSkills(bmmSkillsRoot, skillName) {
-  if (!fs.existsSync(bmmSkillsRoot)) return null;
-  for (const cat of fs.readdirSync(bmmSkillsRoot, { withFileTypes: true })) {
+function _findOneLevelDeep(skillsRoot, skillName) {
+  if (!fs.existsSync(skillsRoot)) return null;
+  for (const cat of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
     if (!cat.isDirectory()) continue;
-    const direct = path.join(bmmSkillsRoot, cat.name, skillName);
+    const direct = path.join(skillsRoot, cat.name, skillName);
     if (fs.existsSync(direct)) return direct;
     // One level deeper — handles subdirs like research/, v6-shims/, etc.
-    const catDir = path.join(bmmSkillsRoot, cat.name);
+    const catDir = path.join(skillsRoot, cat.name);
     for (const sub of fs.readdirSync(catDir, { withFileTypes: true })) {
       if (!sub.isDirectory()) continue;
       const nested = path.join(catDir, sub.name, skillName);
@@ -84,7 +85,9 @@ function reconstructSkillSrcDir(entry) {
     const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
     const coreCandidate = path.join(srcRoot, 'core-skills', entry.skill);
     if (fs.existsSync(coreCandidate)) return coreCandidate;
-    const bmmMatch = _findInBmmSkills(path.join(srcRoot, 'bmm-skills'), entry.skill);
+    const coreMatch = _findOneLevelDeep(path.join(srcRoot, 'core-skills'), entry.skill);
+    if (coreMatch) return coreMatch;
+    const bmmMatch = _findOneLevelDeep(path.join(srcRoot, 'bmm-skills'), entry.skill);
     if (bmmMatch) return bmmMatch;
     throw new Error(`bmad.lock entry for skill "${entry.skill}" has no fragments[]; cannot reconstruct source directory.`);
   }
@@ -95,7 +98,9 @@ function reconstructSkillSrcDir(entry) {
     const srcRoot = path.join(PROJECT_ROOT, SRC_PREFIX);
     const coreCandidate = path.join(srcRoot, 'core-skills', entry.skill);
     if (fs.existsSync(coreCandidate)) return coreCandidate;
-    const bmmMatch = _findInBmmSkills(path.join(srcRoot, 'bmm-skills'), entry.skill);
+    const coreMatch = _findOneLevelDeep(path.join(srcRoot, 'core-skills'), entry.skill);
+    if (coreMatch) return coreMatch;
+    const bmmMatch = _findOneLevelDeep(path.join(srcRoot, 'bmm-skills'), entry.skill);
     if (bmmMatch) return bmmMatch;
     throw new Error(
       `bmad.lock entry for skill "${entry.skill}": uses _shared fragments but source not found in core-skills/ or bmm-skills/.`,
@@ -145,7 +150,7 @@ function reconstructSkillSrcDir(entry) {
     if (fs.existsSync(altResolved)) return altResolved;
     // For bmm-skills, also search one level deeper (e.g. research/ subdir).
     if (firstSeg === 'bmm') {
-      const bmmMatch = _findInBmmSkills(path.join(srcRoot, 'bmm-skills'), segments[1]);
+      const bmmMatch = _findOneLevelDeep(path.join(srcRoot, 'bmm-skills'), segments[1]);
       if (bmmMatch) return bmmMatch;
     }
   }

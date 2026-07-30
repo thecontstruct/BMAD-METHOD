@@ -60,8 +60,7 @@ run_folder_pattern = "architecture-{project_name}-{date}"
 # design. Each entry is a `skill:`, `file:`, or plain-text directive applied before the user sees
 # the polished draft. Suggested order: structural passes first, prose mechanics last. Append-only.
 doc_standards = [
-  "skill:bmad-editorial-review-structure",
-  "skill:bmad-editorial-review-prose",
+  "skill:bmad-review lenses=structure,prose",
 ]
 
 # External-source registry. Natural-language directives describing knowledge bases, MCP tools, or
