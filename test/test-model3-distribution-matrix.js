@@ -638,8 +638,8 @@ async function main() {
   });
 
   // AC-3 (10.43): IDE-invocation smoke test — static regression check for ≥1 Batch 1
-  // (multi-file with step artifacts, e.g. bmad-code-review) and ≥1 Batch 4/5 (research
-  // skill with D4 Handlebars + research.template.md artifact, e.g. bmad-domain-research).
+  // (multi-file with step artifacts, e.g. bmad-code-review) and ≥1 Batch 4/5 (skill with
+  // D4 Handlebars + a runtime-scaffold artifact template, e.g. bmad-check-implementation-readiness).
   // Verifies migration golden SKILL.md and template source still exist (guards against
   // accidental deletion of migrated artifacts).
   await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 1 (bmad-code-review)', async () => {
@@ -690,38 +690,40 @@ async function main() {
     );
   });
 
-  await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 4/5 (bmad-domain-research)', async () => {
-    const BATCH4_GOLDEN = path.join(__dirname, 'fixtures', 'migration-goldens', 'bmad-domain-research', 'SKILL.md');
+  // Exemplar repointed from bmad-domain-research to bmad-check-implementation-readiness
+  // (upstream #2611): the research trio was consolidated into bmad-deep-recon, so the old
+  // Batch 4/5 subject no longer exists. Readiness has the same shape the check cares about
+  // — a migrated .template.md, step artifacts, and a runtime-scaffold artifact template.
+  await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 4/5 (bmad-check-implementation-readiness)', async () => {
+    const BATCH4_GOLDEN = path.join(__dirname, 'fixtures', 'migration-goldens', 'bmad-check-implementation-readiness', 'SKILL.md');
     const BATCH4_TEMPLATE = path.join(
       __dirname,
       '..',
       'src',
       'bmm-skills',
-      '1-analysis',
-      'research',
-      'bmad-domain-research',
-      'bmad-domain-research.template.md',
+      '3-solutioning',
+      'bmad-check-implementation-readiness',
+      'bmad-check-implementation-readiness.template.md',
     );
     const BATCH4_STEP = path.join(
       __dirname,
       '..',
       'src',
       'bmm-skills',
-      '1-analysis',
-      'research',
-      'bmad-domain-research',
-      'domain-steps',
-      'step-01-init.md',
+      '3-solutioning',
+      'bmad-check-implementation-readiness',
+      'steps',
+      'step-01-document-discovery.md',
     );
     const BATCH4_ARTIFACT_TEMPLATE = path.join(
       __dirname,
       '..',
       'src',
       'bmm-skills',
-      '1-analysis',
-      'research',
-      'bmad-domain-research',
-      'research.template.md',
+      '3-solutioning',
+      'bmad-check-implementation-readiness',
+      'templates',
+      'readiness-report-template.md',
     );
 
     assert(
@@ -729,7 +731,7 @@ async function main() {
         .access(BATCH4_GOLDEN)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 migration golden SKILL.md exists (bmad-domain-research)',
+      'AC-3 (10.43): Batch 4/5 migration golden SKILL.md exists (bmad-check-implementation-readiness)',
       `expected: ${BATCH4_GOLDEN}`,
     );
     assert(
@@ -737,7 +739,7 @@ async function main() {
         .access(BATCH4_TEMPLATE)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 skill template source exists (bmad-domain-research.template.md)',
+      'AC-3 (10.43): Batch 4/5 skill template source exists (bmad-check-implementation-readiness.template.md)',
       `expected: ${BATCH4_TEMPLATE}`,
     );
     assert(
@@ -745,7 +747,7 @@ async function main() {
         .access(BATCH4_STEP)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 artifact domain-step exists (domain-steps/step-01-init.md)',
+      'AC-3 (10.43): Batch 4/5 artifact step exists (steps/step-01-document-discovery.md)',
       `expected: ${BATCH4_STEP}`,
     );
     assert(
@@ -753,7 +755,7 @@ async function main() {
         .access(BATCH4_ARTIFACT_TEMPLATE)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 runtime-scaffold artifact exists (research.template.md)',
+      'AC-3 (10.43): Batch 4/5 runtime-scaffold artifact exists (templates/readiness-report-template.md)',
       `expected: ${BATCH4_ARTIFACT_TEMPLATE}`,
     );
   });

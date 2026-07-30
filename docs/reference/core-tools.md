@@ -19,6 +19,7 @@ Run any core tool by typing its skill name (e.g., `bmad-help`) in your IDE. No a
 | [`bmad-brainstorming`](#bmad-brainstorming) | Workflow | Facilitate interactive brainstorming sessions |
 | [`bmad-party-mode`](#bmad-party-mode) | Workflow | Orchestrate multi-agent group discussions |
 | [`bmad-forge-idea`](#bmad-forge-idea) | Workflow | Pressure-test an idea until it hardens, proves out, or dies cheaply |
+| [`bmad-deep-recon`](#bmad-deep-recon) | Workflow | Decision-grade research: draft, process, or run — any subject |
 | [`bmad-spec`](#bmad-spec) | Workflow | Distill any intent input into a SPEC kernel and companions, the canonical contract for downstream work |
 | [`bmad-advanced-elicitation`](#bmad-advanced-elicitation) | Task | Push LLM output through iterative refinement methods |
 | [`bmad-review-adversarial-general`](#bmad-review-adversarial-general) | Task | Cynical review that finds what's missing and what's wrong |
@@ -120,6 +121,35 @@ The magic happens in ideas 50–100. The workflow encourages generating 100+ ide
 **Input:** The idea, in any domain — a feature, a business model, a research hypothesis, a life decision
 
 **Output:** A `forged-idea.md` distillate when an idea hardens (optional), plus a `forge-report.html` keepsake every run
+
+## bmad-deep-recon
+
+**Decision-grade research on any subject, three ways.** — Draft a deep-research prompt for the AI tool you already subscribe to, process a finished report into a cited summary downstream skills consume directly, or run the research in place through parallel web fan-out.
+
+**Use it when:**
+
+- A decision should rest on evidence instead of the model's memory
+- You need market, domain, technical, competitive, user-voice, or literature research
+- You have a research report from any source and want it distilled for downstream use
+- You're choosing between named options and want a structured comparison
+
+**How it works:**
+
+1. Detects the mode — draft, process, or run — and infers the research type from your ask
+2. Loads the type's pack: prioritized dimensions, source craft, freshness rules
+3. Run mode plans at one gate, fans out firewalled research assistants, and verifies claims as they land
+4. Draft and Process round-trip through your own deep-research tool instead
+5. Refresh and Deepen update an existing report without re-researching it
+
+**Input:** The decision and topic, a report to process, or an existing research folder to refresh
+
+**Output:** A cited `research.md` with metadata frontmatter, plus an optional self-contained HTML briefing
+
+For the three modes, how to choose between them, and what happens inside a run, see [Deep Recon](../explanation/deep-recon.md).
+
+:::note[Merged]
+The former `bmad-market-research`, `bmad-domain-research`, and `bmad-technical-research` workflows are merged into `bmad-deep-recon` as research types. The old IDs still resolve via forwarders for compatibility.
+:::
 
 ## bmad-spec
 
