@@ -1,9 +1,11 @@
 ---
 name: bmad-dev-story
-description: 'Execute story implementation following a context filled story spec file. Use when the user says "dev this story [story file]" or "implement the next story in the sprint plan"'
+description: "Deprecated: `bmad-quick-dev` is now the official implementation method. Only use this when explicitly invoked by name."
 ---
 
 # Dev Story Workflow
+
+<output>Deprecated: `bmad-quick-dev` is now the official implementation method. Only use this when explicitly invoked by name.</output>
 
 **Goal:** Execute story implementation following a context filled story spec file.
 

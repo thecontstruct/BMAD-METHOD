@@ -1,9 +1,11 @@
 ---
 name: bmad-create-story
-description: 'Creates a dedicated story file with all the context the agent will need to implement it later. Use when the user says "create the next story" or "create story [story identifier]"'
+description: "Deprecated: `bmad-quick-dev` is now the official implementation method. Only use this when explicitly invoked by name."
 ---
 
 # Create Story Workflow
+
+<output>Deprecated: `bmad-quick-dev` is now the official implementation method. Only use this when explicitly invoked by name.</output>
 
 **Goal:** Create a comprehensive story file that gives the dev agent everything needed for flawless implementation.
 
