@@ -219,6 +219,35 @@ function copyDirSync(src, dst) {
   }
 }
 
+/**
+ * Materialize lockfile-declared components beside a schema-validation SKILL.md.
+ *
+ * validateSkill resolves component paths relative to the skill directory. Positional
+ * compile layouts keep shared components at <install-root>/_shared/, while the
+ * compiled skill lives at <install-root>/<module>/<skill>/; a clean schema input
+ * similarly contains only SKILL.md. Copy the declared component files into the
+ * validator's expected relative paths without changing the compiled bytes or the
+ * lockfile hash being checked.
+ */
+function materializeSchemaComponents(schemaInputDir, compiledSkillDir, installRoot, components) {
+  const schemaRoot = path.resolve(schemaInputDir);
+
+  for (const component of components || []) {
+    const componentPath = component?.path;
+    if (typeof componentPath !== 'string' || componentPath === '') continue;
+
+    const destination = path.resolve(schemaRoot, componentPath);
+    if (destination !== schemaRoot && !destination.startsWith(schemaRoot + path.sep)) continue;
+
+    const candidates = [path.join(compiledSkillDir, componentPath), path.join(installRoot, componentPath)];
+    const source = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!source) continue;
+
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+  }
+}
+
 function validateOne(entry) {
   const skill = entry.skill;
   const skillSrcDir = reconstructSkillSrcDir(entry);
@@ -331,6 +360,7 @@ function validateOne(entry) {
           return d;
         })()
       : compiledSkillDir;
+    materializeSchemaComponents(schemaInputDir, compiledSkillDir, tmpDir, entry.components);
     const schemaFindings = validateSkill(schemaInputDir);
     // DN-R1-1=A (Phil 2026-05-08): only CRITICAL and HIGH block the build. MEDIUM and LOW
     // are informational, mirroring the `validate:skills --strict` contract.
