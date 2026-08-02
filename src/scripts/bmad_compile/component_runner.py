@@ -369,7 +369,7 @@ class MockComponentRunner(ComponentRunner):
 
 # =============================================================================
 # JIT sentinel resolution (Story 10.65 / AC-5; extracted from
-# src/bmm-skills/4-implementation/bmad-build/render.py)
+# src/bmm-skills/ship/bmad-build/render.py)
 # =============================================================================
 
 _JIT_SENTINEL_RE = re.compile(

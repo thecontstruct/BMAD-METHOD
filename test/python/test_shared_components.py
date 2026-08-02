@@ -485,7 +485,7 @@ class TestGroupCLockfileV4:
 _PINNED_SKILLS: dict[str, str] = {
     "src/core-skills/bmad-help/SKILL.md":
         "718077d741e20d9c94f3c2b7827047f2d18a90b85c3cc2eecd449e28b7b0d642",
-    "src/bmm-skills/4-implementation/bmad-build/SKILL.md":
+    "src/bmm-skills/ship/bmad-build/SKILL.md":
         "e58119e55ba1c5f39ec931a19cb1cc9e2a28040292a7a105ee0118f49d8b77f3",
     "src/core-skills/bmad-customize/bmad-customize.template.md":
         "c0d17619473868ace920dcf23e4240be92049feed9b10678f44e53752ad59f76",
@@ -533,7 +533,7 @@ class TestGroupESHAPins:
         shared_names = {p.name for p in shared_dir.glob("*.py")}
 
         pinned_dirs = [
-            _REPO / "src" / "bmm-skills" / "4-implementation"
+            _REPO / "src" / "bmm-skills" / "ship"
             / "bmad-build" / "components",
             _REPO / "src" / "core-skills" / "bmad-reference-components" / "components",
         ]
@@ -560,7 +560,7 @@ class TestGroupESHAPins:
         shared_copy = _REPO / "src" / "_shared" / "components" / "todays_date.py"
         assert shared_copy.is_file(), f"missing canonical shared copy: {shared_copy}"
         local_dirs = [
-            _REPO / "src" / "bmm-skills" / "4-implementation"
+            _REPO / "src" / "bmm-skills" / "ship"
             / "bmad-build" / "components",
             _REPO / "src" / "core-skills" / "bmad-reference-components" / "components",
         ]

@@ -644,25 +644,8 @@ async function main() {
   // accidental deletion of migrated artifacts).
   await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 1 (bmad-code-review)', async () => {
     const BATCH1_GOLDEN = path.join(__dirname, 'fixtures', 'migration-goldens', 'bmad-code-review', 'SKILL.md');
-    const BATCH1_TEMPLATE = path.join(
-      __dirname,
-      '..',
-      'src',
-      'bmm-skills',
-      '4-implementation',
-      'bmad-code-review',
-      'bmad-code-review.template.md',
-    );
-    const BATCH1_STEP = path.join(
-      __dirname,
-      '..',
-      'src',
-      'bmm-skills',
-      '4-implementation',
-      'bmad-code-review',
-      'steps',
-      'step-01-gather-context.md',
-    );
+    const BATCH1_TEMPLATE = path.join(__dirname, '..', 'src', 'bmm-skills', 'ship', 'bmad-code-review', 'bmad-code-review.template.md');
+    const BATCH1_STEP = path.join(__dirname, '..', 'src', 'bmm-skills', 'ship', 'bmad-code-review', 'steps', 'step-01-gather-context.md');
 
     assert(
       await fs
@@ -701,7 +684,7 @@ async function main() {
       '..',
       'src',
       'bmm-skills',
-      '3-solutioning',
+      'plan',
       'bmad-check-implementation-readiness',
       'bmad-check-implementation-readiness.template.md',
     );
@@ -710,7 +693,7 @@ async function main() {
       '..',
       'src',
       'bmm-skills',
-      '3-solutioning',
+      'plan',
       'bmad-check-implementation-readiness',
       'steps',
       'step-01-document-discovery.md',
@@ -720,7 +703,7 @@ async function main() {
       '..',
       'src',
       'bmm-skills',
-      '3-solutioning',
+      'plan',
       'bmad-check-implementation-readiness',
       'templates',
       'readiness-report-template.md',

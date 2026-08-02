@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const buildDir = path.join(root, 'src/bmm-skills/4-implementation/bmad-build');
+const buildDir = path.join(root, 'src/bmm-skills/ship/bmad-build');
 const customize = fs.readFileSync(path.join(buildDir, 'customize.toml'), 'utf8');
 const present = fs.readFileSync(path.join(buildDir, 'step-05-present.template.md'), 'utf8');
 const oneshot = fs.readFileSync(path.join(buildDir, 'step-oneshot.template.md'), 'utf8');

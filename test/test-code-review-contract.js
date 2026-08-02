@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const gather = fs.readFileSync(path.join(root, 'src/bmm-skills/4-implementation/bmad-code-review/steps/step-01-gather-context.md'), 'utf8');
+const gather = fs.readFileSync(path.join(root, 'src/bmm-skills/ship/bmad-code-review/steps/step-01-gather-context.md'), 'utf8');
 const lens = fs.readFileSync(path.join(root, 'src/core-skills/bmad-review/references/lens-verification-gap.md'), 'utf8');
 
 const checks = [

@@ -33,7 +33,7 @@ except ImportError:
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _COMPILE_PY = _PROJECT_ROOT / "src" / "scripts" / "compile.py"
-_BMAD_QUICK_DEV = _PROJECT_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-build"
+_BMAD_QUICK_DEV = _PROJECT_ROOT / "src" / "bmm-skills" / "ship" / "bmad-build"
 
 # In-process import for _compile_one_skill (AC-3 tests: cannot test via subprocess
 # because unittest.mock.patch does not cross the subprocess boundary).

@@ -150,10 +150,14 @@ function reconstructSkillSrcDir(entry) {
     if (fs.existsSync(altResolved)) return altResolved;
     // For bmm-skills, also search one level deeper (e.g. research/ subdir).
     if (firstSeg === 'bmm') {
-      const bmmMatch = _findOneLevelDeep(path.join(srcRoot, 'bmm-skills'), segments[1]);
+      const bmmMatch = _findOneLevelDeep(path.join(srcRoot, 'bmm-skills'), entry.skill);
       if (bmmMatch) return bmmMatch;
     }
   }
+  // Group names are organizational, not part of a skill's stable identity.
+  // Locks written before a group move therefore need a final name-based lookup.
+  const bmmMatch = _findOneLevelDeep(path.join(srcRoot, 'bmm-skills'), entry.skill);
+  if (bmmMatch) return bmmMatch;
   return resolved;
 }
 

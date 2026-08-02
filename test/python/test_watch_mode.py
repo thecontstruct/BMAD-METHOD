@@ -122,7 +122,7 @@ def test_scan_includes_component_py(tmp_path: Path) -> None:
 
 def test_route_skill_local_file(tmp_path: Path) -> None:
     """A file inside module/skill/ routes to that single skill dir."""
-    skill_dir = tmp_path / "4-implementation" / "bmad-build"
+    skill_dir = tmp_path / "ship" / "bmad-build"
     skill_dir.mkdir(parents=True)
     tpl = skill_dir / "bmad-build.template.md"
     tpl.write_text("t", encoding="utf-8")

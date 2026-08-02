@@ -3,10 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(
-  path.join(__dirname, '../src/bmm-skills/4-implementation/bmad-retrospective/bmad-retrospective.template.md'),
-  'utf8',
-);
+const source = fs.readFileSync(path.join(__dirname, '../src/bmm-skills/ship/bmad-retrospective/bmad-retrospective.template.md'), 'utf8');
 
 const checks = [
   ['requires evidence-backed findings', source.includes('A claim without evidence is not a finding')],

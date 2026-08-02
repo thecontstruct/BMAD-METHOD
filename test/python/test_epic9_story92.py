@@ -14,7 +14,7 @@ from unittest.mock import patch
 BMAD_ROOT = Path(__file__).resolve().parent.parent.parent
 REF_COMPS = BMAD_ROOT / "src" / "core-skills" / "bmad-reference-components" / "components"
 SHARED_COMPS = BMAD_ROOT / "src" / "_shared" / "components"
-QD_COMPS = BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-build" / "components"
+QD_COMPS = BMAD_ROOT / "src" / "bmm-skills" / "ship" / "bmad-build" / "components"
 # Post-DN-FOLLOWUP-II: bmad-build's local todays_date.py was lifted to
 # _shared/components/. bmad-reference-components' local copy is also lifted
 # (same story). All consumers resolve via the shared fallback.
