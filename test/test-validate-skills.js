@@ -237,6 +237,22 @@ function test_tpl02_missing_def_render() {
   }
 }
 
+// Case 9b — shared component path resolves from src/_shared for source-tree skills
+function test_tpl02_shared_component_path_resolves() {
+  const { tmpRoot, skillDir } = makeComponentFixture('Body content.');
+  const components = [makeCompEntry({ path: '_shared/components/artifact_path.py', render_mode: 'jit', compiled_hash: null })];
+  try {
+    const findings = validateSkill(skillDir, components).filter((f) => f.rule === 'TPL-02');
+    record(
+      'Case 9b: source-tree shared component path resolves',
+      !findings.some((f) => f.detail.includes('Component file not found')),
+      JSON.stringify(findings.map((f) => f.detail)),
+    );
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
 // Case 10 — JIT component missing RENDER_ERROR_FALLBACK → TPL-02 HIGH
 function test_tpl02_missing_render_error_fallback() {
   const { tmpRoot, skillDir } = makeComponentFixture('Body content.', {
@@ -292,6 +308,7 @@ test_tpl02_compile_only_with_jit_sentinel();
 test_tpl02_malformed_sentinel();
 test_tpl02_sentinel_lockfile_mismatch();
 test_tpl02_missing_def_render();
+test_tpl02_shared_component_path_resolves();
 test_tpl02_missing_render_error_fallback();
 test_tpl02_empty_components_skip();
 

@@ -271,6 +271,26 @@ function readLockfileComponents(skillName) {
   return entry.components;
 }
 
+/**
+ * Resolve a lockfile component path for a source-tree skill.
+ *
+ * Per-skill components are relative to the skill directory, whereas shared
+ * components are recorded as `_shared/components/...` and live at src/_shared.
+ * The latter are sibling paths only in an installed positional layout, not in
+ * the authoring tree validated by this tool.
+ */
+function resolveComponentPath(skillDir, componentPath) {
+  const localPath = path.join(skillDir, componentPath);
+  if (fs.existsSync(localPath)) return localPath;
+
+  if (componentPath.startsWith('_shared/')) {
+    const sharedPath = path.join(SRC_DIR, componentPath);
+    if (fs.existsSync(sharedPath)) return sharedPath;
+  }
+
+  return localPath;
+}
+
 // --- Rule Checks ---
 
 function validateSkill(skillDir, _testComponents) {
@@ -661,7 +681,7 @@ function validateSkill(skillDir, _testComponents) {
     // --- AC-5: missing def render( + AC-6: RENDER_ERROR_FALLBACK for JIT components ---
     for (const entry of components) {
       const compRelPath = entry.path;
-      const compAbsPath = path.join(skillDir, compRelPath);
+      const compAbsPath = resolveComponentPath(skillDir, compRelPath);
       let compSource = null;
 
       if (!fs.existsSync(compAbsPath)) {
