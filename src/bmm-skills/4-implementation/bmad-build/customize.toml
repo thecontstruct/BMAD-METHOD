@@ -33,6 +33,20 @@ persistent_facts = [
 
 on_complete = ""
 
+# How Build opens a completed spec for human review. Override with the editor
+# and equivalent behavior you prefer, or set this to an empty string to
+# disable automatic opening and all related completion output. `{project-root}`
+# and `{spec_file}` are substituted at run time.
+#
+# Example overrides:
+# - `Run \`cursor -r "{project-root}" "{spec_file}"\`, root first.`
+# - `Run \`cd "{project-root}" && vim "{spec_file}"\`.`
+# - `""` to disable automatic opening.
+
+open_spec = """
+Run `code -r "{project-root}" "{spec_file}"` — the repository root first so VS Code opens in the right context, then the spec file. Always double-quote both paths to handle spaces and special characters. If `code` is unavailable or the command fails, skip gracefully and tell the user the spec file path instead. In the completion summary, note that the spec was sent to VS Code and that it contains a Suggested Review Order, then add this navigation tip: "Ctrl+click (Cmd+click on macOS) the links in the Suggested Review Order to jump to each stop."
+"""
+
 # Review layers for the review step. `instruction` is the layer's whole
 # execution recipe — subagents by default, but an override may run anything
 # (e.g. an external reviewer via bash). {diff_output} is substituted at run
