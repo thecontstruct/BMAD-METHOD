@@ -803,9 +803,12 @@ class UI {
 
     const configCollector = new OfficialModules({ channelOptions: options.channelOptions });
 
-    // Seed core config from CLI options if provided
-    if (options.userName || options.communicationLanguage || options.documentOutputLanguage || options.outputFolder) {
-      const coreConfig = {};
+    // Seed core config from CLI options if provided. `--set core.<key>` seeds it
+    // too: core values are dependency-bearing — module artifact paths are built
+    // from output_folder here, and each module's config.yaml snapshots the core
+    // values — so the post-install patch alone lands too late.
+    if (options.userName || options.communicationLanguage || options.documentOutputLanguage || options.outputFolder || setOverrides.core) {
+      const coreConfig = { ...setOverrides.core };
       if (options.userName) {
         coreConfig.user_name = options.userName;
         await prompts.log.info(`Using user name from command-line: ${options.userName}`);
@@ -826,7 +829,28 @@ class UI {
       // Load existing config to merge with provided options
       await configCollector.loadExistingConfig(directory);
       const existingConfig = configCollector.collectedConfig.core || {};
-      configCollector.collectedConfig.core = { ...existingConfig, ...coreConfig };
+      // In headless mode, partial CLI input must retain every core default.
+      // Otherwise a lone `--set core.user_name=…` would skip the normal
+      // defaults branch and leave dependency-bearing values such as
+      // output_folder unresolved while BMM configuration is collected.
+      let headlessDefaults = {};
+      if (options.yes && Object.keys(existingConfig).length === 0) {
+        let safeUsername;
+        try {
+          safeUsername = os.userInfo().username;
+        } catch {
+          safeUsername = process.env.USER || process.env.USERNAME || 'User';
+        }
+        const defaultUsername = safeUsername.charAt(0).toUpperCase() + safeUsername.slice(1);
+        headlessDefaults = {
+          user_name: defaultUsername,
+          project_name: path.basename(directory),
+          communication_language: 'English',
+          document_output_language: 'English',
+          output_folder: '_bmad-output',
+        };
+      }
+      configCollector.collectedConfig.core = { ...headlessDefaults, ...existingConfig, ...coreConfig };
 
       // If not all options are provided, collect the missing ones interactively (unless --yes flag)
       if (
