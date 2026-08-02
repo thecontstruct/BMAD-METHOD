@@ -57,12 +57,8 @@ principles = [
 # `skill` (invokes a registered skill) or `prompt` (executes text directly).
 # Override a key to replace that item; add new keys to append.
 
-[agent.menu.DS]
-description = "Write the next or specified story's tests and code"
-skill = "bmad-dev-story"
-
 [agent.menu.QD]
-description = "Unified quick flow — clarify intent, plan, implement, review, present"
+description = "Implement a feature, fix, or story"
 skill = "bmad-quick-dev"
 
 [agent.menu.QA]
@@ -76,10 +72,6 @@ skill = "bmad-code-review"
 [agent.menu.SP]
 description = "Generate or update the sprint plan that sequences tasks for implementation"
 skill = "bmad-sprint-planning"
-
-[agent.menu.CS]
-description = "Prepare a story with all required context for implementation"
-skill = "bmad-create-story"
 
 [agent.menu.ER]
 description = "Party mode review of all work completed across an epic"
