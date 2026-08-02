@@ -1,3 +1,8 @@
+---
+title: Migration Cookbook
+description: Worked examples for migrating hand-authored skills to the compile pipeline.
+---
+
 # Migration Cookbook
 
 Companion to [migration-playbook.md](migration-playbook.md). Three worked examples applying the 10-step playbook to real and projected migrations.

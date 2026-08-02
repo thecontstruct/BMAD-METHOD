@@ -129,7 +129,7 @@ export default defineConfig({
         {
           label: 'Compile',
           collapsed: true,
-          autogenerate: { directory: 'compile' },
+          items: [{ autogenerate: { directory: 'compile' } }],
         },
         // TEA docs moved to standalone module site; keep BMM sidebar focused.
         {

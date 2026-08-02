@@ -1,3 +1,8 @@
+---
+title: Dev Notes Template
+description: Pre-development checklist for Epic 10 story specifications.
+---
+
 # Dev Notes Template
 
 Pre-dev checklist for story specs on this fork. Paste this block into the Dev Notes section of every new story spec. Fill in each item before dev starts.

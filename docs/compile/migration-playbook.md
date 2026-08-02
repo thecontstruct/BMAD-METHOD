@@ -1,3 +1,8 @@
+---
+title: Migration Playbook
+description: Canonical migration process for moving hand-authored skills onto the compile pipeline.
+---
+
 # Migration Playbook
 
 Canonical 10-step migration playbook for Epic 10. Authored by Story 10.1 (R0 spike). Refined empirically by Story 10.7 after Batch 1 closes.
