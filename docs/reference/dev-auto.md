@@ -7,6 +7,8 @@ sidebar:
 
 To use BMad in an autonomous development loop, use the `bmad-dev-auto` skill. It is like [Quick Dev](../explanation/quick-dev.md), but designed to keep moving without human interaction. You can use it in an interactive session, but its main purpose is to be used by an orchestrator.
 
+The important architectural boundary is this: `bmad-dev-auto` owns the implementation run and the spec artifact it produces, but it does not own your backlog policy. When review finds something real that is not this story's problem, the skill records that finding in the spec it owns and stops there. Deciding whether to queue it, deduplicate it, escalate it, or ignore it is the orchestrator's responsibility.
+
 ## What It Does
 
 `bmad-dev-auto` performs one unattended development-loop iteration:
@@ -99,6 +101,17 @@ The spec frontmatter `status` is the main machine-readable state for orchestrati
 | `done` | Workflow completed successfully |
 | `blocked` | Workflow cannot safely continue unattended |
 
+### Deferred Findings
+
+`deferred` is where the skill reports real findings that are not this story's problem. Each item contains:
+
+- `summary` — one-sentence description of the deferred issue
+- `evidence` — why the finding is real
+- `location` — optional file:line or component hint
+- `severity` — optional final triage severity (`high`, `medium`, `low`)
+
+This is intentionally not a backlog. It is a machine-readable review output. The orchestrator has to decide what happens next: create a ticket, append to a central queue, correlate duplicates across runs, or do nothing.
+
 ### On `ready-for-dev`
 
 `ready-for-dev` is normally a resume state the workflow passes straight through on its way to implementation. It becomes a genuine halt outcome when the invocation prompt directs a halt after planning: once the spec passes the READY FOR DEVELOPMENT gate, the workflow sets status `ready-for-dev` and stops there instead of continuing to implementation. Re-dispatching the same spec (or the same spec folder and story id) resumes at implementation via the routing above.
@@ -116,6 +129,7 @@ On successful completion, the workflow writes or updates the spec with:
   - Residual risks
 - `followup_review_recommended` flag. True if LLM decided another review pass seems worthwhile. It's a suggestion, not a must. Simplest way to give it a second review pass is to re-run the skill pointing it at the spec file.
 - `baseline_revision` and `final_revision` — HEAD before implementation and after the final commit. Together they bracket the run's commits: `git log baseline_revision..final_revision` lists exactly what it produced, and equal values mean no commits were made. Both are `NO_VCS` when version control is unavailable.
+- `deferred` frontmatter entries for review findings triaged `defer`. Each item records `summary`, `evidence`, and, when known, `location` plus `severity`.
 
 If version control is available, the workflow commits the change. It does not push.
 
@@ -158,6 +172,7 @@ For new work, the workflow creates:
 That spec is the contract between planning, implementation, and review. It contains:
 
 - Frontmatter status
+- Frontmatter machine state (`followup_review_recommended`, `warnings`, `deferred`, revision markers)
 - The immutable `<intent-contract>` block
 - Code map
 - Tasks and acceptance criteria
@@ -192,7 +207,6 @@ This records the terminal status and blocking condition.
 Depending on the route, the workflow may also write:
 
 - `{implementation_artifacts}/epic-<N>-context.md`
-- `{implementation_artifacts}/deferred-work.md`
 - A patch file preserving the attempted change when the review step halts on `intent gap` (path recorded in the spec's triage log)
 
 ## Orchestrator Responsibilities
@@ -203,6 +217,7 @@ An orchestrator integrating `bmad-dev-auto` should:
 - Prefer passing a spec path when resuming prior work — or the same spec folder and story id, under folder+id dispatch
 - Monitor the produced spec file, story spec artifact, or fallback result file for terminal state
 - Read `status`, `blocking condition`, and `followup_review_recommended` rather than inferring success from chat output alone
+- Read deferred findings from the spec frontmatter `deferred:` list
 - Use `baseline_revision..final_revision` to identify the commits the run produced, rather than inferring them from git state
 - Expect autonomous file changes and possibly a local commit
 - Handle `blocked` as a routing signal, not just a failure signal
