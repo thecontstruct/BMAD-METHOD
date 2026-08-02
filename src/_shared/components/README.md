@@ -50,7 +50,7 @@ Failing any criterion → keep the component per-skill.
 ## Currently shipped components
 
 - `todays_date.py` — lifted byte-identical from
-  `bmad-quick-dev/components/` + `bmad-reference-components/components/`.
+  `bmad-build/components/` + `bmad-reference-components/components/`.
   Pinned copies stay in place pending a cleanup pass once all consumers
   have migrated to the shared location.
 - `artifact_path.py` — JIT component encoding BMAD-domain path-derivation

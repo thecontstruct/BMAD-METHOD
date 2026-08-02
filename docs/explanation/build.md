@@ -1,5 +1,5 @@
 ---
-title: "Quick Dev"
+title: "Build"
 description: Reduce human-in-the-loop friction without giving up the checkpoints that protect output quality
 sidebar:
   order: 7
@@ -9,7 +9,7 @@ Intent in, code changes out, with as few human-in-the-loop turns as possible —
 
 It lets the model run longer between checkpoints, then brings the human back only when the task cannot safely continue without human judgment or when it is time to review the end result.
 
-![Quick Dev workflow diagram](/diagrams/quick-dev-diagram.png)
+![Build workflow diagram](/diagrams/build-diagram.png)
 
 ## Why This Exists
 
@@ -17,7 +17,7 @@ Human-in-the-loop turns are necessary and expensive.
 
 Current LLMs still fail in predictable ways: they misread intent, fill gaps with confident guesses, drift into unrelated work, and generate noisy review output. At the same time, constant human intervention limits development velocity. Human attention is the bottleneck.
 
-`bmad-quick-dev` rebalances that tradeoff. It trusts the model to run unsupervised for longer stretches, but only after the workflow has created a strong enough boundary to make that safe.
+`bmad-build` rebalances that tradeoff. It trusts the model to run unsupervised for longer stretches, but only after the workflow has created a strong enough boundary to make that safe.
 
 ## The Core Design
 
@@ -53,7 +53,7 @@ The intent interview is human-in-the-loop, but it is not the same kind of interr
 
 - **Intent-gap resolution** - stepping back in when review proves the workflow could not safely infer what was meant
 
-Everything else is a candidate for longer autonomous execution. That tradeoff is deliberate. Older patterns spend more human attention on continuous supervision. Quick Dev spends more trust on the model, but saves human attention for the moments where human reasoning has the highest leverage.
+Everything else is a candidate for longer autonomous execution. That tradeoff is deliberate. Older patterns spend more human attention on continuous supervision. Build spends more trust on the model, but saves human attention for the moments where human reasoning has the highest leverage.
 
 ## Why the Review System Matters
 
@@ -66,7 +66,7 @@ Agentic reviews often go wrong in two ways:
 - They generate too many findings, forcing the human to sift through noise.
 - They derail the current change by surfacing unrelated issues and turning every run into an ad hoc cleanup project.
 
-Quick Dev addresses both by treating review as triage.
+Build addresses both by treating review as triage.
 
 Some findings belong to the current change. Some do not. If a finding is incidental rather than causally tied to the current work, the workflow can defer it instead of forcing the human to handle it immediately. That keeps the run focused and prevents random tangents from consuming the budget of attention.
 

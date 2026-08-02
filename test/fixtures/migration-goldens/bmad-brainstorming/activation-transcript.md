@@ -79,7 +79,7 @@ migrations). Non-breaking — LLM reads body only.
 
 ## Engine-Frozen Statement (Story 10.48)
 
-5 pinned SHA files (bmad-help/SKILL.md, invoke-python.js, bmad-quick-dev/*,
+5 pinned SHA files (bmad-help/SKILL.md, invoke-python.js, bmad-build/*,
 bmad-customize.template.md, bmad-reference-components/*) remain byte-identical.
 Proof: test_bmad_help_keep_contract.py passes.
 

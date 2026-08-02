@@ -69,7 +69,7 @@ Pour les projets complexes, envisagez d’utiliser le workflow `bmad-document-pr
 
 ```
 bmad-help J'ai une app Rails existante, par où dois-je commencer ?
-bmad-help Quelle est la différence entre quick-dev et la méthode complète ?
+bmad-help Quelle est la différence entre build et la méthode complète ?
 bmad-help Montre-moi quels workflows sont disponibles
 ```
 
@@ -81,7 +81,7 @@ Vous avez deux options principales selon l’ampleur des modifications :
 
 | Portée                              | Approche recommandée                                                                                                                                                                 |
 |-------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Petites mises à jour ou ajouts**  | Exécutez `bmad-quick-dev` pour clarifier l’intention, planifier, implémenter et réviser dans un seul workflow. La méthode BMad complète en quatre phases est probablement excessive. |
+| **Petites mises à jour ou ajouts**  | Exécutez `bmad-build` pour clarifier l’intention, planifier, implémenter et réviser dans un seul workflow. La méthode BMad complète en quatre phases est probablement excessive. |
 | **Modifications ou ajouts majeurs** | Commencez avec la méthode BMad, en appliquant autant ou aussi peu de rigueur que nécessaire.                                                                                         |
 
 ### Pendant la création du PRD

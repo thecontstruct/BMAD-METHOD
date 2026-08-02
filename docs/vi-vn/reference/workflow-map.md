@@ -69,7 +69,7 @@ Bỏ qua giai đoạn 1-3 đối với những việc nhỏ, rõ và đã hiểu
 
 | Quy trình | Mục đích | Tạo ra |
 | ------------------ | --------------------------------------------------------------------------- | ---------------------- |
-| `bmad-quick-dev` | Luồng nhanh hợp nhất — làm rõ yêu cầu, lập kế hoạch, triển khai, review và trình bày | `spec-*.md` + mã nguồn |
+| `bmad-build` | Luồng nhanh hợp nhất — làm rõ yêu cầu, lập kế hoạch, triển khai, review và trình bày | `spec-*.md` + mã nguồn |
 
 ## Quản lý ngữ cảnh
 

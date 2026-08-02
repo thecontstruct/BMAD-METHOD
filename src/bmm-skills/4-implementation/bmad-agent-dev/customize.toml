@@ -57,9 +57,9 @@ principles = [
 # `skill` (invokes a registered skill) or `prompt` (executes text directly).
 # Override a key to replace that item; add new keys to append.
 
-[agent.menu.QD]
+[agent.menu.BD]
 description = "Implement a feature, fix, or story"
-skill = "bmad-quick-dev"
+skill = "bmad-build"
 
 [agent.menu.QA]
 description = "Generate API and E2E tests for existing features"

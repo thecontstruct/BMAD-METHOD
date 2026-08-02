@@ -52,7 +52,7 @@ Các workflow phát triển game có cấu trúc, được điều chỉnh cho U
 **Cung cấp:**
 
 - Workflow tạo Game Design Document (GDD)
-- Chế độ Quick Dev cho làm prototype nhanh
+- Chế độ Build cho làm prototype nhanh
 - Hỗ trợ thiết kế narrative cho nhân vật, hội thoại và world-building
 - Bao phủ hơn 21 thể loại game cùng hướng dẫn kiến trúc theo engine
 

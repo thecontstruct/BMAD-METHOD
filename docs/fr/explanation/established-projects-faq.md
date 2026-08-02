@@ -10,7 +10,7 @@ Réponses rapides aux questions courantes sur l’utilisation de la méthode BMa
 
 - [Dois-je d’abord exécuter document-project ?](#dois-je-dabord-exécuter-document-project)
 - [Que faire si j’oublie d’exécuter document-project ?](#que-faire-si-joublie-dexécuter-document-project)
-- [Puis-je utiliser Quick Dev pour les projets existants ?](#puis-je-utiliser-quick-dev-pour-les-projets-existants)
+- [Puis-je utiliser Build pour les projets existants ?](#puis-je-utiliser-build-pour-les-projets-existants)
 - [Que faire si mon code existant ne suit pas les bonnes pratiques ?](#que-faire-si-mon-code-existant-ne-suit-pas-les-bonnes-pratiques)
 
 ### Dois-je d’abord exécuter `document-project` ?
@@ -27,9 +27,9 @@ Vous pouvez l’ignorer si vous disposez d’une documentation complète et à j
 
 Ne vous inquiétez pas — vous pouvez le faire à tout moment. Vous pouvez même le faire pendant ou après un projet pour aider à maintenir la documentation à jour.
 
-### Puis-je utiliser Quick Dev pour les projets existants ?
+### Puis-je utiliser Build pour les projets existants ?
 
-Oui ! Quick Dev fonctionne très bien pour les projets existants. Il va :
+Oui ! Build fonctionne très bien pour les projets existants. Il va :
 
 - Détecter automatiquement votre pile technologique existante
 - Analyser les patterns de code existants
@@ -40,7 +40,7 @@ Parfait pour les corrections de bugs et les petites fonctionnalités dans des ba
 
 ### Que faire si mon code existant ne suit pas les bonnes pratiques ?
 
-Quick Dev détecte vos conventions et demande : « Dois-je suivre ces conventions existantes ? » Vous décidez :
+Build détecte vos conventions et demande : « Dois-je suivre ces conventions existantes ? » Vous décidez :
 
 - **Oui** → Maintenir la cohérence avec la base de code actuelle
 - **Non** → Établir de nouvelles normes (documenter pourquoi dans la spécification technique)

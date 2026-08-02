@@ -485,7 +485,7 @@ class TestGroupCLockfileV4:
 _PINNED_SKILLS: dict[str, str] = {
     "src/core-skills/bmad-help/SKILL.md":
         "718077d741e20d9c94f3c2b7827047f2d18a90b85c3cc2eecd449e28b7b0d642",
-    "src/bmm-skills/4-implementation/bmad-quick-dev/SKILL.md":
+    "src/bmm-skills/4-implementation/bmad-build/SKILL.md":
         "e58119e55ba1c5f39ec931a19cb1cc9e2a28040292a7a105ee0118f49d8b77f3",
     "src/core-skills/bmad-customize/bmad-customize.template.md":
         "c0d17619473868ace920dcf23e4240be92049feed9b10678f44e53752ad59f76",
@@ -523,7 +523,7 @@ class TestGroupESHAPins:
         """E-6: no _shared/components/<f>.py shares basename with a pinned
         component file.
 
-        Post-full-lift: both bmad-quick-dev (2026-07-03) and bmad-reference-components
+        Post-full-lift: both bmad-build (2026-07-03) and bmad-reference-components
         (2026-07-25) have had their local todays_date.py copies lifted to _shared/.
         No per-skill copies remain, so the allowlist is now empty.
         """
@@ -534,7 +534,7 @@ class TestGroupESHAPins:
 
         pinned_dirs = [
             _REPO / "src" / "bmm-skills" / "4-implementation"
-            / "bmad-quick-dev" / "components",
+            / "bmad-build" / "components",
             _REPO / "src" / "core-skills" / "bmad-reference-components" / "components",
         ]
         pinned_names: set[str] = set()
@@ -553,7 +553,7 @@ class TestGroupESHAPins:
     def test_e7_todays_date_single_copy_in_shared(self):
         """E-7: post-full-lift — only _shared/components/todays_date.py exists.
 
-        Both local copies lifted: bmad-quick-dev (2026-07-03) and
+        Both local copies lifted: bmad-build (2026-07-03) and
         bmad-reference-components (2026-07-25). Engine resolves TodaysDate
         via the _shared/ fallback probe.
         """
@@ -561,7 +561,7 @@ class TestGroupESHAPins:
         assert shared_copy.is_file(), f"missing canonical shared copy: {shared_copy}"
         local_dirs = [
             _REPO / "src" / "bmm-skills" / "4-implementation"
-            / "bmad-quick-dev" / "components",
+            / "bmad-build" / "components",
             _REPO / "src" / "core-skills" / "bmad-reference-components" / "components",
         ]
         stray = [d / "todays_date.py" for d in local_dirs if (d / "todays_date.py").is_file()]
@@ -825,7 +825,7 @@ class TestGroupHArtifactPath:
 
         Verifies the glob does NOT match story_key=1-10-bar. This is the
         canonical collision-safety reasoning documented in pinned
-        bmad-quick-dev/step-01-clarify-and-route.md; the lifted component
+        bmad-build/step-01-clarify-and-route.md; the lifted component
         must encode the same semantics so post-pin-lift migration is a
         no-semantic-change refactor.
         """
@@ -863,7 +863,7 @@ class TestGroupHArtifactPath:
             _artifact_path_render(kind="retro", epic="10", date="2026-06-08")
             == f"{self.DEFAULT_IA}/epic-10-retro-2026-06-08.md"
         )
-        # bmad-quick-dev/sync-sprint-status.md (epic key derivation)
+        # bmad-build/sync-sprint-status.md (epic key derivation)
         assert _artifact_path_render(kind="epic-key", epic="3") == "epic-3"
         # sprint-status path
         assert (

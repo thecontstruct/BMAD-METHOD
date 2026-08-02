@@ -85,7 +85,7 @@ function — distinct from `toml_merge.load_toml_file()`. The central loader doe
 strip UTF-8 BOM, does not perform TOCTOU recovery, and surfaces parse errors as stderr
 warnings (or errors for required layers). See §Edge Cases for the full comparison.
 
-**Upstream prototype comparison:** `upstream/feat/quick-dev-python-config` has its own
+**Upstream prototype comparison:** `upstream/feat/build-python-config` has its own
 4-layer inline merge in `render.py` (lines 33–41) covering the same 4 central config
 files. That implementation uses simplified semantics: scalars override, tables deep
 merge, but **all arrays append** (no keyed AoT merge). The comment at render.py line 39
@@ -276,7 +276,7 @@ dotted-path lookup in that table.
 
 ### `{{.X}}` — Upstream prototype sigil (render.py, JIT renderer)
 
-Resolved at skill-entry time by `render.py` in `upstream/feat/quick-dev-python-config`,
+Resolved at skill-entry time by `render.py` in `upstream/feat/build-python-config`,
 using the simplified 4-layer central config merge. This sigil is rejected by the TPL-01
 lint rule (Story 7.20) when found in template `.md` files.
 

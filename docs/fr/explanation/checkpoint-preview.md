@@ -11,7 +11,7 @@ sidebar:
 
 ## Le Flux Typique
 
-Vous lancez `bmad-quick-dev`. Il clarifie votre intention, construit une spécification, implémente la modification, et une fois terminé, il ajoute un historique de revue au fichier de spécification et l’ouvre dans votre éditeur. Vous regardez la spec et constatez que la modification a touché 20 fichiers dans plusieurs modules.
+Vous lancez `bmad-build`. Il clarifie votre intention, construit une spécification, implémente la modification, et une fois terminé, il ajoute un historique de revue au fichier de spécification et l’ouvre dans votre éditeur. Vous regardez la spec et constatez que la modification a touché 20 fichiers dans plusieurs modules.
 
 Vous pourriez survoler le diff. Mais 20 fichiers, c’est le moment où le survol commence à échouer — on perd le fil, on rate un lien entre deux modifications éloignées, ou on approuve quelque chose qu’on n’a pas pleinement compris. Alors au lieu de cela, vous dites « checkpoint » et le LLM vous guide à travers la modification.
 
@@ -77,7 +77,7 @@ Lorsqu’aucun historique produit par l’auteur n’existe, le workflow en gén
 
 ## Quand l’utiliser
 
-Le scénario principal est le passage de relais depuis `bmad-quick-dev` : l’implémentation est terminée, le fichier de spécification est ouvert dans votre éditeur avec un historique de revue ajouté, et vous devez décider si vous publiez. Dites « checkpoint » et c’est parti.
+Le scénario principal est le passage de relais depuis `bmad-build` : l’implémentation est terminée, le fichier de spécification est ouvert dans votre éditeur avec un historique de revue ajouté, et vous devez décider si vous publiez. Dites « checkpoint » et c’est parti.
 
 Il fonctionne aussi de manière autonome :
 

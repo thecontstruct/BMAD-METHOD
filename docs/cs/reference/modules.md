@@ -52,7 +52,7 @@ Strukturované workflow pro vývoj her adaptované pro Unity, Unreal, Godot a vl
 **Poskytuje:**
 
 - Workflow pro generování Game Design Document (GDD)
-- Režim Quick Dev pro rychlé prototypování
+- Režim Build pro rychlé prototypování
 - Podporu narativního designu pro postavy, dialogy a budování světa
 - Pokrytí 21+ typů her s architektonickým vedením specifickým pro engine
 

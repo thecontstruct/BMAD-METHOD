@@ -81,7 +81,7 @@ Máte dvě hlavní možnosti v závislosti na rozsahu změn:
 
 | Rozsah                         | Doporučený přístup                                                                                                            |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Malé aktualizace či doplnění** | Spusťte `bmad-quick-dev` pro vyjasnění záměru, plánování, implementaci a revizi v jednom workflow. Plná čtyřfázová metoda BMad je pravděpodobně přehnaná. |
+| **Malé aktualizace či doplnění** | Spusťte `bmad-build` pro vyjasnění záměru, plánování, implementaci a revizi v jednom workflow. Plná čtyřfázová metoda BMad je pravděpodobně přehnaná. |
 | **Velké změny či doplnění**    | Začněte s metodou BMad a aplikujte tolik nebo tak málo důkladnosti, kolik potřebujete.                                        |
 
 ### Během tvorby PRD

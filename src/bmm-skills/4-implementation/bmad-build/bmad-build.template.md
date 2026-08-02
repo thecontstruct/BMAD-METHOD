@@ -1,5 +1,5 @@
 ---
-name: bmad-quick-dev
+name: bmad-build
 description: 'Implements any user intent, requirement, story, bug fix or change request by producing clean working code artifacts that follow the project''s existing architecture, patterns and conventions. Use when the user wants to build, fix, tweak, refactor, add or modify any code, component or feature.'
 artifacts:
   - path: step-01-clarify-and-route.md
@@ -22,7 +22,7 @@ artifacts:
     kind: step-template
 ---
 
-# Quick Dev New Preview Workflow
+# Build Workflow
 
 **Goal:** Turn user intent into a hardened, reviewable artifact.
 

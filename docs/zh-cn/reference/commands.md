@@ -90,7 +90,7 @@ skill 目录名就是调用名，例如 `bmad-agent-dev/` 对应 skill `bmad-age
 | `bmad-create-epics-and-stories` | 拆分 epics/stories |
 | `bmad-dev-story` | 实现指定 story |
 | `bmad-code-review` | 代码评审 |
-| `bmad-quick-dev` | 快速流程（澄清→规划→实现→审查→呈现） |
+| `bmad-build` | 快速流程（澄清→规划→实现→审查→呈现） |
 
 按阶段查看见 [工作流地图](./workflow-map.md)。
 

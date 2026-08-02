@@ -81,7 +81,7 @@ Bạn có hai lựa chọn chính, tùy thuộc vào phạm vi thay đổi:
 
 | Phạm vi | Cách tiếp cận được khuyến nghị |
 | --- | --- |
-| **Cập nhật hoặc bổ sung nhỏ** | Chạy `bmad-quick-dev` để làm rõ ý định, lập kế hoạch, triển khai và review trong một workflow duy nhất. Quy trình BMad Method đầy đủ có thể là quá mức cần thiết. |
+| **Cập nhật hoặc bổ sung nhỏ** | Chạy `bmad-build` để làm rõ ý định, lập kế hoạch, triển khai và review trong một workflow duy nhất. Quy trình BMad Method đầy đủ có thể là quá mức cần thiết. |
 | **Thay đổi hoặc bổ sung lớn** | Bắt đầu với BMad Method, áp dụng mức độ chặt chẽ phù hợp với nhu cầu của bạn. |
 
 ### Khi tạo PRD

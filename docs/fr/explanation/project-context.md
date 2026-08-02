@@ -25,7 +25,7 @@ Chaque workflow d’implémentation charge automatiquement `project-context.md` 
 - `bmad-create-story` — informe la création de stories avec les patterns du projet
 - `bmad-dev-story` — guide les décisions d’implémentation
 - `bmad-code-review` — valide par rapport aux standards du projet
-- `bmad-quick-dev` — applique les patterns lors de l’implémentation des spécifications techniques
+- `bmad-build` — applique les patterns lors de l’implémentation des spécifications techniques
 - `bmad-sprint-planning`, `bmad-retrospective`, `bmad-correct-course` — fournit le contexte global du projet
 
 ## Quand Le Créer
@@ -37,7 +37,7 @@ Le fichier `project-context.md` est utile à n’importe quel stade d’un proje
 | **Nouveau projet, avant l’architecture** | Manuellement, avant `bmad-create-architecture`      | Documenter vos préférences techniques pour que l’architecte les respecte              |
 | **Nouveau projet, après l’architecture** | Via `bmad-generate-project-context` ou manuellement | Capturer les décisions d’architecture pour les agents d’implémentation                |
 | **Projet existant**                      | Via `bmad-generate-project-context`                 | Découvrir les patterns existants pour que les agents suivent les conventions établies |
-| **Projet Quick Dev**                     | Avant ou pendant `bmad-quick-dev`                   | Garantir que l’implémentation rapide respecte vos patterns                            |
+| **Projet Build**                     | Avant ou pendant `bmad-build`                   | Garantir que l’implémentation rapide respecte vos patterns                            |
 
 :::tip[Recommandé]
 Pour les nouveaux projets, créez-le manuellement avant l’architecture si vous avez de fortes préférences techniques. Sinon, générez-le après l’architecture pour capturer ces décisions.
@@ -138,7 +138,7 @@ Sans `project-context.md`, les agents font des suppositions qui peuvent ne pas c
 | Chaque agent décide indépendamment                 | Tous les agents s’alignent sur les mêmes règles |
 
 C’est particulièrement important pour :
-- **Quick Dev** — saute le PRD et l’architecture, le fichier de contexte comble le vide
+- **Build** — saute le PRD et l’architecture, le fichier de contexte comble le vide
 - **Projets d’équipe** — garantit que tous les agents suivent les mêmes standards
 - **Projets existants** — empêche de casser les patterns établis
 

@@ -76,11 +76,11 @@ Decide how to build it and break work into stories.
 
 ## Phase 4: Implementation
 
-Build it with `bmad-quick-dev` as the official implementation method. The legacy `bmad-create-story` / `bmad-dev-story` split is deprecated and remains available only when explicitly invoked by name.
+Build it with `bmad-build` as the official implementation method. The legacy `bmad-create-story` / `bmad-dev-story` split is deprecated and remains available only when explicitly invoked by name.
 
 | Workflow | Purpose | Produces |
 |----------|---------|----------|
-| `bmad-quick-dev` | Turn an intent or story into implemented, reviewed code | `spec-*.md` + code |
+| `bmad-build` | Turn an intent or story into implemented, reviewed code | `spec-*.md` + code |
 | `bmad-sprint-planning` | Initialize tracking (once per project to sequence the dev cycle) | `sprint-status.yaml` |
 | `bmad-code-review` | Ad hoc review of any code change | Findings + applied patches |
 | `bmad-correct-course` | Handle significant mid-sprint changes | Updated plan or re-routing |
@@ -93,10 +93,10 @@ Skip phases 1-3 for small, well-understood work.
 
 | Workflow         | Purpose                                                                   | Produces           |
 |------------------|---------------------------------------------------------------------------|--------------------|
-| `bmad-quick-dev` | Turn an intent or story into implemented, reviewed code | `spec-*.md` + code |
-| `bmad-dev-auto`  | Runs one unattended development-loop iteration — small intent in, code out | `spec-*.md` + code |
+| `bmad-build` | Turn an intent or story into implemented, reviewed code | `spec-*.md` + code |
+| `bmad-build-auto`  | Runs one unattended development-loop iteration — small intent in, code out | `spec-*.md` + code |
 
-For the reference on unattended development loops with `bmad-dev-auto`, see [Autonomous Development Loops](./dev-auto.md).
+For the reference on unattended development loops with `bmad-build-auto`, see [Autonomous Development Loops](./build-auto.md).
 
 ## Context Management
 

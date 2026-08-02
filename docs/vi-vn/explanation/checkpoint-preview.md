@@ -11,7 +11,7 @@ sidebar:
 
 ## Luồng điển hình
 
-Bạn chạy `bmad-quick-dev`. Nó làm rõ ý định của bạn, dựng spec, triển khai thay đổi, rồi khi xong sẽ nối thêm một review trail vào file spec và mở file đó trong editor. Bạn nhìn vào spec và thấy thay đổi này chạm tới 20 file, trải trên nhiều module.
+Bạn chạy `bmad-build`. Nó làm rõ ý định của bạn, dựng spec, triển khai thay đổi, rồi khi xong sẽ nối thêm một review trail vào file spec và mở file đó trong editor. Bạn nhìn vào spec và thấy thay đổi này chạm tới 20 file, trải trên nhiều module.
 
 Bạn có thể tự liếc diff. Nhưng khoảng 20 file là lúc cách đó bắt đầu kém hiệu quả: bạn mất mạch, bỏ sót liên hệ giữa hai thay đổi ở xa nhau, hoặc duyệt một thứ mà bạn chưa thực sự hiểu. Thay vì vậy, bạn nói "checkpoint" và LLM sẽ dẫn bạn đi qua thay đổi.
 
@@ -77,7 +77,7 @@ Nếu không có review trail do tác giả tạo, workflow sẽ tự sinh một
 
 ## Khi nào nên dùng
 
-Tình huống chính là bước bàn giao sau `bmad-quick-dev`: phần triển khai đã xong, file spec đang mở trong editor với review trail đã được nối thêm, và bạn cần quyết định có nên phát hành hay không. Lúc đó chỉ cần nói "checkpoint" là bắt đầu.
+Tình huống chính là bước bàn giao sau `bmad-build`: phần triển khai đã xong, file spec đang mở trong editor với review trail đã được nối thêm, và bạn cần quyết định có nên phát hành hay không. Lúc đó chỉ cần nói "checkpoint" là bắt đầu.
 
 Nó cũng hoạt động độc lập:
 

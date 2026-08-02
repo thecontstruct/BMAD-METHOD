@@ -1,11 +1,11 @@
 ---
 name: bmad-dev-story
-description: "Deprecated: `bmad-quick-dev` is now the official implementation method. Only use this when explicitly invoked by name."
+description: "Deprecated: `bmad-build` is now the official implementation method. Only use this when explicitly invoked by name."
 ---
 
 # Dev Story Workflow
 
-<output>Deprecated: `bmad-quick-dev` is now the official implementation method. Only use this when explicitly invoked by name.</output>
+<output>Deprecated: `bmad-build` is now the official implementation method. Only use this when explicitly invoked by name.</output>
 
 **Goal:** Execute story implementation following a context filled story spec file.
 

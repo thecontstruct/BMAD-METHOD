@@ -64,7 +64,7 @@ BMad Method（BMM）通过分阶段 workflow 逐步构建上下文，让智能�
 
 | Workflow | 目的 | 产出 |
 | --- | --- | --- |
-| `bmad-quick-dev` | 统一快流：意图澄清、规划、实现、审查、呈现 | `spec-*.md` + 代码变更 |
+| `bmad-build` | 统一快流：意图澄清、规划、实现、审查、呈现 | `spec-*.md` + 代码变更 |
 
 ## 上下文管理
 

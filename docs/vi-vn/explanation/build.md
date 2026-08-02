@@ -9,7 +9,7 @@ sidebar:
 
 Nó cho phép mô hình tự vận hành lâu hơn giữa các điểm kiểm tra, rồi chỉ đưa con người quay lại khi tác vụ không thể tiếp tục an toàn nếu thiếu phán đoán của con người, hoặc khi đã đến lúc rà soát kết quả cuối.
 
-![Quick Dev workflow diagram](/diagrams/quick-dev-diagram.png)
+![Build workflow diagram](/diagrams/build-diagram.png)
 
 ## Vì sao nó tồn tại
 
@@ -17,7 +17,7 @@ Các lượt có người trong vòng lặp vừa cần thiết vừa tốn kém
 
 LLM hiện tại vẫn thất bại theo những cách dễ đoán: hiểu sai ý định, tự điền vào khoảng trống bằng những phán đoán tự tin, lệch sang công việc không liên quan, và tạo ra các bản review nhiễu. Đồng thời, việc cần con người nhảy vào liên tục làm giảm tốc độ phát triển. Sự chú ý của con người là nút thắt.
 
-`bmad-quick-dev` cân bằng lại đánh đổi đó. Nó tin mô hình có thể chạy tự chủ lâu hơn, nhưng chỉ sau khi quy trình đã tạo được một ranh giới đủ mạnh để làm điều đó an toàn.
+`bmad-build` cân bằng lại đánh đổi đó. Nó tin mô hình có thể chạy tự chủ lâu hơn, nhưng chỉ sau khi quy trình đã tạo được một ranh giới đủ mạnh để làm điều đó an toàn.
 
 ## Thiết kế cốt lõi
 
@@ -53,7 +53,7 @@ Bước phỏng vấn ý định có người trong vòng lặp, nhưng nó khô
 
 - **Xử lý khoảng trống của ý định** - quay lại khi review cho thấy workflow không thể suy ra an toàn điều được hàm ý
 
-Mọi thứ còn lại đều là ứng viên cho việc thực thi tự chủ lâu hơn. Đánh đổi này là có chủ đích. Các mẫu cũ tốn nhiều sự chú ý của con người cho việc giám sát liên tục. Quick Dev đặt nhiều niềm tin hơn vào mô hình, nhưng để dành sự chú ý của con người cho những thời điểm mà lý trí con người có đòn bẩy lớn nhất.
+Mọi thứ còn lại đều là ứng viên cho việc thực thi tự chủ lâu hơn. Đánh đổi này là có chủ đích. Các mẫu cũ tốn nhiều sự chú ý của con người cho việc giám sát liên tục. Build đặt nhiều niềm tin hơn vào mô hình, nhưng để dành sự chú ý của con người cho những thời điểm mà lý trí con người có đòn bẩy lớn nhất.
 
 ## Vì sao hệ thống review quan trọng
 
@@ -66,7 +66,7 @@ Rà soát kiểu agent thường sai theo hai cách:
 - Tạo quá nhiều phát hiện, buộc con người lọc quá nhiều nhiễu.
 - Làm lệch thay đổi hiện tại bằng cách kéo vào các vấn đề không liên quan, biến mỗi lần chạy thành một dự án dọn dẹp chắp vá.
 
-Quick Dev xử lý cả hai bằng cách coi rà soát là bước phân loại.
+Build xử lý cả hai bằng cách coi rà soát là bước phân loại.
 
 Có những phát hiện thuộc về thay đổi hiện tại. Có những phát hiện không thuộc về nó. Nếu một phát hiện chỉ là ngẫu nhiên xuất hiện, không gắn nhân quả với thay đổi đang làm, quy trình có thể trì hoãn nó thay vì ép con người xử lý ngay. Điều đó giữ cho mỗi lần chạy tập trung và ngăn các ngả rẽ ngẫu nhiên ăn hết ngân sách chú ý.
 

@@ -147,7 +147,7 @@ Tất cả workflow trong phase này đều là tùy chọn. [**Chưa chắc nê
 3. Kết quả: `PRD.md`
 
 **Với nhánh Quick Flow:**
-- Chạy `bmad-quick-dev` — workflow này gộp cả planning và implementation trong một lần, nên bạn có thể chuyển thẳng sang triển khai
+- Chạy `bmad-build` — workflow này gộp cả planning và implementation trong một lần, nên bạn có thể chuyển thẳng sang triển khai
 
 :::note[Thiết kế UX (Tùy chọn)]
 Nếu dự án của bạn có giao diện người dùng, hãy gọi **UX-Designer agent** (`bmad-agent-ux-designer`) và chạy workflow thiết kế UX (`bmad-ux`) sau khi tạo PRD.
@@ -269,7 +269,7 @@ BMad-Help sẽ kiểm tra dự án, phát hiện những gì bạn đã hoàn th
 :::tip[Hãy Nhớ Các Điểm Này]
 - **Bắt đầu với `bmad-help`** — Trợ lý thông minh hiểu dự án và các lựa chọn của bạn
 - **Luôn dùng chat mới** — Mỗi workflow nên bắt đầu trong một chat riêng
-- **Nhánh rất quan trọng** — Quick Flow dùng `bmad-quick-dev`; Method/Enterprise cần PRD và kiến trúc
+- **Nhánh rất quan trọng** — Quick Flow dùng `bmad-build`; Method/Enterprise cần PRD và kiến trúc
 - **BMad-Help chạy tự động** — Mỗi workflow đều kết thúc bằng hướng dẫn về bước tiếp theo
 :::
 

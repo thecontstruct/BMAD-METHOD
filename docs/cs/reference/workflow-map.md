@@ -69,7 +69,7 @@ Přeskočte fáze 1–3 pro malou, dobře pochopenou práci.
 
 | Workflow           | Účel                                                                        | Produkuje            |
 | ------------------ | --------------------------------------------------------------------------- | -------------------- |
-| `bmad-quick-dev`   | Sjednocený quick flow — vyjasněte záměr, plánujte, implementujte, revidujte a prezentujte | `spec-*.md` + kód |
+| `bmad-build`   | Sjednocený quick flow — vyjasněte záměr, plánujte, implementujte, revidujte a prezentujte | `spec-*.md` + kód |
 
 ## Správa kontextu
 

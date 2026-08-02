@@ -147,7 +147,7 @@ Všechny workflow v této fázi jsou volitelné:
 3. Výstup: `PRD.md`
 
 **Pro Quick Flow cestu:**
-- Spusťte `bmad-quick-dev` — zvládne plánování i implementaci v jednom workflow, přeskočte k implementaci
+- Spusťte `bmad-build` — zvládne plánování i implementaci v jednom workflow, přeskočte k implementaci
 
 :::note[UX Design (volitelné)]
 Pokud má váš projekt uživatelské rozhraní, vyvolejte **UX-Designer agenta** (`bmad-agent-ux-designer`) a spusťte UX design workflow (`bmad-ux`) po vytvoření PRD.
@@ -269,7 +269,7 @@ BMad-Help prozkoumá váš projekt, detekuje, co jste dokončili, a řekne vám 
 :::tip[Zapamatujte si]
 - **Začněte s `bmad-help`** — Váš inteligentní průvodce, který zná váš projekt a možnosti
 - **Vždy používejte nové chaty** — Začněte nový chat pro každý workflow
-- **Cesta záleží** — Quick Flow používá `bmad-quick-dev`; Method/Enterprise vyžadují PRD a architekturu
+- **Cesta záleží** — Quick Flow používá `bmad-build`; Method/Enterprise vyžadují PRD a architekturu
 - **BMad-Help se spouští automaticky** — Každý workflow končí pokyny, co dělat dál
 :::
 

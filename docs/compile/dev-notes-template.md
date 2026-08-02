@@ -19,7 +19,7 @@ The 5 pinned SHA files must remain byte-identical unless the story explicitly li
 
 - `src/core-skills/bmad-help/SKILL.md`
 - `tools/installer/compiler/invoke-python.js`
-- `src/core-skills/bmad-quick-dev/` (all files)
+- `src/core-skills/bmad-build/` (all files)
 - `src/core-skills/bmad-customize/bmad-customize.template.md`
 - `src/core-skills/bmad-reference-components/` (all files)
 

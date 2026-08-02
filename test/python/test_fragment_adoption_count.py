@@ -117,9 +117,9 @@ _SHARED_FRAGMENTS = REPO_ROOT / "src" / "_shared" / "fragments"
 _SUB_AGENT_INCLUDE_PREFIX = '<<include path="_shared/fragments/sub-agent-activation.template.md"'
 
 _IN_SCOPE_CONSUMERS: list[Path] = [
-    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "step-03-implement.template.md",
-    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "step-04-review.template.md",
-    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "step-oneshot.template.md",
+    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-build" / "step-03-implement.template.md",
+    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-build" / "step-04-review.template.md",
+    REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-build" / "step-oneshot.template.md",
     REPO_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-code-review" / "step-02-review.template.md",
 ]
 

@@ -1,7 +1,7 @@
 """Tests for compile.py --batch <skills.json> mode (Story 5.6).
 
 Coverage:
-- TestShimIntegrity: AC-1 SKILL.md shim + bmad-quick-dev.template.md exist
+- TestShimIntegrity: AC-1 SKILL.md shim + bmad-build.template.md exist
 - TestBatchMode: --batch JSON contract, NDJSON output, validation, dedup
 - TestHashSkip: AC-3 hash-based skip on re-install (compiled=false on repeat)
 - TestBatchPerf: advisory perf targets (gated by BMAD_RUN_PERF=1; @pytest.mark.perf)
@@ -33,7 +33,7 @@ except ImportError:
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _COMPILE_PY = _PROJECT_ROOT / "src" / "scripts" / "compile.py"
-_BMAD_QUICK_DEV = _PROJECT_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev"
+_BMAD_QUICK_DEV = _PROJECT_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-build"
 
 # In-process import for _compile_one_skill (AC-3 tests: cannot test via subprocess
 # because unittest.mock.patch does not cross the subprocess boundary).
@@ -80,7 +80,7 @@ def _make_skill(install: Path, module: str, name: str, body: str = "Hello world"
 # ---------------------------------------------------------------------------
 
 class TestShimIntegrity(unittest.TestCase):
-    """AC-1: SKILL.md shim contents + bmad-quick-dev.template.md existence."""
+    """AC-1: SKILL.md shim contents + bmad-build.template.md existence."""
 
     def test_shim_contains_lazy_compile(self) -> None:
         skill_md = (_BMAD_QUICK_DEV / "SKILL.md").read_text(encoding="utf-8")
@@ -120,7 +120,7 @@ class TestShimIntegrity(unittest.TestCase):
         self.assertNotIn("{skill-root}", body)
 
     def test_template_file_exists_and_nonempty(self) -> None:
-        template = _BMAD_QUICK_DEV / "bmad-quick-dev.template.md"
+        template = _BMAD_QUICK_DEV / "bmad-build.template.md"
         self.assertTrue(template.is_file(), f"template not found at {template}")
         self.assertGreater(template.stat().st_size, 0, "template is empty")
 

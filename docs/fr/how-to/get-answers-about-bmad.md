@@ -30,7 +30,7 @@ Clonez ou ouvrez le [dépôt BMAD-METHOD](https://github.com/bmad-code-org/BMAD-
 :::note[Exemple]
 **Q :** « Quel est le moyen le plus rapide de construire quelque chose avec BMad ? »
 
-**R :** Utilisez le flux rapide : Lancez `bmad-quick-dev` — il clarifie votre intention, planifie, implémente, révise et présente les résultats dans un seul workflow, en sautant les phases de planification complètes.
+**R :** Utilisez le flux rapide : Lancez `bmad-build` — il clarifie votre intention, planifie, implémente, révise et présente les résultats dans un seul workflow, en sautant les phases de planification complètes.
 :::
 
 **Conseils pour de meilleures réponses :**

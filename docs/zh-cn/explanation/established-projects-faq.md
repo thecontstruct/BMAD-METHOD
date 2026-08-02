@@ -29,7 +29,7 @@ sidebar:
 
 ### 既有项目可以直接用 Quick Flow 吗？
 
-可以。Quick Flow（例如 `bmad-quick-dev`）在既有项目里通常很高效，尤其适合：
+可以。Quick Flow（例如 `bmad-build`）在既有项目里通常很高效，尤其适合：
 - 小功能增量
 - 缺陷修复
 - 风险可控的局部改动
@@ -55,7 +55,7 @@ BMad Method 不会强制“立即现代化”，而是把决策权交给你。
 
 **还有问题？** 欢迎在 [GitHub Issues](https://github.com/bmad-code-org/BMAD-METHOD/issues) 或 [Discord](https://discord.gg/gk8jAdXWmj) 提问。
 
-如果你想了解这套接入方式的操作步骤，可继续阅读 [How-to：既有项目](../how-to/established-projects.md) 与 [How-to：项目上下文](../how-to/project-context.md)。想理解快速流程在方法论中的定位，可参见 [快速开发](./quick-dev.md)。
+如果你想了解这套接入方式的操作步骤，可继续阅读 [How-to：既有项目](../how-to/established-projects.md) 与 [How-to：项目上下文](../how-to/project-context.md)。想理解快速流程在方法论中的定位，可参见 [快速开发](./build.md)。
 
 ## 继续阅读
 

@@ -160,7 +160,7 @@ All workflows in this phase are optional. [**Not sure which to use?**](../explan
 
 **For Quick Flow track:**
 
-- Run `bmad-quick-dev` — it handles planning and implementation in a single workflow, skip to implementation
+- Run `bmad-build` — it handles planning and implementation in a single workflow, skip to implementation
 
 :::note[UX Design (Optional)]
 If your project has a user interface, invoke the **UX-Designer agent** (`bmad-agent-ux-designer`) and run the UX design workflow (`bmad-ux`) after creating your PRD.
@@ -204,10 +204,10 @@ For each story, repeat this cycle with fresh chats:
 
 | Step | Agent | Workflow | Command | Purpose |
 | ---- | ----- | -------- | ------- | ------- |
-| 1    | DEV   | `bmad-quick-dev` | `bmad-quick-dev` | Create the story spec, implement, review, present |
+| 1    | DEV   | `bmad-build` | `bmad-build` | Create the story spec, implement, review, present |
 | 2    | DEV   | `bmad-code-review` | `bmad-code-review` | Additional quality validation _(recommended)_ |
 
-The older `bmad-create-story` / `bmad-dev-story` split flow is deprecated; `bmad-quick-dev` is the official implementation method.
+The older `bmad-create-story` / `bmad-dev-story` split flow is deprecated; `bmad-build` is the official implementation method.
 
 After completing all stories in an epic, invoke the **Developer agent** (`bmad-agent-dev`) and run `bmad-retrospective` (`bmad-retrospective`).
 
@@ -247,7 +247,7 @@ your-project/
 | `bmad-create-epics-and-stories`       | `bmad-create-epics-and-stories`       | PM        | Break down PRD into epics                  |
 | `bmad-check-implementation-readiness` | `bmad-check-implementation-readiness` | Architect | Validate planning cohesion                 |
 | `bmad-sprint-planning`                | `bmad-sprint-planning`                | DEV       | Initialize sprint tracking                 |
-| `bmad-quick-dev`                      | `bmad-quick-dev`                      | DEV       | Implement a feature, fix, or story         |
+| `bmad-build`                      | `bmad-build`                      | DEV       | Implement a feature, fix, or story         |
 | `bmad-code-review`                    | `bmad-code-review`                    | DEV       | Review implemented code                    |
 
 ## Common Questions
@@ -286,7 +286,7 @@ BMad-Help inspects your project, detects what you've completed, and tells you ex
 
 - **Start with `bmad-help`** — Your intelligent guide that knows your project and options
 - **Always use fresh chats** — Start a new chat for each workflow
-- **Track matters** — Quick Flow uses `bmad-quick-dev`; Method/Enterprise need PRD and architecture
+- **Track matters** — Quick Flow uses `bmad-build`; Method/Enterprise need PRD and architecture
 - **BMad-Help runs automatically** — Every workflow ends with guidance on what's next
   :::
 

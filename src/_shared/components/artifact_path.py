@@ -24,13 +24,13 @@ def render(ctx, **props):
           ctx.config; fall back to default paths if absent.
         - Collision-safety for "1-1 vs 1-10": when called with epic='1'
           + story='1', glob returns "{ia}/1-1-*.md" — NOT "{ia}/1-1*-*.md".
-          This matches the canonical reasoning in pinned bmad-quick-dev
+          This matches the canonical reasoning in pinned bmad-build
           /step-01-clarify-and-route.md so post-pin-lift consumer migration
           is a no-semantic-change refactor.
         - Subsumes hand-rolled call sites: bmad-create-story.template.md:39,228;
           bmad-dev-story.template.md:149; bmad-retrospective.template.md:200,
           1352,1356,1362-1364; bmad-code-review/steps/step-01-gather-context.md:
-          38-39; bmad-quick-dev/step-01-clarify-and-route.md:42-67 (pinned ref).
+          38-39; bmad-build/step-01-clarify-and-route.md:42-67 (pinned ref).
         - Skills adopt this component independently as they migrate.
     """
     config = getattr(ctx, "config", None) or {}

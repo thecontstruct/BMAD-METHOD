@@ -92,7 +92,7 @@ Ignorez les phases 1 à 3 pour les travaux de faible envergure et bien cernés.
 
 | Workflow         | Objectif                                                                              | Livrable           |
 |------------------|---------------------------------------------------------------------------------------|--------------------|
-| `bmad-quick-dev` | Flux rapide unifié — clarifiez l’intention, planifiez, implémentez, révisez et livrez | `spec-*.md` + code |
+| `bmad-build` | Flux rapide unifié — clarifiez l’intention, planifiez, implémentez, révisez et livrez | `spec-*.md` + code |
 
 ## Gestion du Contexte
 

@@ -146,7 +146,7 @@ BMad-Help 将检测你已完成的内容，并准确推荐下一步该做什么�
 3. 输出：`PRD.md`
 
 **对于 Quick Flow 路径：**
-- 运行 `bmad-quick-dev` —— 它会在一个工作流里同时处理规划与实现，可直接进入实现阶段
+- 运行 `bmad-build` —— 它会在一个工作流里同时处理规划与实现，可直接进入实现阶段
 
 :::note[UX 设计（可选）]
 如果你的项目有用户界面，在创建 PRD 后调用 **UX-Designer 智能体**（`bmad-agent-ux-designer`），然后运行 UX 设计工作流（`bmad-ux`）。
@@ -268,7 +268,7 @@ BMad-Help 检查你的项目，检测你已完成的内容，并确切地告诉�
 :::tip[记住这些]
 - **从 `bmad-help` 开始** — 你的智能向导，了解你的项目和选项
 - **始终使用新对话** — 为每个工作流开始新对话
-- **路径很重要** — Quick Flow 使用 `bmad-quick-dev`；Method/Enterprise 需要 PRD 和架构
+- **路径很重要** — Quick Flow 使用 `bmad-build`；Method/Enterprise 需要 PRD 和架构
 - **BMad-Help 自动运行** — 每个工作流结束时都会提供下一步的指导
 :::
 

@@ -98,7 +98,7 @@ Les skills de workflow exécutent un processus structuré en plusieurs étapes s
 | `bmad-create-epics-and-stories` | Créer des epics et des stories                                                                                               |
 | `bmad-dev-story`                | Implémenter une story                                                                                                        |
 | `bmad-code-review`              | Effectuer une revue de code                                                                                                  |
-| `bmad-quick-dev`                | Flux rapide unifié — clarifier l’intention, planifier, implémenter, réviser, présenter                                       |
+| `bmad-build`                | Flux rapide unifié — clarifier l’intention, planifier, implémenter, réviser, présenter                                       |
 
 Consultez la [Carte des workflows](./workflow-map.md) pour la référence complète des workflows organisés par phase.
 

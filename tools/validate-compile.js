@@ -336,7 +336,11 @@ function validateOne(entry) {
     // Story 10.25 AC-7 (FR-11): multi-artifact gate — verify each declared artifact.
     // No-op for skills with empty artifacts: [] (all current 22 skills).
     const artifactFindings = [];
-    const declaredArtifacts = Array.isArray(entry.artifacts) ? entry.artifacts : [];
+    // A v6 shim deliberately compiles only its redirect wrapper. It must not
+    // inherit the implementation artifacts recorded for the workflow it
+    // replaced in an older local lockfile.
+    const isV6Shim = skillSrcDir.split(path.sep).includes('v6-shims');
+    const declaredArtifacts = isV6Shim ? [] : Array.isArray(entry.artifacts) ? entry.artifacts : [];
     for (const art of declaredArtifacts) {
       const artPath = path.join(compiledSkillDir, art.path);
       if (!fs.existsSync(artPath)) {

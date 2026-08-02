@@ -53,7 +53,7 @@ Cela évite :
 
 | Parcours              | Solutioning Requis ?        |
 |-----------------------|-----------------------------|
-| Quick Dev             | Non - l’ignore complètement |
+| Build             | Non - l’ignore complètement |
 | Méthode BMad Simple   | Optionnel                   |
 | Méthode BMad Complexe | Oui                         |
 | Enterprise            | Oui                         |

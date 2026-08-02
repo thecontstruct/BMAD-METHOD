@@ -98,7 +98,7 @@ Workflow skills chạy một quy trình có cấu trúc, nhiều bước mà kh�
 | `bmad-create-epics-and-stories` | Tạo epics và stories |
 | `bmad-dev-story` | Triển khai một story |
 | `bmad-code-review` | Chạy code review |
-| `bmad-quick-dev` | Luồng nhanh hợp nhất — làm rõ yêu cầu, lập kế hoạch, triển khai, review và trình bày |
+| `bmad-build` | Luồng nhanh hợp nhất — làm rõ yêu cầu, lập kế hoạch, triển khai, review và trình bày |
 
 Xem [Workflow Map](./workflow-map.md) để có tài liệu workflow đầy đủ theo từng phase.
 

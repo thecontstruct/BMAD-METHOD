@@ -80,7 +80,7 @@ Selon la complexité de votre projet, BMad propose trois voies de planification 
 
 | Voie             | Idéal pour                                                                   | Documents créés                        |
 |------------------|------------------------------------------------------------------------------|----------------------------------------|
-| **Quick Dev**    | Corrections de bugs, fonctionnalités simples, périmètre clair (1-15 stories) | Spécification technique uniquement     |
+| **Build**    | Corrections de bugs, fonctionnalités simples, périmètre clair (1-15 stories) | Spécification technique uniquement     |
 | **BMad Method**  | Produits, plateformes, fonctionnalités complexes (10-50+ stories)            | PRD + Architecture + UX[^4]            |
 | **Enterprise**   | Conformité, systèmes multi-tenant[^5] (30+ stories)                          | PRD + Architecture + Security + DevOps |
 
@@ -157,9 +157,9 @@ Tous les workflows de cette phase sont optionnels. [**Vous ne savez pas lequel c
 :::
 
 
-**Pour la voie Quick Dev :**
+**Pour la voie Build :**
 
-- Exécutez `bmad-quick-dev` — ce workflow couvre la planification et l’implémentation en une seule fois ; vous pouvez passer directement à l’implémentation
+- Exécutez `bmad-build` — ce workflow couvre la planification et l’implémentation en une seule fois ; vous pouvez passer directement à l’implémentation
 
 :::note[Design UX (optionnel)]
 Si votre projet comporte une interface utilisateur, invoquez l'**agent UX Designer** (`bmad-agent-ux-designer`) et lancez le workflow de design UX (`bmad-ux`) après avoir créé votre PRD.
@@ -252,7 +252,7 @@ your-project/
 ## Questions fréquentes
 
 **Ai-je toujours besoin d’une architecture ?**
-Seulement pour les voies BMad Method et Enterprise. Quick Dev passe directement de la spécification à l’implémentation.
+Seulement pour les voies BMad Method et Enterprise. Build passe directement de la spécification à l’implémentation.
 
 **Puis-je modifier mon plan en cours de route ?**
 Oui. Le workflow `bmad-correct-course` gère les changements de périmètre en cours d’implémentation.
@@ -284,7 +284,7 @@ BMad-Help inspecte votre projet, détecte ce que vous avez accompli et vous indi
 :::tip[Retenez ceci]
 - **Commencez par `bmad-help`** — Votre guide intelligent qui connaît votre projet et vos options
 - **Utilisez toujours de nouveaux chats** — Démarrez un nouveau chat pour chaque workflow
-- **Le choix de la voie est important** — Quick Dev utilise `bmad-quick-dev` ; BMad Method/Enterprise nécessitent un PRD et une architecture
+- **Le choix de la voie est important** — Build utilise `bmad-build` ; BMad Method/Enterprise nécessitent un PRD et une architecture
 - **BMad-Help se lance automatiquement** — Chaque workflow se termine par des conseils sur la prochaine étape
 :::
 

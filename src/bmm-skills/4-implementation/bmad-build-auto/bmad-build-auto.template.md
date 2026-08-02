@@ -1,9 +1,9 @@
 ---
-name: bmad-dev-auto
+name: bmad-build-auto
 description: 'One iteration of an unattended development loop. Use when invoked by name.'
 ---
 
-# Dev Auto Workflow
+# Build Auto Workflow
 
 **Goal:** Turn intent into a hardened, reviewable artifact, without human interaction.
 
@@ -34,13 +34,13 @@ To HALT with a final status and optional blocking condition:
      ```
 2. **Otherwise:**
    - If `{spec_file}` is known and exists, update `status` in frontmatter and append missing result details under `## Auto Run Result`.
-   - If `{spec_file}` is unknown or missing, create `{implementation_artifacts}/bmad-dev-auto-result-<slug-or-timestamp>.md` with:
+   - If `{spec_file}` is unknown or missing, create `{implementation_artifacts}/bmad-build-auto-result-<slug-or-timestamp>.md` with:
      ```markdown
      ---
      status: <final status>
      ---
 
-     # BMad Dev Auto Result
+     # BMad Build Auto Result
 
      Status: <final status>
      Blocking condition: <blocking condition, if any>

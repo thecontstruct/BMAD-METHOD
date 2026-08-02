@@ -97,9 +97,9 @@ Workflow skills run a structured, multi-step process without loading an agent pe
 | `bmad-ux` | Design user experience |
 | `bmad-create-architecture` | Design system architecture |
 | `bmad-create-epics-and-stories` | Create epics and stories |
-| `bmad-quick-dev` | Implement a feature, fix, or story |
+| `bmad-build` | Implement a feature, fix, or story |
 | `bmad-code-review` | Run a code review |
-| `bmad-dev-auto` | Run one unattended development-loop iteration — small intent in, code out, no human interaction |
+| `bmad-build-auto` | Run one unattended development-loop iteration — small intent in, code out, no human interaction |
 
 See [Workflow Map](./workflow-map.md) for the complete workflow reference organized by phase.
 

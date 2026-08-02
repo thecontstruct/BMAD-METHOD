@@ -289,13 +289,13 @@ Review sau khi hoàn tất một epic. Ghi lại bài học, pattern tốt, vấ
 
 **Bỏ qua:** Giai đoạn 1, 2, 3 hoàn toàn
 
-**Dùng:** Quick Dev (`bmad-quick-dev`)
+**Dùng:** Build (`bmad-build`)
 
 ```
 Mô tả yêu cầu → Làm rõ ý định → Sinh spec → Triển khai → Review → Done
 ```
 
-Quick Dev gộp tất cả vào một workflow: làm rõ yêu cầu, lập kế hoạch mini, triển khai, code review, và trình bày kết quả.
+Build gộp tất cả vào một workflow: làm rõ yêu cầu, lập kế hoạch mini, triển khai, code review, và trình bày kết quả.
 
 ---
 
@@ -462,14 +462,14 @@ Tạo hoặc cập nhật `docs/index.md` với:
 
 #### Bước 3: Chọn cách tiếp cận phù hợp
 
-- **Thay đổi nhỏ** (bug fix, tính năng nhỏ): Dùng `bmad-quick-dev` trực tiếp
+- **Thay đổi nhỏ** (bug fix, tính năng nhỏ): Dùng `bmad-build` trực tiếp
 - **Thay đổi lớn** (module mới, refactor lớn): Dùng BMad Method đầy đủ từ Giai đoạn 2
 
-#### Bước 4: Quick Dev cho việc nhỏ
+#### Bước 4: Build cho việc nhỏ
 
 ```bash
-# Mở skill Quick Dev
-bmad-quick-dev
+# Mở skill Build
+bmad-build
 
 # Mô tả yêu cầu, agent sẽ:
 # 1. Làm rõ ý định (có người trong vòng lặp)
@@ -772,7 +772,7 @@ bmad-help Implementation Readiness check thất bại, làm gì tiếp?
 
 ### Quick Flow không có nghĩa là không có chất lượng
 
-Quick Dev vẫn có code review, vẫn tạo spec (mini), vẫn yêu cầu người approve kết quả. "Nhanh" ở đây là bỏ overhead lập kế hoạch không cần thiết, không phải bỏ qua chất lượng.
+Build vẫn có code review, vẫn tạo spec (mini), vẫn yêu cầu người approve kết quả. "Nhanh" ở đây là bỏ overhead lập kế hoạch không cần thiết, không phải bỏ qua chất lượng.
 
 ### Customize agent theo nhu cầu team
 
@@ -809,7 +809,7 @@ E2E test cần toàn bộ tính năng của epic để test integration. Test s�
 | Modules | [reference/modules.md](reference/modules.md) |
 | Dự án đã tồn tại | [how-to/established-projects.md](how-to/established-projects.md) |
 | Project Context | [explanation/project-context.md](explanation/project-context.md) |
-| Quick Dev | [explanation/quick-dev.md](explanation/quick-dev.md) |
+| Build | [explanation/build.md](explanation/build.md) |
 | Why Solutioning Matters | [explanation/why-solutioning-matters.md](explanation/why-solutioning-matters.md) |
 | Cài đặt BMAD | [how-to/install-bmad.md](how-to/install-bmad.md) |
 

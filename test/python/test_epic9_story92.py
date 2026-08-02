@@ -1,4 +1,4 @@
-"""Story 9.2 tests: reference conditional-rendering components + quick-dev migration.
+"""Story 9.2 tests: reference conditional-rendering components + build migration.
 
 Tests run via ComponentRunner.run_jit() against the actual component source files.
 This mirrors Story 9.1's test approach: real files, no mocks except where isolation
@@ -14,8 +14,8 @@ from unittest.mock import patch
 BMAD_ROOT = Path(__file__).resolve().parent.parent.parent
 REF_COMPS = BMAD_ROOT / "src" / "core-skills" / "bmad-reference-components" / "components"
 SHARED_COMPS = BMAD_ROOT / "src" / "_shared" / "components"
-QD_COMPS = BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev" / "components"
-# Post-DN-FOLLOWUP-II: bmad-quick-dev's local todays_date.py was lifted to
+QD_COMPS = BMAD_ROOT / "src" / "bmm-skills" / "4-implementation" / "bmad-build" / "components"
+# Post-DN-FOLLOWUP-II: bmad-build's local todays_date.py was lifted to
 # _shared/components/. bmad-reference-components' local copy is also lifted
 # (same story). All consumers resolve via the shared fallback.
 
@@ -161,7 +161,7 @@ class TestQuickDevMigration(unittest.TestCase):
     def test_j_todays_date_renders_via_run_jit(self):
         """TodaysDate at the shared-components path returns today's ISO date via run_jit.
 
-        Post-DN-FOLLOWUP-II: bmad-quick-dev's local todays_date.py was lifted to
+        Post-DN-FOLLOWUP-II: bmad-build's local todays_date.py was lifted to
         _shared/components/todays_date.py. The render still happens via run_jit
         with the shared path as the resolved source.
         """

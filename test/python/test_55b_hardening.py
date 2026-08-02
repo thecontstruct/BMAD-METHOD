@@ -212,24 +212,24 @@ class TestEmptyArrayWorkflowKeys(unittest.TestCase):
             self.assertEqual(summary["compiled"], 1)
 
     def test_bmad_quick_dev_customize_toml_compiles_cleanly_with_two_warnings(self) -> None:
-        # Integration: compile bmad-quick-dev (real fixture, restored keys).
+        # Integration: compile bmad-build (real fixture, restored keys).
         # Uses positional compile form so _shared/fragments/ resolves (Story 10.61:
         # step-templates now include _shared/fragments/sub-agent-activation.template.md).
         import shutil
         import subprocess
         repo_root = Path(__file__).resolve().parent.parent.parent
         src_shared = repo_root / "src" / "_shared"
-        qd_src = repo_root / "src" / "bmm-skills" / "4-implementation" / "bmad-quick-dev"
+        qd_src = repo_root / "src" / "bmm-skills" / "4-implementation" / "bmad-build"
         compile_py = repo_root / "src" / "scripts" / "compile.py"
         with tempfile.TemporaryDirectory() as tmp:
             install = Path(tmp)
             # Set up positional compile layout: <module>/<skill> + _shared/
-            dest_skill = install / "4-implementation" / "bmad-quick-dev"
+            dest_skill = install / "4-implementation" / "bmad-build"
             shutil.copytree(str(qd_src), str(dest_skill))
             shutil.copytree(str(src_shared), str(install / "_shared"))
             result = subprocess.run(
                 [sys.executable, str(compile_py),
-                 "4-implementation/bmad-quick-dev", "--install-dir", str(install)],
+                 "4-implementation/bmad-build", "--install-dir", str(install)],
                 capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
@@ -237,7 +237,7 @@ class TestEmptyArrayWorkflowKeys(unittest.TestCase):
             self.assertEqual(len(warning_lines), 2,
                              f"expected exactly 2 warnings, got {len(warning_lines)}: {result.stderr!r}")
             # `{project-root}` survives in compiled SKILL.md as a VarRuntime token
-            skill_md = install / "4-implementation" / "bmad-quick-dev" / "SKILL.md"
+            skill_md = install / "4-implementation" / "bmad-build" / "SKILL.md"
             self.assertTrue(skill_md.is_file())
             self.assertIn("{project-root}", skill_md.read_text(encoding="utf-8"))
 

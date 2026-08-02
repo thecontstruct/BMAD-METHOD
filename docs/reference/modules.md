@@ -52,7 +52,7 @@ Structured game development workflows adapted for Unity, Unreal, Godot, and cust
 **Provides:**
 
 - Game Design Document (GDD) generation workflow
-- Quick Dev mode for rapid prototyping
+- Build mode for rapid prototyping
 - Narrative design support for characters, dialogue, and world-building
 - Coverage for 21+ game types with engine-specific architecture guidance
 

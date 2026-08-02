@@ -82,7 +82,7 @@ https://bmad-code-org.github.io/BMAD-METHOD/llms-full.txt
 :::note[Příklad]
 **O:** „Řekni mi nejrychlejší způsob, jak něco vytvořit s BMad“
 
-**A:** Použijte Quick Flow: Spusťte `bmad-quick-dev` — vyjasní váš záměr, naplánuje, implementuje, zreviduje a prezentuje výsledky v jednom workflow, přeskočí celé fáze plánování.
+**A:** Použijte Quick Flow: Spusťte `bmad-build` — vyjasní váš záměr, naplánuje, implementuje, zreviduje a prezentuje výsledky v jednom workflow, přeskočí celé fáze plánování.
 :::
 
 ## Co získáte

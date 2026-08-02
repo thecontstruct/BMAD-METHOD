@@ -98,7 +98,7 @@ Workflow skills spouštějí strukturovaný, vícekrokový proces bez předchoz�
 | `bmad-create-epics-and-stories` | Vytvoření epiců a stories |
 | `bmad-dev-story` | Implementace story |
 | `bmad-code-review` | Spuštění revize kódu |
-| `bmad-quick-dev` | Sjednocený quick flow — vyjasnění záměru, plán, implementace, revize, prezentace |
+| `bmad-build` | Sjednocený quick flow — vyjasnění záměru, plán, implementace, revize, prezentace |
 
 Viz [Mapa pracovních postupů](./workflow-map.md) pro kompletní referenci workflow organizovanou podle fází.
 
