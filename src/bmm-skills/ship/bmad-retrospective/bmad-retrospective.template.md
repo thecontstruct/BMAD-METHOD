@@ -10,7 +10,7 @@ Review a completed epic by reading the evidence it left: its epic and story reco
 ## RULES
 
 - Communicate in `{communication_language}` and write artifacts in `{document_output_language}`.
-- Do not modify project code, specs, or tests. The retrospective may update sprint status only after the human accepts its action items and verdict.
+- Do not modify project code, specs, stories, or tests. The retrospective may update sprint status only after the human accepts its action items and verdict. In stories mode, it writes only the retrospective document in the selected spec folder.
 - Do not invent a root cause or a trend. Drop a pattern that is not demonstrated by the evidence.
 - `-H` / `--headless` means do not ask questions: select the requested epic, use machine-verifiable evidence, write the report, and return the verdict.
 - Party-mode discussion is opt-in. It discusses the evidence already gathered; it never replaces gathering or changes an evidence-backed finding without recording the source.
@@ -34,20 +34,26 @@ Use these sources, skipping an unavailable source and recording that it was unav
 4. The complete repository diff for the epic's commit range, including per-story commits when discoverable.
 5. Relevant test/CI output, review findings, and session logs when present.
 
+### Stories mode
+
+A completed epic can also be a spec folder: `SPEC.md`, an ordered `stories.yaml`, and one `stories/<id>-*.md` artifact per story. A named spec folder selects this mode even when sprint status exists. A named epic number selects sprint mode. With neither, use sprint mode when `sprint-status.yaml` exists; otherwise search `{planning_artifacts}` and `{implementation_artifacts}` for spec folders. If more than one candidate exists, ask which folder to retro; headless mode stops and requires an explicit folder.
+
+In stories mode, `stories.yaml` list order is authoritative. Resolve each entry to exactly one `stories/<id>-*.md` file and read its frontmatter status. `pending_stories` is every id whose status is not `done`; do not create, read, or update `sprint-status.yaml`. Use each completed story's `baseline_revision` or `baseline_commit` and `final_revision` to gather per-story diff evidence; when an end revision is absent, report that evidence gap rather than substituting `HEAD`.
+
 For each source, record its path or command, the scope inspected, and the evidence it contributed. Keep source references beside each finding rather than collecting unsupported conclusions at the end.
 
 ## Execution
 
 ### 1. Resolve the Epic
 
-1. If the request names an epic, use it.
-2. Otherwise read sprint status and select the highest epic with completed stories and no completed retrospective; in interactive mode ask the user to confirm.
-3. Gather all story keys for the epic and classify them as done, review, in-progress, backlog, or missing.
+1. If the request names a spec folder, use stories mode and that folder. If it names an epic, use sprint mode and that epic.
+2. Otherwise read sprint status and select the highest epic with completed stories and no completed retrospective; only when sprint status is unavailable, discover candidate spec folders as described above. In interactive mode ask the user to confirm.
+3. In sprint mode, gather all story keys for the epic and classify them as done, review, in-progress, backlog, or missing. In stories mode, use `stories.yaml` order and each story artifact's frontmatter status.
 4. If any story is not done, the machine verdict is `rejected`. In interactive mode, explain the incomplete inventory and ask whether to stop or produce a partial report. In headless mode, continue only to document the rejection and evidence.
 
 ### 2. Inventory Evidence
 
-Create `{implementation_artifacts}/epic-{epic_number}-retro-{date}.md` with these initial sections:
+Create `{implementation_artifacts}/epic-{epic_number}-retro-{date}.md` in sprint mode, or `{spec_folder}/RETROSPECTIVE.md` in stories mode, with these initial sections:
 
 ```markdown
 # Epic {epic_number} Retrospective
@@ -65,7 +71,7 @@ Create `{implementation_artifacts}/epic-{epic_number}-retro-{date}.md` with thes
 ## Action Items
 ```
 
-For every story, locate its Build spec (`spec-{epic_number}-{story_number}-*.md`) or legacy story record. Extract acceptance criteria, verification evidence, review outcome, deferred work, and any explicit unresolved risk. For the epic, extract its stated goal and acceptance criteria. Record missing artifacts explicitly; never fill them in from memory.
+For every story, locate its Build spec (`spec-{epic_number}-{story_number}-*.md`) or legacy story record; in stories mode use the resolved `{spec_folder}/stories/<id>-*.md` artifact. Extract acceptance criteria, verification evidence, review outcome, deferred work, and any explicit unresolved risk. For the epic, extract its stated goal and acceptance criteria from the epic record or `SPEC.md`. Record missing artifacts explicitly; never fill them in from memory.
 
 ### 3. Examine the Epic as a Whole
 
@@ -103,7 +109,7 @@ In interactive mode, present the evidence and proposed verdict. The human may ov
 
 For every accepted finding, create an owned action item with a stable id (`retro-{epic_number}-{n}`), a precise next step, severity, owner when known, and a source reference. Do not create action items for speculation or rejected review noise.
 
-After interactive approval (or immediately in headless mode), append the action items and verdict to sprint status. Mark the epic retrospective complete only when the report was written. Do not mark a rejected epic accepted merely because a report exists.
+After interactive approval (or immediately in headless mode), append the action items and verdict to sprint status in sprint mode. In stories mode, finalize `{spec_folder}/RETROSPECTIVE.md` and stop: do not create or edit sprint status, `SPEC.md`, `stories.yaml`, or any story artifact. Mark the epic retrospective complete only when the report was written. Do not mark a rejected epic accepted merely because a report exists.
 
 ### 7. Present
 
