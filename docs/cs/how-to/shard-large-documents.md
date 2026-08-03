@@ -2,7 +2,7 @@
 title: "Průvodce dělením dokumentů"
 description: Rozdělení velkých markdown souborů na menší organizované soubory pro lepší správu kontextu
 sidebar:
-  order: 9
+  order: 8
 ---
 
 Použijte nástroj `bmad-shard-doc`, pokud potřebujete rozdělit velké markdown soubory na menší, organizované soubory pro lepší správu kontextu.

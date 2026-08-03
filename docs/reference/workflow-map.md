@@ -72,7 +72,7 @@ Decide how to build it and break work into stories.
 |---------------------------------------|--------------------------------------------|-----------------------------|
 | `bmad-architecture`            | Make technical decisions explicit          | `ARCHITECTURE-SPINE.md` is the spine by default but can hydrate to your desired output or presentation needs also |
 | `bmad-create-epics-and-stories`       | Break requirements into implementable work | Epic files with stories     |
-| `bmad-check-implementation-readiness` | Gate check before implementation           | PASS/CONCERNS/FAIL decision |
+| `bmad-sprint-planning` | Gate planning readiness before implementation | PASS/CONCERNS/FAIL decision |
 
 ## Phase 4: Implementation
 
@@ -81,10 +81,9 @@ Build it with `bmad-build` as the official implementation method. The legacy `bm
 | Workflow | Purpose | Produces |
 |----------|---------|----------|
 | `bmad-build` | Turn an intent or story into implemented, reviewed code | `spec-*.md` + code |
-| `bmad-sprint-planning` | Initialize tracking (once per project to sequence the dev cycle) | `sprint-status.yaml` |
+| `bmad-sprint-planning` | Gate readiness, initialize tracking, and report sprint status | `sprint-status.yaml` |
 | `bmad-code-review` | Ad hoc review of any code change | Findings + applied patches |
 | `bmad-correct-course` | Handle significant mid-sprint changes | Updated plan or re-routing |
-| `bmad-sprint-status` | Track sprint progress and story status | Sprint status update |
 | `bmad-retrospective` | Evidence-based review of a completed epic against its acceptance criteria | Retro document, action items, acceptance verdict |
 
 ## Quick Flow (Parallel Track)

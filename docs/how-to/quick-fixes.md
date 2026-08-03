@@ -2,7 +2,7 @@
 title: 'Quick Fixes'
 description: How to make quick fixes and ad-hoc changes
 sidebar:
-  order: 6
+  order: 5
 ---
 
 Use **Build** for bug fixes, refactorings, or small targeted changes that don't require the full BMad Method.

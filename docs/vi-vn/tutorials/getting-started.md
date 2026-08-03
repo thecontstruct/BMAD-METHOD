@@ -172,7 +172,7 @@ Epics và stories giờ được tạo *sau* kiến trúc. Điều này giúp st
 
 **Kiểm tra mức sẵn sàng để triển khai** *(Rất nên dùng)*
 1. Gọi **Architect agent** (`bmad-agent-architect`) trong một chat mới
-2. Chạy `bmad-check-implementation-readiness` (`bmad-check-implementation-readiness`)
+2. Chạy `bmad-sprint-planning` (`bmad-sprint-planning`) ở chế độ kiểm tra mức sẵn sàng
 3. Xác nhận tính nhất quán giữa toàn bộ tài liệu lập kế hoạch
 
 ## Bước 2: Xây Dựng Dự Án
@@ -229,8 +229,7 @@ your-project/
 | `bmad-create-architecture` | `bmad-create-architecture` | Architect | Tạo tài liệu kiến trúc |
 | `bmad-generate-project-context` | `bmad-generate-project-context` | Analyst | Tạo file project context |
 | `bmad-create-epics-and-stories` | `bmad-create-epics-and-stories` | PM | Phân rã PRD thành epics |
-| `bmad-check-implementation-readiness` | `bmad-check-implementation-readiness` | Architect | Kiểm tra độ nhất quán của kế hoạch |
-| `bmad-sprint-planning` | `bmad-sprint-planning` | DEV | Khởi tạo theo dõi sprint |
+| `bmad-sprint-planning` | `bmad-sprint-planning` | DEV | Kiểm tra mức sẵn sàng và theo dõi sprint |
 | `bmad-create-story` | `bmad-create-story` | DEV | Tạo file story |
 | `bmad-dev-story` | `bmad-dev-story` | DEV | Triển khai một story |
 | `bmad-code-review` | `bmad-code-review` | DEV | Review phần code đã triển khai |

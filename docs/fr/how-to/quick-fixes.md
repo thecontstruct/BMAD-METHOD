@@ -2,7 +2,7 @@
 title: "Corrections Rapides"
 description: Comment effectuer des corrections rapides et des modifications ciblées
 sidebar:
-  order: 6
+  order: 5
 ---
 
 Utilisez **Build** pour les corrections de bugs, les refactorisations ou les petites modifications ciblées qui ne nécessitent pas la méthode BMad complète.

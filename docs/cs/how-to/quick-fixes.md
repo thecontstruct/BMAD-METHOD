@@ -2,7 +2,7 @@
 title: "Rychlé opravy"
 description: Jak provádět rychlé opravy a ad-hoc změny
 sidebar:
-  order: 5
+  order: 4
 ---
 
 Použijte **Build** pro opravy chyb, refaktoringy nebo malé cílené změny, které nevyžadují plnou metodu BMad.

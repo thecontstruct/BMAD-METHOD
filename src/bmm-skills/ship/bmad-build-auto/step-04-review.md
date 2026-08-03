@@ -89,10 +89,8 @@ Prepare `Auto Run Result` details:
 
 Set `{spec_file}` frontmatter `followup_review_recommended` from the computation above.
 
-If version control is available, commit every file in the reviewed diff — tracked and untracked. Do not push. After committing, verify the commit contains each file from the reviewed diff; if any is missing, add it and amend before proceeding. Anything still visible in `git status --porcelain` is by definition not part of the change: leave it in place — do not commit, delete, or gitignore it — and list it under `Auto Run Result` as residual artifacts.
+If version control is available, commit every file in the reviewed diff — including `{spec_file}` when it is tracked. Do not push. After committing, verify the commit contains each file from the reviewed diff; if any is missing, add it and amend before proceeding. Anything still visible in `git status --porcelain` is by definition not part of the change: leave it in place — do not commit, delete, or gitignore it — and list it under `Auto Run Result` as residual artifacts.
 
-Capture `final_revision` (current HEAD after committing, or `NO_VCS` if version control is unavailable) into `{spec_file}` frontmatter.
-
-Set `{spec_file}` frontmatter `status: done`.
+Set `{spec_file}` frontmatter `status: done` before that final commit. Do not record `final_revision`: it creates a self-referential revision boundary and is no longer part of the spec contract.
 
 HALT with status `done`.

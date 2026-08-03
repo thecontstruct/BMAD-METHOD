@@ -47,7 +47,7 @@ Rozhodněte, jak to budovat, a rozložte práci na stories.
 | ----------------------------------------- | ------------------------------------------ | --------------------------- |
 | `bmad-create-architecture`                | Explicitní technická rozhodnutí            | `architecture.md` s ADR     |
 | `bmad-create-epics-and-stories`           | Rozložení požadavků na implementovatelnou práci | Soubory epiců se stories |
-| `bmad-check-implementation-readiness`     | Kontrola brány před implementací           | Rozhodnutí PASS/CONCERNS/FAIL |
+| `bmad-sprint-planning` | Kontrola připravenosti před implementací | Rozhodnutí PASS/CONCERNS/FAIL |
 
 ## Fáze 4: Implementace
 
@@ -55,12 +55,11 @@ Budujte to, jednu story po druhé. Brzy plná automatizace fáze 4!
 
 | Workflow                   | Účel                                                                     | Produkuje                        |
 | -------------------------- | ------------------------------------------------------------------------ | -------------------------------- |
-| `bmad-sprint-planning`     | Inicializace sledování (jednou na projekt pro sekvencování dev cyklu)    | `sprint-status.yaml`             |
+| `bmad-sprint-planning`     | Kontrola připravenosti, inicializace sledování a zobrazení stavu         | `sprint-status.yaml`             |
 | `bmad-create-story`        | Příprava další story pro implementaci                                    | `story-[slug].md`                |
 | `bmad-dev-story`           | Implementace story                                                       | Fungující kód + testy            |
 | `bmad-code-review`         | Validace kvality implementace                                            | Schváleno nebo požadovány změny  |
 | `bmad-correct-course`      | Řešení významných změn uprostřed sprintu                                 | Aktualizovaný plán nebo přesměrování |
-| `bmad-sprint-status`       | Sledování průběhu sprintu a stavu stories                                | Aktualizace stavu sprintu        |
 | `bmad-retrospective`       | Revize po dokončení epicu                                                | Poučení                          |
 
 ## Quick Flow (paralelní cesta)

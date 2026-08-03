@@ -172,7 +172,7 @@ Epicy a stories se nyní vytvářejí *po* architektuře. Tím vznikají kvalitn
 
 **Kontrola připravenosti k implementaci** *(vysoce doporučeno)*
 1. Vyvolejte **Architect agenta** (`bmad-agent-architect`) v novém chatu
-2. Spusťte `bmad-check-implementation-readiness` (`bmad-check-implementation-readiness`)
+2. Spusťte `bmad-sprint-planning` (`bmad-sprint-planning`) v režimu kontroly připravenosti
 3. Validuje soudržnost všech plánovacích dokumentů
 
 ## Krok 2: Sestavte svůj projekt
@@ -229,8 +229,7 @@ váš-projekt/
 | `bmad-create-architecture`            | `bmad-create-architecture`                | Architect | Vytvoření dokumentu architektury                |
 | `bmad-generate-project-context`       | `bmad-generate-project-context`           | Analyst   | Vytvoření souboru kontextu projektu             |
 | `bmad-create-epics-and-stories`       | `bmad-create-epics-and-stories`           | PM        | Rozklad PRD na epicy                            |
-| `bmad-check-implementation-readiness` | `bmad-check-implementation-readiness`     | Architect | Validace soudržnosti plánování                  |
-| `bmad-sprint-planning`                | `bmad-sprint-planning`                    | DEV       | Inicializace sledování sprintu                  |
+| `bmad-sprint-planning`                | `bmad-sprint-planning`                    | DEV       | Kontrola připravenosti a sledování sprintu      |
 | `bmad-create-story`                   | `bmad-create-story`                       | DEV       | Vytvoření souboru story                         |
 | `bmad-dev-story`                      | `bmad-dev-story`                          | DEV       | Implementace story                              |
 | `bmad-code-review`                    | `bmad-code-review`                        | DEV       | Revize implementovaného kódu                    |

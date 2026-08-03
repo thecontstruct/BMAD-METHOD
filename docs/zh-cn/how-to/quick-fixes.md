@@ -2,7 +2,7 @@
 title: "快速修复"
 description: 如何进行快速修复和临时更改
 sidebar:
-  order: 6
+  order: 5
 ---
 
 对于 bug 修复、重构或小范围改动，使用 **Build** 即可，不必走完整的 BMad Method。

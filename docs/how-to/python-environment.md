@@ -2,7 +2,7 @@
 title: 'Python Environment for Validators and Tests'
 description: How the BMAD-METHOD build pipeline resolves a Python 3.11+ interpreter for validators and tests, and what to install to make `npm run quality` work
 sidebar:
-  order: 13
+  order: 12
 ---
 
 The fork's validator and test scripts (`npm run validate:compile`, `npm run test:validate-compile`, `test/python/test_migration_equivalence.py`, and others) shell out to Python scripts in `src/scripts/`. Stories 10.27+ in the fork introduced Python 3.11+ syntax (`from enum import StrEnum`), so the fork's Python surface requires **CPython ≥ 3.11**.

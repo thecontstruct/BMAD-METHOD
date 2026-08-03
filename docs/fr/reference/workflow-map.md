@@ -70,7 +70,7 @@ Décidez comment le construire et décomposez le travail en stories.
 |---------------------------------------|---------------------------------------------------|---------------------------------|
 | `bmad-create-architecture`            | Rendez explicites les décisions techniques        | `architecture.md` avec ADRs[^2] |
 | `bmad-create-epics-and-stories`       | Décomposez les exigences en tâches implémentables | Fichiers d’epic avec stories    |
-| `bmad-check-implementation-readiness` | Jalon de validation avant implémentation          | Décision OK / RÉSERVES / ÉCHEC  |
+| `bmad-sprint-planning` | Vérifiez la préparation avant implémentation | Décision OK / RÉSERVES / ÉCHEC |
 
 ## Phase 4 : Implémentation
 
@@ -78,12 +78,11 @@ Construisez, une story à la fois. L’automatisation complète de la phase 4 ar
 
 | Workflow               | Objectif                                                                             | Livrable                         |
 |------------------------|--------------------------------------------------------------------------------------|----------------------------------|
-| `bmad-sprint-planning` | Initialisez le suivi (une fois par projet, pour séquencer le cycle de développement) | `sprint-status.yaml`             |
+| `bmad-sprint-planning` | Vérifiez la préparation, initialisez le suivi et affichez le statut | `sprint-status.yaml`             |
 | `bmad-create-story`    | Préparez la story suivante pour implémentation                                       | `story-[slug].md`                |
 | `bmad-dev-story`       | Implémentez la story                                                                 | Code fonctionnel + tests         |
 | `bmad-code-review`     | Validez la qualité de l’implémentation                                               | Approuvé ou changements demandés |
 | `bmad-correct-course`  | Gérez les changements significatifs en cours de sprint                               | Plan mis à jour ou réorientation |
-| `bmad-sprint-status`   | Suivez la progression du sprint et le statut des stories                             | Mise à jour du statut du sprint  |
 | `bmad-retrospective`   | Bilan après l’achèvement d’un epic                                                   | Leçons apprises                  |
 
 ## Flux Rapide (Parcours Parallèle)
