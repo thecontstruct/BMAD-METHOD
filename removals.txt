@@ -68,3 +68,8 @@ bmad-investigate
 # Removed agents (bmm reorg): generic documentation assistance is now a
 # standard coding-agent capability; bmad-document-project remains available.
 bmad-agent-tech-writer
+
+# Removed skills (sprint consolidation)
+# bmad-check-implementation-readiness is folded into bmad-sprint-planning,
+# which now opens with a readiness gate before generating tracking.
+bmad-check-implementation-readiness

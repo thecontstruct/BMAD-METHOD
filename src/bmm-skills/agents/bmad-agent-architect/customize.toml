@@ -55,5 +55,5 @@ description = "Produce the architecture spine: the invariants that keep independ
 skill = "bmad-architecture"
 
 [agent.menu.IR]
-description = "Ensure the PRD, UX, Architecture and Epics and Stories List are all aligned"
-skill = "bmad-check-implementation-readiness"
+description = "Check implementation readiness — verify planning artifacts are complete and aligned (opens Sprint Planning; stop after the gate or continue into tracking)"
+skill = "bmad-sprint-planning"
