@@ -525,6 +525,45 @@ async function runTests() {
   console.log('');
 
   // ============================================================
+  // Test 12c: Grok Native Skills Install
+  // ============================================================
+  console.log(`${colors.yellow}Test Suite 12c: Grok Native Skills${colors.reset}\n`);
+
+  try {
+    clearCache();
+    const platformCodes12c = await loadPlatformCodes();
+    const grokInstaller = platformCodes12c.platforms.grok?.installer;
+
+    assert(grokInstaller?.target_dir === '.agents/skills', 'Grok target_dir uses native skills path');
+
+    const tempProjectDir12c = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-grok-test-'));
+    const installedBmadDir12c = await createTestBmadFixture();
+
+    const ideManager12c = new IdeManager();
+    await ideManager12c.ensureInitialized();
+    const result12c = await ideManager12c.setup('grok', tempProjectDir12c, installedBmadDir12c, {
+      silent: true,
+      selectedModules: ['bmm'],
+    });
+
+    assert(result12c.success === true, 'Grok setup succeeds against temp project');
+
+    const skillFile12c = path.join(tempProjectDir12c, '.agents', 'skills', 'bmad-master', 'SKILL.md');
+    assert(await fs.pathExists(skillFile12c), 'Grok install writes SKILL.md directory output');
+
+    const skillContent12c = await fs.readFile(skillFile12c, 'utf8');
+    const nameMatch12c = skillContent12c.match(/^name:\s*(.+)$/m);
+    assert(nameMatch12c && nameMatch12c[1].trim() === 'bmad-master', 'Grok skill name frontmatter matches directory name exactly');
+
+    await fs.remove(tempProjectDir12c);
+    await fs.remove(path.dirname(installedBmadDir12c));
+  } catch (error) {
+    assert(false, 'Grok native skills install test succeeds', error.message);
+  }
+
+  console.log('');
+
+  // ============================================================
   // Test 13: Cursor Native Skills Install
   // ============================================================
   console.log(`${colors.yellow}Test Suite 13: Cursor Native Skills${colors.reset}\n`);
