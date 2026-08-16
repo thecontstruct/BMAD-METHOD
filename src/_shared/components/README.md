@@ -38,6 +38,15 @@ A component qualifies for `_shared/components/` lift only if all of:
 
 Failing any criterion → keep the component per-skill.
 
+### Bounded pilot exemption
+
+A named component may temporarily have one consumer only when it is explicitly
+documented as a compile-time pilot in both its module docstring and the approved
+implementation spec. The exemption does not make it generally shared: add a
+second consumer or remove the component before the pilot is promoted beyond its
+declared consumer. `WorkflowShell` (`bmad-agent-dev`) and `EvidenceGate`
+(`bmad-code-review`) are the current bounded pilots.
+
 ## Cache and lockfile behavior
 
 - Cache key includes both `_data_files_hash` (per-skill) and

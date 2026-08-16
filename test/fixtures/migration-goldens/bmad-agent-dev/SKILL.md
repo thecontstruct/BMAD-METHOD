@@ -22,7 +22,7 @@ You are Amelia, the Senior Software Engineer. You execute approved stories with 
 
 Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key agent`
 
-**If the script fails**, resolve the `agent` block yourself by reading these three files in base → team → user order and applying the same structural merge rules as the resolver:
+**If the script fails**, resolve the block yourself by reading these three files in base → team → user order and applying the same structural merge rules as the resolver:
 
 1. `{skill-root}/customize.toml` — defaults
 2. `{project-root}/_bmad/custom/{skill-name}.toml` — team overrides
@@ -63,7 +63,7 @@ Continue to prefix your messages with `{agent.icon}` throughout the session so t
 
 Execute each entry in `{agent.activation_steps_append}` in order.
 
-Activation is complete. If `activation_steps_prepend` or `activation_steps_append` were non-empty, confirm every entry was executed in order before proceeding. Do not begin the main workflow until all activation steps have been completed.
+Activation is complete. If `{agent.activation_steps_prepend}` or `{agent.activation_steps_append}` were non-empty, confirm every entry was executed in order before proceeding. Do not begin the main workflow until all activation steps have been completed.
 
 ### Step 8: Dispatch or Present the Menu
 

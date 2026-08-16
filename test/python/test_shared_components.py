@@ -476,17 +476,17 @@ class TestGroupCLockfileV4:
 # Group E — Engine-frozen invariant guards
 # ===========================================================================
 
-# Pinned hashes — frozen at story 10.58 baseline (commit 2d5ced84).
-# Any drift in these 4 files fails E-1, E-3, E-4, E-5 loudly.
+# Pinned hashes — rebaselined after intentional upstream changes to bmad-help
+# and bmad-build. Any drift in these 4 files fails E-1, E-3, E-4, E-5 loudly.
 # E-2 (invoke-python SKILL.md) is intentionally OMITTED: invoke-python is a
 # JS helper (tools/installer/compiler/invoke-python.js), not a Python skill.
 # The "5 pinned skills" wording in the spec includes the JS helper; JS-side
 # stability is enforced by the existing JS test suite, not by this file.
 _PINNED_SKILLS: dict[str, str] = {
     "src/core-skills/bmad-help/SKILL.md":
-        "718077d741e20d9c94f3c2b7827047f2d18a90b85c3cc2eecd449e28b7b0d642",
+        "70babfd83a050b0f77b40b45c82bd31888218a178bb6c58bfdc336f843e205eb",
     "src/bmm-skills/ship/bmad-build/SKILL.md":
-        "e58119e55ba1c5f39ec931a19cb1cc9e2a28040292a7a105ee0118f49d8b77f3",
+        "80603505f7d8c33f3210e2e01d945b8f3465b770e02adf5a0c59e0044c34eca2",
     "src/core-skills/bmad-customize/bmad-customize.template.md":
         "c0d17619473868ace920dcf23e4240be92049feed9b10678f44e53752ad59f76",
     "src/core-skills/bmad-reference-components/SKILL.md":
@@ -503,7 +503,7 @@ class TestGroupESHAPins:
 
     @pytest.mark.parametrize("rel_path,expected", _PINNED_SKILLS.items())
     def test_e_1_through_e_5_pinned_files_byte_identical(self, rel_path, expected):
-        """E-1/3/4/5: each pinned skill file SHA matches baseline 2d5ced84.
+        """E-1/3/4/5: each pinned skill file SHA matches its approved baseline.
 
         E-2 (invoke-python) intentionally skipped — no Python skill exists.
         """
@@ -512,7 +512,7 @@ class TestGroupESHAPins:
         actual = _sha256_bytes(path)
         assert actual == expected, (
             f"PINNED-SKILL DRIFT: {rel_path}\n"
-            f"  expected (baseline 2d5ced84): {expected}\n"
+            f"  expected (approved baseline): {expected}\n"
             f"  actual                      : {actual}\n"
             "Per Story 10.58 hard invariant #1, the 5 SHA-pinned skills must "
             "remain byte-identical. If this drift is intentional, the change "

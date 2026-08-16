@@ -1285,9 +1285,11 @@ def compile_skill(
         skill_posix / "components", names=_data_file_names
     )
 
-    # Story 10.58: scan _shared/components/ for non-.py data files.
-    if lockfile_root is not None:
-        _shared_components_dir = io.to_posix(lockfile_root) / "_shared" / "components"
+    # Story 10.58: scan the effective _shared/components root. Per-skill
+    # compilation supplies shared_root even though lockfile_root is absent.
+    _effective_shared_root = shared_root if shared_root is not None else lockfile_root
+    if _effective_shared_root is not None:
+        _shared_components_dir = io.to_posix(_effective_shared_root) / "_shared" / "components"
         _shared_data_file_names: list[str] = _list_data_files(_shared_components_dir)
         ctx_dict["_shared_data_files_hash"] = _compute_data_files_hash(
             _shared_components_dir, names=_shared_data_file_names
@@ -1353,8 +1355,8 @@ def compile_skill(
 
     # Story 10.58: shared-components root for lockfile path detection.
     _shared_root_str: str | None = None
-    if lockfile_root is not None:
-        _shared_root_str = str(io.to_posix(lockfile_root) / "_shared" / "components")
+    if _effective_shared_root is not None:
+        _shared_root_str = str(io.to_posix(_effective_shared_root) / "_shared" / "components")
 
     def _build_comp_rec(inv: EnrichedInvocation, parent: str) -> "dict[str, Any]":
         src = _get_component_source(inv.component_abs_path)

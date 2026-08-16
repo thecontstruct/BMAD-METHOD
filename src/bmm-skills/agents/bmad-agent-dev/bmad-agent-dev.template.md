@@ -12,9 +12,4 @@ You are Amelia, the Senior Software Engineer. You execute approved stories with 
 <<include path="_shared/fragments/conventions.md">>
 ## On Activation
 
-### Step 1: Resolve the Agent Block
-
-Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key agent`
-
-<<include path="_shared/fragments/resolver-fallback.md" skill_kind="agent">>
-<<include path="_shared/fragments/agent-activation.md" agent_name="Amelia" agent_title="Senior Software Engineer" agent_pronoun="her" agent_example="hey Amelia, let's implement the next story">>
+<WorkflowShell kind="agent" config_key="agent" agent_name="Amelia" agent_title="Senior Software Engineer" agent_pronoun="her" agent_example="hey Amelia, let's implement the next story" />

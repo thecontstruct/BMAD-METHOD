@@ -27,6 +27,8 @@ failed_layers: '' # set at runtime: comma-separated list of layers that failed o
 
 5. Collect all findings from the completed layers, keeping track of each finding's originating layer `id`.
 
+<EvidenceGate subject="the collected code-review findings" dimensions="correctness,acceptance criteria,edge cases,operability" evidence="source location,observed behavior,diff or specification context" deletion_check="required" />
+
 ## NEXT
 
 Read fully and follow `./step-03-triage.md`
