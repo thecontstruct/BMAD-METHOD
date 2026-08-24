@@ -23,11 +23,11 @@ Implement the clarified intent directly.
 
 The review layers for this route are `{workflow.oneshot_review_layers}`, resolved during activation.
 
-Skip every layer whose `instruction` is empty or missing, and every layer whose `when` condition (if present) does not hold. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
+Announce skipped layers first, then launch every active layer before handling any layer's result. Try running all active layers simultaneously. Skip every layer whose `instruction` is empty or missing, and every layer whose `when` condition (if present) does not hold. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
 
 <<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch each active layer's reviewer as a parallel subagent without conversation context." fallback_action="generate one review prompt file per layer in `{implementation_artifacts}` and HALT. Ask the human to run each in a separate session and paste back the findings.">>
 
-Execute all remaining layers following each layer's `instruction` verbatim after substituting any runtime placeholders.
+Execute all remaining layers following each layer's `instruction` verbatim after substituting any runtime placeholders. Never handle a layer's result until every active layer has launched.
 
 ### Classify
 

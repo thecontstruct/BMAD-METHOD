@@ -39,3 +39,58 @@ persistent_facts = [
 # Leave empty for no custom post-completion behavior.
 
 on_complete = ""
+
+# Review layers for the review step. The fork routes its reusable review
+# methods through the consolidated bmad-review skill; only the spec-bound
+# acceptance audit remains local to code review.
+
+[[workflow.review_layers]]
+id = "blind-hunter"
+name = "Blind Hunter"
+instruction = """
+Launch a context-free subagent with this prompt:
+
+> Invoke the `bmad-review` skill with only the `adversarial` lens on this diff:
+>
+> {diff_output}
+"""
+
+[[workflow.review_layers]]
+id = "edge-case-hunter"
+name = "Edge Case Hunter"
+instruction = """
+Launch a context-free subagent with this prompt:
+
+> Invoke the `bmad-review` skill with only the `edge-case-hunter` lens on this diff:
+>
+> {diff_output}
+>
+> claims_file (do not read until the lens's claims-check pass): {claims_file}
+"""
+
+[[workflow.review_layers]]
+id = "verification-gap"
+name = "Verification Gap Reviewer"
+instruction = """
+Launch a context-free subagent with this prompt:
+
+> Invoke the `bmad-review` skill with only the `verification-gap` lens on this diff:
+>
+> {diff_output}
+"""
+
+[[workflow.review_layers]]
+id = "acceptance-auditor"
+name = "Acceptance Auditor"
+when = 'Only when {review_mode} = "full".'
+instruction = """
+Launch a context-free subagent with this prompt:
+
+You are an Acceptance Auditor. Review the provided diff against `{spec_file}` and any loaded context docs. Check for violations of acceptance criteria, deviations from spec intent, missing implementation of specified behavior, and contradictions between spec constraints and actual code. Output findings as a Markdown list. Each finding: one-line title, which AC or constraint it violates, and evidence from the diff.
+
+Diff:
+
+{diff_output}
+
+Do not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.
+"""

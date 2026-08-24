@@ -38,6 +38,19 @@ Deletion findings go in the same array with the four standard fields plus:
 
 For a deletion finding the standard fields read as: `location` = the removed item; `trigger_condition` = the behavior or contract it enforced; `guard_snippet` = where or how to re-establish it; `potential_consequence` = the regression or orphan.
 
+## Step 4: Claims check
+
+Run this pass only when the launch message supplied a non-empty `claims_file` path. Do not read that file until now: the preceding path analysis must finish before the narrative can steer it.
+
+Read the file now. It holds the change's own narrative — commit messages and any stated description — which is testimony, not evidence. Extract each checkable claim: what the change does or preserves, ordering, arithmetic, and claimed parity with existing code. Try to falsify each claim against the code already traced; where that trace is insufficient, inspect the code that decides it.
+
+Append one finding per falsified claim with the four standard fields plus:
+
+- `kind`: `"claim"`
+- `confidence`: `"high"`, `"medium"`, or `"low"`
+
+For a claim finding, `location` is where the code contradicts the claim; `trigger_condition` quotes or tightly paraphrases the claim; `guard_snippet` states what the code actually does; and `potential_consequence` says what goes wrong for someone who believed it. Verified claims produce nothing.
+
 ## Findings shape
 
 Each edge-case finding contains exactly these four fields:

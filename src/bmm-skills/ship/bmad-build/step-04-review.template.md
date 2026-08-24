@@ -24,7 +24,7 @@ Do NOT `git add` anything — this is read-only inspection.
 
 The review layers are `{workflow.review_layers}`, resolved during activation.
 
-Skip every layer whose `instruction` is empty or missing — that is how an override disables a default layer — and every layer whose `when` condition (if present) does not hold in the current context. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
+Announce skipped layers first, then launch every active layer before handling any layer's result. Skip every layer whose `instruction` is empty or missing — that is how an override disables a default layer — and every layer whose `when` condition (if present) does not hold in the current context. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
 
 <<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch each active layer's reviewer as a parallel subagent without conversation context. Spawn all before reading any output; begin collection and triage only once all are launched." fallback_action="generate one review prompt file per layer in `{implementation_artifacts}` and HALT. Ask the human to run each in a separate session (ideally a different LLM) and paste back the findings.">>
 
