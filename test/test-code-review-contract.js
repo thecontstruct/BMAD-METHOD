@@ -9,6 +9,7 @@ const lens = fs.readFileSync(path.join(root, 'src/core-skills/bmad-review/refere
 const edgeLens = fs.readFileSync(path.join(root, 'src/core-skills/bmad-review/references/lens-edge-case-hunter.md'), 'utf8');
 const review = fs.readFileSync(path.join(root, 'src/core-skills/bmad-review/bmad-review.template.md'), 'utf8');
 const customize = fs.readFileSync(path.join(root, 'src/bmm-skills/ship/bmad-code-review/customize.toml'), 'utf8');
+const triage = fs.readFileSync(path.join(root, 'src/bmm-skills/ship/bmad-code-review/steps/step-03-triage.md'), 'utf8');
 
 const checks = [
   ['explicit no-spec requests skip the spec question', gather.includes('explicitly') && gather.includes('Do **not** ask for a spec')],
@@ -29,6 +30,7 @@ const checks = [
     ['blind-hunter', 'edge-case-hunter', 'verification-gap', 'acceptance-auditor'].every((id) => customize.includes(`id = "${id}"`)),
   ],
   ['review layers receive a staged diff path rather than repeated diff text', gather.includes('diff_file') && customize.includes('{diff_file}') && !customize.includes('{diff_output}')],
+  ['each review finding is verified before grouping or dismissal', triage.includes('before grouping') && triage.includes('never drop a finding silently')],
 ];
 
 let failed = 0;

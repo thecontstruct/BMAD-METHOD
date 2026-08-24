@@ -16,22 +16,19 @@
    - `detail` -- full description
    - `location` -- file and line reference (if available)
 
-2. **Deduplicate.** Deduplicate only findings with the same claim and same required action. If two or more findings meet both conditions, merge them into one:
-   - Use the most specific finding as the base (prefer findings with a precise location over prose-only findings).
-   - Append any unique detail, reasoning, or location references from the other finding(s) into the surviving `detail` field.
-   - Set `source` to the merged sources (e.g., `blind-hunter+edge-case-hunter`).
+2. **Render a verdict on each finding before grouping.** Once every layer has reported, verify each claim at its named location independently. Read past the diff hunk into callers, guards, and validation far enough to determine whether its claimed consequence actually occurs. A neighboring finding's outcome never settles this one.
 
-3. Then evaluate each remaining finding independently. Do not reject a finding because a related finding was rejected.
-
-4. **Read the code before rating.** Before assigning severity, open the source at each finding's location and read enough surrounding code to judge reachability -- call sites, guards, and validation that live outside the diff hunk. Do not rate from the diff hunk alone. Severity reflects the real consequence at a real call site, not the worst theoretical reading.
-
-5. **Assign severity** to each finding by consequence for the artifact's main consumer (software user, document reader, etc).
+3. **Assign severity** from that verified consequence for the artifact's main consumer (software user, document reader, etc).
    Disregard any severity assigned by a reviewing subagent. Review subagents operate under by-design information asymmetry and do not have enough context to set final severity for this workflow.
    - `low` -- none or cosmetic
    - `medium` -- tolerable
    - `high` -- intolerable
 
-6. **Route** each finding into exactly one triage bucket:
+4. **Keep or dismiss.** Keep a finding only when verification confirms its claimed consequence. Dismiss noise, refuted claims, and claims that cannot be substantiated; the reason must dispose of that finding's own claim. Record every dismissal and its reason for the summary — never drop a finding silently.
+
+5. **Group survivors by shared root cause.** Merge only findings with the same underlying defect, not merely the same location or fix. Preserve each member's verified consequence and the highest severity in the group.
+
+6. **Route** each surviving group into exactly one triage bucket:
    - **decision_needed** -- There is an ambiguous choice that requires human input. The code cannot be correctly patched without knowing the user's intent. Only possible if `{review_mode}` = `"full"`.
    - **patch** -- Code issue that is fixable without human input. The correct fix is unambiguous.
    - **defer** -- Pre-existing issue not caused by the current change. Real but not actionable now.
@@ -39,7 +36,7 @@
 
    If `{review_mode}` = `"no-spec"` and a finding would otherwise be `decision_needed`, reclassify it as `patch` (if the fix is unambiguous) or `defer` (if not).
 
-7. **Drop** all `dismiss` findings. Record the dismiss count for the summary.
+7. **Record** every dismissed finding and its reason in the summary; do not include it in the surviving groups.
 
 8. If `{failed_layers}` is non-empty, report which layers failed before announcing results. If zero findings remain after dropping dismissed AND `{failed_layers}` is non-empty, warn the user that the review may be incomplete rather than announcing a clean review.
 
