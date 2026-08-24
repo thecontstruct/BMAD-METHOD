@@ -3,6 +3,8 @@
 # dependencies = ["pytest>=8.0"]
 # ///
 """Tests for brain.py. Run: uv run -m pytest scripts/tests/test_brain.py"""
+import io
+import json
 import sys
 from pathlib import Path
 
@@ -131,6 +133,26 @@ def test_random_negative_n_does_not_crash(lib, capsys):
 
 def test_missing_file_returns_2(tmp_path):
     assert brain.main(["--file", str(tmp_path / "nope.csv"), "categories"]) == 2
+
+
+def _cp1252_stream():
+    return io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict", write_through=True)
+
+
+def test_extra_technique_prints_when_stdout_encoding_is_cp1252(lib, tmp_path, monkeypatch):
+    overlay = tmp_path / "extra.json"
+    overlay.write_text(json.dumps([{"category": "wild", "technique_name": "Fikir Fırtınası 🌪", "description": "Beyin fırtınası — 日本語"}]), encoding="utf-8")
+    fake = _cp1252_stream()
+    monkeypatch.setattr(sys, "stdout", fake)
+    assert brain.main(["--file", str(lib), "--extra", str(overlay), "list", "--all"]) == 0
+    assert "日本語" in fake.buffer.getvalue().decode("utf-8")
+
+
+def test_pin_utf8_preserves_the_stream_error_handler():
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="backslashreplace")
+    brain.pin_utf8(stream)
+    assert stream.encoding == "utf-8"
+    assert stream.errors == "backslashreplace"
 
 
 # --- html selection page ------------------------------------------------

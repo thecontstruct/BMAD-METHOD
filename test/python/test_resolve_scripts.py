@@ -19,6 +19,7 @@ ACs 1, 2, 4, 5 are exercised here:
 from __future__ import annotations
 
 import json
+import importlib
 import subprocess
 import sys
 import tempfile
@@ -202,6 +203,37 @@ class TestResolveConfigParity(unittest.TestCase):
         self.assertNotIn("enabled", alpha)  # full replacement — base field dropped
         beta = next(p for p in cli_output["plugins"] if p["code"] == "beta")
         self.assertEqual(beta["label"], "Beta")
+
+    def test_write_json_stdout_reconfigures_cp1252_console(self) -> None:
+        class Captured:
+            encoding = "cp1252"
+            errors = "strict"
+
+            def __init__(self) -> None:
+                self.reconfigured = None
+                self.output = ""
+
+            def reconfigure(self, **kwargs: str) -> None:
+                self.reconfigured = kwargs
+
+            def write(self, value: str) -> None:
+                self.output += value
+
+        sys.path.insert(0, str(_RESOLVE_CONFIG.parent))
+        try:
+            resolve_config = importlib.import_module("resolve_config")
+        finally:
+            sys.path.pop(0)
+
+        previous = sys.stdout
+        captured = Captured()
+        try:
+            sys.stdout = captured  # type: ignore[assignment]
+            resolve_config.write_json_stdout({"icon": "⚔️"})
+        finally:
+            sys.stdout = previous
+        self.assertEqual(captured.reconfigured, {"encoding": "utf-8"})
+        self.assertIn("⚔️", captured.output)
 
 
 class TestResolveCustomizationSingleLayer(unittest.TestCase):

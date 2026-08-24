@@ -666,7 +666,16 @@ def html_doc(rows: list[dict]) -> str:
     )
 
 
+def pin_utf8(stream):
+    """Pin a console stream to UTF-8 without changing its error handler."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8", errors=getattr(stream, "errors", None) or "strict")
+
+
 def main(argv: list[str] | None = None) -> int:
+    pin_utf8(sys.stdout)
+    pin_utf8(sys.stderr)
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--file", type=Path, default=DEFAULT_FILE, help="technique CSV (default: sibling assets/brain-methods.csv)")
     p.add_argument("--extra", type=Path, help="JSON overlay of additional techniques (customize.toml additional_techniques), merged into every command")

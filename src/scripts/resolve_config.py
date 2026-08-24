@@ -83,6 +83,14 @@ def extract_key(data: dict[str, Any], dotted_key: str) -> Any:
     return current
 
 
+def write_json_stdout(output: dict[str, Any]) -> None:
+    """Write JSON through UTF-8 stdout, including on Windows consoles."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8")
+    sys.stdout.write(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Resolve BMad central config using four-layer TOML merge.",
@@ -117,7 +125,7 @@ def main() -> None:
     else:
         output = merged
 
-    sys.stdout.write(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
+    write_json_stdout(output)
 
 
 if __name__ == "__main__":
