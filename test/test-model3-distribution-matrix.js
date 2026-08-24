@@ -638,8 +638,8 @@ async function main() {
   });
 
   // AC-3 (10.43): IDE-invocation smoke test — static regression check for ≥1 Batch 1
-  // (multi-file with step artifacts, e.g. bmad-code-review) and ≥1 Batch 4/5 (skill with
-  // D4 Handlebars + a runtime-scaffold artifact template, e.g. bmad-check-implementation-readiness).
+  // (multi-file with step artifacts, e.g. bmad-code-review) and the consolidated
+  // sprint-planning skill that now owns the implementation-readiness gate.
   // Verifies migration golden SKILL.md and template source still exist (guards against
   // accidental deletion of migrated artifacts).
   await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 1 (bmad-code-review)', async () => {
@@ -673,40 +673,29 @@ async function main() {
     );
   });
 
-  // Exemplar repointed from bmad-domain-research to bmad-check-implementation-readiness
-  // (upstream #2611): the research trio was consolidated into bmad-deep-recon, so the old
-  // Batch 4/5 subject no longer exists. Readiness has the same shape the check cares about
-  // — a migrated .template.md, step artifacts, and a runtime-scaffold artifact template.
-  await runTest('AC-3 (10.43): IDE smoke — migration golden regression for Batch 4/5 (bmad-check-implementation-readiness)', async () => {
-    const BATCH4_GOLDEN = path.join(__dirname, 'fixtures', 'migration-goldens', 'bmad-check-implementation-readiness', 'SKILL.md');
+  // bmad-check-implementation-readiness was later folded into bmad-sprint-planning.
+  // Keep the smoke test on its live replacement, including the readiness-gate reference.
+  await runTest('AC-3 (10.43): IDE smoke — migration golden regression for consolidated readiness (bmad-sprint-planning)', async () => {
+    const BATCH4_GOLDEN = path.join(__dirname, 'fixtures', 'migration-goldens', 'bmad-sprint-planning', 'SKILL.md');
     const BATCH4_TEMPLATE = path.join(
       __dirname,
       '..',
       'src',
       'bmm-skills',
       'plan',
-      'bmad-check-implementation-readiness',
-      'bmad-check-implementation-readiness.template.md',
+      'bmad-sprint-planning',
+      'bmad-sprint-planning.template.md',
     );
-    const BATCH4_STEP = path.join(
-      __dirname,
-      '..',
-      'src',
-      'bmm-skills',
-      'plan',
-      'bmad-check-implementation-readiness',
-      'steps',
-      'step-01-document-discovery.md',
-    );
+    const BATCH4_STEP = path.join(__dirname, '..', 'src', 'bmm-skills', 'plan', 'bmad-sprint-planning', 'references', 'readiness-gate.md');
     const BATCH4_ARTIFACT_TEMPLATE = path.join(
       __dirname,
       '..',
       'src',
       'bmm-skills',
       'plan',
-      'bmad-check-implementation-readiness',
-      'templates',
-      'readiness-report-template.md',
+      'bmad-sprint-planning',
+      'scripts',
+      'sprint_plan.py',
     );
 
     assert(
@@ -714,7 +703,7 @@ async function main() {
         .access(BATCH4_GOLDEN)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 migration golden SKILL.md exists (bmad-check-implementation-readiness)',
+      'AC-3 (10.43): consolidated readiness migration golden SKILL.md exists (bmad-sprint-planning)',
       `expected: ${BATCH4_GOLDEN}`,
     );
     assert(
@@ -722,7 +711,7 @@ async function main() {
         .access(BATCH4_TEMPLATE)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 skill template source exists (bmad-check-implementation-readiness.template.md)',
+      'AC-3 (10.43): consolidated readiness skill template source exists (bmad-sprint-planning.template.md)',
       `expected: ${BATCH4_TEMPLATE}`,
     );
     assert(
@@ -730,7 +719,7 @@ async function main() {
         .access(BATCH4_STEP)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 artifact step exists (steps/step-01-document-discovery.md)',
+      'AC-3 (10.43): consolidated readiness reference exists (references/readiness-gate.md)',
       `expected: ${BATCH4_STEP}`,
     );
     assert(
@@ -738,7 +727,7 @@ async function main() {
         .access(BATCH4_ARTIFACT_TEMPLATE)
         .then(() => true)
         .catch(() => false),
-      'AC-3 (10.43): Batch 4/5 runtime-scaffold artifact exists (templates/readiness-report-template.md)',
+      'AC-3 (10.43): consolidated readiness implementation exists (scripts/sprint_plan.py)',
       `expected: ${BATCH4_ARTIFACT_TEMPLATE}`,
     );
   });
