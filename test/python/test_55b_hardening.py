@@ -211,7 +211,7 @@ class TestEmptyArrayWorkflowKeys(unittest.TestCase):
             self.assertEqual(summary["errors"], 0)
             self.assertEqual(summary["compiled"], 1)
 
-    def test_bmad_quick_dev_customize_toml_compiles_cleanly_with_two_warnings(self) -> None:
+    def test_bmad_quick_dev_customize_toml_compiles_cleanly_with_three_warnings(self) -> None:
         # Integration: compile bmad-build (real fixture, restored keys).
         # Uses positional compile form so _shared/fragments/ resolves (Story 10.61:
         # step-templates now include _shared/fragments/sub-agent-activation.template.md).
@@ -234,8 +234,8 @@ class TestEmptyArrayWorkflowKeys(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
             warning_lines = [ln for ln in result.stderr.splitlines() if "TOML_EMPTY_ARRAY_SKIPPED" in ln]
-            self.assertEqual(len(warning_lines), 2,
-                             f"expected exactly 2 warnings, got {len(warning_lines)}: {result.stderr!r}")
+            self.assertEqual(len(warning_lines), 3,
+                             f"expected exactly 3 warnings, got {len(warning_lines)}: {result.stderr!r}")
             # `{project-root}` survives in compiled SKILL.md as a VarRuntime token
             skill_md = install / "ship" / "bmad-build" / "SKILL.md"
             self.assertTrue(skill_md.is_file())
