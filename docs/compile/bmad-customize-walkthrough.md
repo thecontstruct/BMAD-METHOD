@@ -23,7 +23,7 @@ Trigger from any IDE chat that hosts BMad:
 
 > "Run `bmad-customize` to add a step before the PRD workflow that loads our team's PRD style guide."
 
-The skill activates and loads `_bmad/config.toml` (and `_bmad/config.user.toml` if present) for your `user_name` and `communication_language` defaults. If your invocation already names a target skill plus a specific change, the skill jumps straight to surface routing.
+The skill resolves `_bmad/config.toml`, `_bmad/custom/config.toml`, and `_bmad/custom/config.user.toml` for your `user_name` and `communication_language` defaults. If your invocation already names a target skill plus a specific change, the skill jumps straight to surface routing.
 
 ## Step 1: Classify intent
 

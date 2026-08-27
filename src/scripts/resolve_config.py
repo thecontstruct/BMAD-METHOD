@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Resolve BMad's central config using four-layer TOML merge.
+Resolve BMad's central config using three-layer TOML merge.
 
-Reads from four layers (highest priority last):
+Reads from three layers (highest priority last):
   1. {project-root}/_bmad/config.toml              (installer-owned team)
-  2. {project-root}/_bmad/config.user.toml         (installer-owned user)
-  3. {project-root}/_bmad/custom/config.toml       (human-authored team, committed)
-  4. {project-root}/_bmad/custom/config.user.toml  (human-authored user, gitignored)
+  2. {project-root}/_bmad/custom/config.toml       (human-authored team, committed)
+  3. {project-root}/_bmad/custom/config.user.toml  (installer-owned user, gitignored)
 
 Outputs merged JSON to stdout. Errors go to stderr.
 
@@ -93,7 +92,7 @@ def write_json_stdout(output: dict[str, Any]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Resolve BMad central config using four-layer TOML merge.",
+        description="Resolve BMad central config using three-layer TOML merge.",
     )
     parser.add_argument(
         "--project-root", "-p", required=True,
@@ -109,11 +108,10 @@ def main() -> None:
     bmad_dir = project_root / "_bmad"
 
     base_team = load_toml(bmad_dir / "config.toml", required=True)
-    base_user = load_toml(bmad_dir / "config.user.toml")
     custom_team = load_toml(bmad_dir / "custom" / "config.toml")
     custom_user = load_toml(bmad_dir / "custom" / "config.user.toml")
 
-    merged = merge_layers(base_team, base_user, custom_team, custom_user)
+    merged = merge_layers(base_team, custom_team, custom_user)
 
     output: dict[str, Any]
     if args.key:

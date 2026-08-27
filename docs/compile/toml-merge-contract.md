@@ -17,12 +17,12 @@ Epic 8 implementers: read this before building on the TOML config stack.
 1. **`engine.py`** — builds a **per-skill 3-layer stack** (defaults → team → user)
    for each `compile_skill()` call. Resolves `self.*` TOML variables for one skill
    at compile time.
-2. **`src/scripts/resolve_config.py`** — builds a **central 4-layer stack** for the
+2. **`src/scripts/resolve_config.py`** — builds a **central 3-layer stack** for the
    project's agent roster and install answers, resolved once per engine invocation.
 
-The term "4-layer" in the story title refers to the central config stack in
+The earlier "4-layer" story title referred to the former central config stack in
 `resolve_config.py`. The per-skill stack has 3 layers (defaults, team, user). Together
-with the reserved install-flag tier, the full cascade is **8 tiers** per ADR
+with the reserved install-flag tier, the active cascade is **7 tiers** per ADR
 §Decision 17.
 
 The merge engine applies the same four structural rules to both stacks. Both callers
@@ -66,15 +66,13 @@ engine invocation — the merged result is shared across all skills compiled in 
 | Layer name | TOML-layer label | File path | Ownership | Priority |
 |---|---|---|---|---|
 | `base_team` | `central-base-team` | `_bmad/config.toml` | installer-owned, committed | lowest |
-| `base_user` | `central-base-user` | `_bmad/config.user.toml` | installer-owned, gitignored | 2nd |
-| `custom_team` | `central-custom-team` | `_bmad/custom/config.toml` | human-authored, committed | 3rd |
-| `custom_user` | `central-custom-user` | `_bmad/custom/config.user.toml` | human-authored, gitignored | highest |
+| `custom_team` | `central-custom-team` | `_bmad/custom/config.toml` | human-authored, committed | 2nd |
+| `custom_user` | `central-custom-user` | `_bmad/custom/config.user.toml` | installer-owned, gitignored | highest |
 
 **Ownership:**
-- `base_team` / `base_user` are written by `npm install`. `base_user` captures
-  personal install answers and is gitignored.
-- `custom_team` / `custom_user` are human-authored overrides. `custom_user` is
-  gitignored (personal preferences).
+- `base_team` is written by `npm install`.
+- `custom_team` is a human-authored override. `custom_user` holds personal
+  install answers and is gitignored.
 
 **Required layer:** `base_team` (`_bmad/config.toml`) is required. `resolve_config.py`
 calls `load_toml(..., required=True)` for it — if missing, writes an error to stderr
@@ -86,7 +84,7 @@ strip UTF-8 BOM, does not perform TOCTOU recovery, and surfaces parse errors as 
 warnings (or errors for required layers). See §Edge Cases for the full comparison.
 
 **Upstream prototype comparison:** `upstream/feat/build-python-config` has its own
-4-layer inline merge in `render.py` (lines 33–41) covering the same 4 central config
+3-layer inline merge in `render.py` covering the same central config
 files. That implementation uses simplified semantics: scalars override, tables deep
 merge, but **all arrays append** (no keyed AoT merge). The comment at render.py line 39
 reads: "we don't need the full keyed-merge semantics of resolve_config.py". Our
@@ -98,10 +96,10 @@ are present in the central config files.
 
 ---
 
-## 8-Tier ADR Cascade Mapping
+## 7-Tier ADR Cascade Mapping
 
 ADR §Decision 17 (`proposals/bmad-skill-compiler-architecture.md`) defines an 8-tier
-cascade. The current implementation realizes all 8 tiers:
+cascade. The current implementation realizes seven active tiers:
 
 | Tier | ADR label | Implementation | Stack |
 |---|---|---|---|
@@ -110,17 +108,16 @@ cascade. The current implementation realizes all 8 tiers:
 | 3 | `toml/team` | `team` layer: `_bmad/custom/{skill}.toml` | per-skill (`engine.py`) |
 | 4 | `toml/user` | `user` layer: `_bmad/custom/{skill}.user.toml` | per-skill (`engine.py`) |
 | 5 | `central-base-team` | `base_team`: `_bmad/config.toml` | central (`resolve_config.py`) |
-| 6 | `central-base-user` | `base_user`: `_bmad/config.user.toml` | central (`resolve_config.py`) |
-| 7 | `central-custom-team` | `custom_team`: `_bmad/custom/config.toml` | central (`resolve_config.py`) |
-| 8 | `central-custom-user` | `custom_user`: `_bmad/custom/config.user.toml` | central (`resolve_config.py`) |
+| 6 | `central-custom-team` | `custom_team`: `_bmad/custom/config.toml` | central (`resolve_config.py`) |
+| 7 | `central-custom-user` | `custom_user`: `_bmad/custom/config.user.toml` | central (`resolve_config.py`) |
 
 **Precedence principle — specific scope wins over general scope.** Per-skill TOML
-layers (tiers 2–4) outrank the process-global central TOML layers (tiers 5–8) even
+layers (tiers 2–4) outrank the process-global central TOML layers (tiers 5–7) even
 when the per-skill layer is a *shipped default* (tier 2) and the central layer is an
-*explicit user override* (tier 8).
+*explicit user configuration* (tier 7).
 
 Example: a skill author declares `agent.icon = "📋"` in PM's `customize.toml` (tier 2).
-Even if `_bmad/custom/config.user.toml` (tier 8) sets `agent.icon = "⚙️"`, the
+Even if `_bmad/custom/config.user.toml` (tier 7) sets `agent.icon = "⚙️"`, the
 per-skill default wins. The rationale: per-skill intent from the skill author is more
 specific than a global preference.
 
@@ -234,9 +231,8 @@ stderr rather than exceptions.
 | Layer | Trust level | Rationale |
 |---|---|---|
 | `base_team` | Installer-owned | Written by `npm install`; committed. |
-| `base_user` | Installer-owned, personal | Written by `npm install`; gitignored — captures local install answers. |
 | `custom_team` | Human-authored, committed | Team overrides; committed to version control. |
-| `custom_user` | Human-authored, gitignored | Personal overrides; gitignored. |
+| `custom_user` | Installer-owned, personal | Written by `npm install`; gitignored — captures local install answers. |
 
 ### Override-Root Containment
 
@@ -252,7 +248,7 @@ untrusted input can enter the path.
 
 ### Central Config is Process-Global
 
-`resolve_config.py` merges the 4 central files once per engine invocation. Its output is
+`resolve_config.py` merges the 3 central files once per engine invocation. Its output is
 shared across all skills compiled in that run. A malicious `_bmad/custom/config.user.toml`
 could inject values into all skills in the same compile run. However, the per-skill layer
 precedence principle (§8-Tier Cascade) means it cannot override paths the skill's own
@@ -277,7 +273,7 @@ dotted-path lookup in that table.
 ### `{{.X}}` — Upstream prototype sigil (render.py, JIT renderer)
 
 Resolved at skill-entry time by `render.py` in `upstream/feat/build-python-config`,
-using the simplified 4-layer central config merge. This sigil is rejected by the TPL-01
+using the simplified 3-layer central config merge. This sigil is rejected by the TPL-01
 lint rule (Story 7.20) when found in template `.md` files.
 
 Mixing `{{self.X}}` and `{{.X}}` in a template is a bug — they serve different pipelines
@@ -353,7 +349,7 @@ comprehensive coverage.
 | Resource | Purpose |
 |---|---|
 | `src/scripts/bmad_compile/toml_merge.py` | Primary implementation — merge engine and TOML file loader |
-| `src/scripts/resolve_config.py` | Central 4-layer config caller — reads the 4 central config files and calls `merge_layers` |
+| `src/scripts/resolve_config.py` | Central 3-layer config caller — reads the 3 central config files and calls `merge_layers` |
 | `src/scripts/bmad_compile/engine.py` lines 327–342 | Per-skill layer stack construction loop |
 | `src/scripts/bmad_compile/resolver.py` `VariableScope.build()` | Integrates merged per-skill TOML into the compile-time variable resolver |
 | `proposals/bmad-skill-compiler-architecture.md` §Decision 17 | Architecture ADR — source of merge rules and 8-tier cascade design |

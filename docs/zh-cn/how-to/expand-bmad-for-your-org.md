@@ -195,7 +195,7 @@ implementation_artifacts = "{project-root}/shared/implementation"
 document_output_language = "English"
 ```
 
-个人设置如 `user_name`、`communication_language` 或 `user_skill_level` 留在各开发者自己的 `_bmad/config.user.toml` 中。团队文件不应触碰这些。
+个人设置如 `user_name`、`communication_language` 或 `user_skill_level` 留在各开发者自己的 `_bmad/custom/config.user.toml` 中。团队文件不应触碰这些。
 
 **为什么用中央配置而不是逐智能体的 customize.toml：** 逐智能体文件塑造*一个*智能体激活时的行为。中央配置塑造花名册消费者*查看全局时看到的内容：*有哪些智能体、叫什么、属于哪个团队，以及整个仓库共识的安装设置。两个层面，各司其职。
 

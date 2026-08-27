@@ -285,22 +285,20 @@ Si vous avez besoin d’un réglage précis qui n’est pas encore exposé, util
 
 ## Configuration centrale
 
-Le `customize.toml` par skill couvre le **comportement profond** (hooks, menus, persistent_facts, overrides de persona pour un seul agent ou workflow). Une surface séparée couvre l'**état transversal** — les réponses d’installation et le registre des agents que les skills externes comme `bmad-party-mode`, `bmad-retrospective` et `bmad-advanced-elicitation` consomment. Cette surface se trouve dans quatre fichiers TOML à la racine du projet :
+Le `customize.toml` par skill couvre le **comportement profond** (hooks, menus, persistent_facts, overrides de persona pour un seul agent ou workflow). Une surface séparée couvre l'**état transversal** — les réponses d’installation et le registre des agents que les skills externes comme `bmad-party-mode`, `bmad-retrospective` et `bmad-advanced-elicitation` consomment. Cette surface se trouve dans trois fichiers TOML à la racine du projet :
 
 ```text
 _bmad/config.toml               (géré par l'installateur)  périmètre équipe : réponses d'installation + registre des agents
-_bmad/config.user.toml          (géré par l'installateur)  périmètre utilisateur : user_name, langue, niveau de skill
 _bmad/custom/config.toml        (rédigé manuellement)      overrides d'équipe (versionnés dans git)
-_bmad/custom/config.user.toml   (rédigé manuellement)      overrides personnels (ignoré par git)
+_bmad/custom/config.user.toml   (géré par l'installateur)  périmètre utilisateur : user_name, langue, niveau de skill
 ```
 
-### Fusion à quatre couches
+### Fusion à trois couches
 
 ```text
 Priorité 1 (gagne) : _bmad/custom/config.user.toml
 Priorité 2         : _bmad/custom/config.toml
-Priorité 3         : _bmad/config.user.toml
-Priorité 4 (base)  : _bmad/config.toml
+Priorité 3 (base)  : _bmad/config.toml
 ```
 
 Mêmes règles structurelles que la personnalisation par skill (scalaires prévalent, tables fusionnent en profondeur, tableaux à clé `code`/`id` fusionnent par clé, autres tableaux s’ajoutent).
@@ -309,13 +307,13 @@ Mêmes règles structurelles que la personnalisation par skill (scalaires préva
 
 L’installateur répartit les réponses selon le `scope:` déclaré sur chaque prompt dans `module.yaml` :
 
-- Les sections `[core]` et `[modules.<code>]` — réponses d’installation. Le scope `team` figure dans `_bmad/config.toml` ; le scope `user` figure dans `_bmad/config.user.toml`.
+- Les sections `[core]` et `[modules.<code>]` — réponses d’installation. Le scope `team` figure dans `_bmad/config.toml` ; le scope `user` figure dans `_bmad/custom/config.user.toml`.
 - `[agents.<code>]` — descripteur de l’agent (code, name, title, icon, description, team) extrait du bloc `agents:` de chaque `module.yaml`. Toujours de scope équipe.
 
 ### Règles de modification
 
-- `_bmad/config.toml` et `_bmad/config.user.toml` sont **régénérés à chaque installation** à partir des réponses collectées pendant le processus d’installation. Traitez-les comme des sorties en lecture seule — les modifications directes seront écrasées à la prochaine installation. Pour changer une réponse d’installation de manière durable, relancez l’installateur (il se souvient de vos réponses précédentes comme valeurs par défaut) ou surchargez la valeur dans `_bmad/custom/config.toml`.
-- `_bmad/custom/config.toml` et `_bmad/custom/config.user.toml` ne sont **jamais modifiés** par l’installateur. C’est l’espace approprié pour les agents personnalisés, les overrides de descripteur d’agent, les paramètres imposés par l’équipe et toute valeur que vous souhaitez figer indépendamment des réponses d’installation.
+- `_bmad/config.toml` et `_bmad/custom/config.user.toml` sont **régénérés à chaque installation** à partir des réponses collectées pendant le processus d’installation. Traitez-les comme des sorties en lecture seule — les modifications directes seront écrasées à la prochaine installation.
+- `_bmad/custom/config.toml` n’est jamais modifié par l’installateur. C’est l’espace approprié pour les agents personnalisés, les overrides de descripteur d’agent, les paramètres imposés par l’équipe et toute valeur que vous souhaitez figer indépendamment des réponses d’installation.
 
 ### Exemple — Renommer un agent
 

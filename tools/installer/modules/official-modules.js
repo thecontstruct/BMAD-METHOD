@@ -893,12 +893,12 @@ class OfficialModules {
       return false;
     }
 
-    // Primary source: installer-written config.toml + config.user.toml (v6+).
-    // Both files together hold all install answers; config.user.toml carries
+    // Primary source: installer-written config.toml + custom/config.user.toml (v6+).
+    // Both files together hold all install answers; custom/config.user.toml carries
     // user-scoped keys like user_name that would otherwise be re-prompted on
     // every reinstall.
     let foundAny = false;
-    for (const fileName of ['config.toml', 'config.user.toml']) {
+    for (const fileName of ['config.toml', path.join('custom', 'config.user.toml')]) {
       const tomlPath = path.join(bmadDir, fileName);
       if (!(await fs.pathExists(tomlPath))) continue;
       try {
@@ -2199,7 +2199,7 @@ class OfficialModules {
 }
 
 /**
- * Parse a config.toml or config.user.toml written by writeCentralConfig.
+ * Parse a config.toml or custom/config.user.toml written by writeCentralConfig.
  * Only handles the subset of TOML the installer produces: [core],
  * [modules.<code>], string/bool/number scalar values. [agents.*] and other
  * sections are ignored. Returns a plain object keyed by section name where

@@ -2202,7 +2202,7 @@ class TestGlobExpansion(unittest.TestCase):
         actual = hashlib.sha256(sha_path.read_bytes()).hexdigest()
         self.assertEqual(
             actual,
-            "a4f5ccd5aa26b4dc4aa5684d016469832af31216d3745c9a25305d06e88e2595",
+            "a477ce71974b4aa6a3c4ecd5ca5ea5f6c0d66e405bd646b3fd6cd6ae1054246b",
         )
 
     # ---------- Task 6.15: runtime-variable pattern deferred ----------

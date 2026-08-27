@@ -393,7 +393,7 @@ class Installer {
 
         // Apply post-install --set TOML patches. Runs after writeCentralConfig
         // (inside generateManifests above) so the patch operates on the
-        // freshly written `_bmad/config.toml` / `_bmad/config.user.toml`.
+        // freshly written `_bmad/config.toml` / `_bmad/custom/config.user.toml`.
         // See `tools/installer/set-overrides.js` for routing rules.
         if (config.setOverrides && Object.keys(config.setOverrides).length > 0) {
           const { applySetOverrides } = require('../set-overrides');

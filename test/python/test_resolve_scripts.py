@@ -11,7 +11,7 @@ ACs 1, 2, 4, 5 are exercised here:
     `toml_layer: defaults`.
   - AC 2: user tier overrides defaults; lockfile records `toml_layer: user`.
   - AC 4: parity tests for both resolve_customization.py (3-layer) and
-    resolve_config.py (4-layer).
+    resolve_config.py (3-layer).
   - AC 5: `toml_layer` provenance is observable in the lockfile (the
     3-layer scope within resolve_customization.py's domain).
 """
@@ -135,9 +135,8 @@ class TestResolveConfigParity(unittest.TestCase):
     """AC 4: resolve_config.py CLI output equals merge_layers(...) directly."""
 
     def test_parity_with_merge_layers(self) -> None:
-        # 4-layer fixture: base-team / base-user / custom-team / custom-user.
+        # 3-layer fixture: base-team / custom-team / custom-user.
         base_team = '[core]\nproject_name = "default"\nuser_name = "Alice"\n'
-        base_user = '[core]\nuser_name = "Bob"\n'
         custom_team = '[core]\nproject_name = "team-project"\n'
         custom_user = '[core]\nuser_name = "Carol"\n'
 
@@ -146,7 +145,6 @@ class TestResolveConfigParity(unittest.TestCase):
             bmad_dir = project_root / "_bmad"
             bmad_dir.mkdir(parents=True)
             (bmad_dir / "config.toml").write_text(base_team, encoding="utf-8")
-            (bmad_dir / "config.user.toml").write_text(base_user, encoding="utf-8")
             (bmad_dir / "custom").mkdir()
             (bmad_dir / "custom" / "config.toml").write_text(custom_team, encoding="utf-8")
             (bmad_dir / "custom" / "config.user.toml").write_text(custom_user, encoding="utf-8")
@@ -156,7 +154,6 @@ class TestResolveConfigParity(unittest.TestCase):
         import tomllib
         expected = merge_layers(
             tomllib.loads(base_team),
-            tomllib.loads(base_user),
             tomllib.loads(custom_team),
             tomllib.loads(custom_user),
         )
@@ -166,16 +163,15 @@ class TestResolveConfigParity(unittest.TestCase):
         # custom-team wins on project_name (no custom-user value).
         self.assertEqual(cli_output["core"]["project_name"], "team-project")
 
-    def test_parity_aot_keyed_merge_four_layers(self) -> None:
-        # 4-layer fixture verifying AoT keyed-merge parity for resolve_config.py.
-        # base-team has two code-keyed plugins; base-user replaces "alpha" (full
+    def test_parity_aot_keyed_merge_three_layers(self) -> None:
+        # 3-layer fixture verifying AoT keyed-merge parity for resolve_config.py.
+        # base-team has two code-keyed plugins; custom-team replaces "alpha" (full
         # replacement — base `enabled` field dropped because override lacks it).
         base_team = (
             '[[plugins]]\ncode = "alpha"\nlabel = "Alpha"\nenabled = true\n\n'
             '[[plugins]]\ncode = "beta"\nlabel = "Beta"\n'
         )
-        base_user = '[[plugins]]\ncode = "alpha"\nlabel = "Alpha (custom)"\n'
-        custom_team = ""
+        custom_team = '[[plugins]]\ncode = "alpha"\nlabel = "Alpha (custom)"\n'
         custom_user = ""
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -183,7 +179,6 @@ class TestResolveConfigParity(unittest.TestCase):
             bmad_dir = project_root / "_bmad"
             bmad_dir.mkdir(parents=True)
             (bmad_dir / "config.toml").write_text(base_team, encoding="utf-8")
-            (bmad_dir / "config.user.toml").write_text(base_user, encoding="utf-8")
             (bmad_dir / "custom").mkdir()
             (bmad_dir / "custom" / "config.toml").write_text(custom_team, encoding="utf-8")
             (bmad_dir / "custom" / "config.user.toml").write_text(custom_user, encoding="utf-8")
@@ -193,7 +188,6 @@ class TestResolveConfigParity(unittest.TestCase):
         import tomllib
         expected = merge_layers(
             tomllib.loads(base_team),
-            tomllib.loads(base_user),
             tomllib.loads(custom_team),
             tomllib.loads(custom_user),
         )

@@ -289,9 +289,8 @@ Nếu bạn đang cần một "núm tinh chỉnh" chi tiết hơn nhưng workflo
 
 ```text
 _bmad/config.toml               (do installer quản lý) team scope:   câu trả lời lúc cài đặt + agent roster
-_bmad/config.user.toml          (do installer quản lý) user scope:   user_name, language, skill level
 _bmad/custom/config.toml        (do con người viết)    team overrides (commit vào git)
-_bmad/custom/config.user.toml   (do con người viết)    personal overrides (gitignore)
+_bmad/custom/config.user.toml   (do installer quản lý) user scope:   user_name, language, skill level
 ```
 
 ### Merge bốn lớp
@@ -299,8 +298,7 @@ _bmad/custom/config.user.toml   (do con người viết)    personal overrides (
 ```text
 Ưu tiên 1 (thắng): _bmad/custom/config.user.toml
 Ưu tiên 2:         _bmad/custom/config.toml
-Ưu tiên 3:         _bmad/config.user.toml
-Ưu tiên 4 (gốc):   _bmad/config.toml
+Ưu tiên 3 (gốc):   _bmad/config.toml
 ```
 
 Các quy tắc cấu trúc hoàn toàn giống phần per-skill customize: scalar override, table deep-merge, mảng dùng `code` hoặc `id` sẽ merge theo khóa, các mảng khác thì append.
@@ -309,13 +307,13 @@ Các quy tắc cấu trúc hoàn toàn giống phần per-skill customize: scala
 
 Installer sẽ phân chia câu trả lời theo `scope:` khai báo trên từng prompt trong `module.yaml`:
 
-- Các section `[core]` và `[modules.<code>]`: chứa câu trả lời khi cài. `scope = team` sẽ được ghi vào `_bmad/config.toml`; `scope = user` sẽ nằm trong `_bmad/config.user.toml`
+- Các section `[core]` và `[modules.<code>]`: chứa câu trả lời khi cài. `scope = team` sẽ được ghi vào `_bmad/config.toml`; `scope = user` sẽ nằm trong `_bmad/custom/config.user.toml`
 - Section `[agents.<code>]`: "bản chất" của agent gồm code, name, title, icon, description, team, được chưng cất từ khối `agents:` trong `module.yaml` của từng module. Phần này luôn ở scope team
 
 ### Quy tắc chỉnh sửa
 
-- `_bmad/config.toml` và `_bmad/config.user.toml` sẽ **được tạo lại sau mỗi lần cài đặt** từ những câu trả lời mà installer thu thập. Hãy coi chúng là output chỉ đọc; mọi chỉnh sửa trực tiếp sẽ bị ghi đè ở lần cài tiếp theo. Nếu muốn thay đổi bền vững một giá trị cài đặt, hãy chạy lại installer hoặc chồng giá trị đó bằng `_bmad/custom/config.toml`
-- `_bmad/custom/config.toml` và `_bmad/custom/config.user.toml` sẽ **không bao giờ** bị installer động vào. Đây mới là bề mặt đúng để thêm custom agent, override descriptor của agent, ép các thiết lập dùng chung cho team và ghim mọi giá trị bạn muốn giữ nguyên bất kể câu trả lời lúc cài là gì
+- `_bmad/config.toml` và `_bmad/custom/config.user.toml` sẽ **được tạo lại sau mỗi lần cài đặt** từ những câu trả lời mà installer thu thập. Hãy coi chúng là output chỉ đọc; mọi chỉnh sửa trực tiếp sẽ bị ghi đè ở lần cài tiếp theo.
+- `_bmad/custom/config.toml` sẽ không bị installer động vào. Đây mới là bề mặt đúng để thêm custom agent, override descriptor của agent, ép các thiết lập dùng chung cho team và ghim mọi giá trị bạn muốn giữ nguyên bất kể câu trả lời lúc cài là gì.
 
 ### Ví dụ: đổi thương hiệu cho một agent
 

@@ -443,17 +443,15 @@ def _props_hash(props: "tuple[tuple[str, Any], ...]") -> str:
 
 
 def _build_central_ctx_config(central_config_root: io.PurePosixPath) -> "dict[str, Any]":
-    """Merge the 4 central config TOML layers for ctx.config at compile time.
+    """Merge the 3 central config TOML layers for ctx.config at compile time.
 
     Layer order (lowest → highest priority):
       <root>/config.toml              (central-base-team)
-      <root>/config.user.toml         (central-base-user)
       <root>/custom/config.toml       (central-custom-team)
       <root>/custom/config.user.toml  (central-custom-user)
     """
     layer_paths = [
         central_config_root / "config.toml",
-        central_config_root / "config.user.toml",
         central_config_root / "custom" / "config.toml",
         central_config_root / "custom" / "config.user.toml",
     ]

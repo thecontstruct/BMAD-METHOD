@@ -58,7 +58,7 @@ class InstallPaths {
     return path.join(this.bmadDir, 'config.toml');
   }
   centralUserConfig() {
-    return path.join(this.bmadDir, 'config.user.toml');
+    return path.join(this.customDir, 'config.user.toml');
   }
   filesManifest() {
     return path.join(this.configDir, 'files-manifest.csv');

@@ -202,7 +202,7 @@ implementation_artifacts = "{project-root}/shared/implementation"
 document_output_language = "English"
 ```
 
-Những thiết lập cá nhân như `user_name`, `communication_language` hoặc `user_skill_level` nên vẫn nằm trong `_bmad/config.user.toml` riêng của từng developer. File chung của team không nên đụng vào các giá trị đó.
+Những thiết lập cá nhân như `user_name`, `communication_language` hoặc `user_skill_level` nên vẫn nằm trong `_bmad/custom/config.user.toml` riêng của từng developer. File chung của team không nên đụng vào các giá trị đó.
 
 **Vì sao việc này nằm ở cấu hình trung tâm thay vì per-agent customize.toml:** File per-agent chỉ định hình cách *một* agent hành xử khi nó được kích hoạt. Cấu hình trung tâm lại định hình những gì các roster consumer *nhìn thấy khi quan sát cánh đồng chung*: agent nào tồn tại, tên gì, thuộc team nào và các thiết lập cài đặt dùng chung mà toàn repo đã thống nhất. Hai bề mặt khác nhau, hai công việc khác nhau.
 

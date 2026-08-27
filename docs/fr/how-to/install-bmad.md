@@ -183,7 +183,7 @@ npx bmad-method install --yes --action update \
 
 ### Substitutions de config de module
 
-`--set <module>.<clé>=<valeur>` vous permet de définir toute option de config de module de manière non interactive. Cette option est répétable et s’adapte à chaque module — présent et futur. L’option est appliquée comme un correctif post-installation : l’installateur exécute d’abord son flux normal, puis `--set` insère ou met à jour chaque valeur dans `_bmad/config.toml` (portée équipe) ou `_bmad/config.user.toml` (portée utilisateur), et dans `_bmad/<module>/config.yaml` pour que les valeurs déclarées soient conservées à la prochaine installation.
+`--set <module>.<clé>=<valeur>` vous permet de définir toute option de config de module de manière non interactive. Cette option est répétable et s’adapte à chaque module — présent et futur. L’option est appliquée comme un correctif post-installation : l’installateur exécute d’abord son flux normal, puis `--set` insère ou met à jour chaque valeur dans `_bmad/config.toml` (portée équipe) ou `_bmad/custom/config.user.toml` (portée utilisateur), et dans `_bmad/<module>/config.yaml` pour que les valeurs déclarées soient conservées à la prochaine installation.
 
 **Exemple — installer bmm avec des connaissances projet et un niveau de compétence explicites :**
 
@@ -205,7 +205,7 @@ npx bmad-method install --list-options bmm
 
 **Comment ça fonctionne :**
 
-- **Routage.** L’étape de correctif cherche `[modules.<module>] <clé>` (ou `[core] <clé>`) dans `config.user.toml` en premier ; si elle y est trouvée, elle met à jour ce fichier. Sinon elle écrit dans le `config.toml` de portée équipe. Ainsi, les clés de portée utilisateur (ex. `core.user_name`, `bmm.user_skill_level`) finissent dans `config.user.toml` et les clés de portée équipe dans `config.toml`, correspondant à la partition utilisée par l’installateur.
+- **Routage.** L’étape de correctif cherche `[modules.<module>] <clé>` (ou `[core] <clé>`) dans `custom/config.user.toml` en premier ; si elle y est trouvée, elle met à jour ce fichier. Sinon elle écrit dans le `config.toml` de portée équipe. Ainsi, les clés de portée utilisateur (ex. `core.user_name`, `bmm.user_skill_level`) finissent dans `custom/config.user.toml` et les clés de portée équipe dans `config.toml`, correspondant à la partition utilisée par l’installateur.
 - **Valeurs littérales.** La valeur est écrite exactement comme vous l’avez fournie — aucun rendu de template `result:`. Pour obtenir la valeur résolue (ex. `{project-root}/research`), passez-la explicitement : `--set bmm.project_knowledge='{project-root}/research'`.
 - **Persistance, clés déclarées.** Les valeurs pour les clés déclarées dans `module.yaml` sont conservées entre les installations car elles sont aussi écrites dans `_bmad/<module>/config.yaml`, que l’installateur lit comme valeur par défaut de l’invite lors de la prochaine exécution.
 - **Persistance, clés non déclarées.** Une valeur pour une clé que le schéma du module ne déclare pas est enregistrée dans `config.toml` pour l’installation courante mais ne sera pas réécrite à la prochaine installation (le partitionneur strict au schéma du manifeste ignore les clés inconnues). Repassez `--set` pour qu’elle soit persistante, ou éditez `_bmad/config.toml` directement.

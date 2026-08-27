@@ -1,5 +1,5 @@
 // `--set <module>.<key>=<value>` is a post-install patch. The installer runs
-// its normal flow and writes `_bmad/config.toml`, `_bmad/config.user.toml`,
+// its normal flow and writes `_bmad/config.toml`, `_bmad/custom/config.user.toml`,
 // and `_bmad/<module>/config.yaml`; afterwards `applySetOverrides` upserts
 // each override into those files.
 //
@@ -198,7 +198,7 @@ function escapeRegExp(s) {
  * Look up `[section] key` in a TOML file. Returns true if the file exists,
  * the section is present, and `key` is set within it. Used by
  * `applySetOverrides` to route an override to the file that already owns
- * the key (so user-scope keys land in `config.user.toml`, team-scope keys
+ * the key (so user-scope keys land in `custom/config.user.toml`, team-scope keys
  * land in `config.toml`).
  */
 async function tomlHasKey(filePath, section, key) {
@@ -220,7 +220,7 @@ async function tomlHasKey(filePath, section, key) {
  * installer. Called at the end of an install / quick-update.
  *
  * Routing per (module, key):
- *   1. If `_bmad/config.user.toml` already has `[section] key`, update there
+ *   1. If `_bmad/custom/config.user.toml` already has `[section] key`, update there
  *      (user-scope key like `core.user_name`, `bmm.user_skill_level`).
  *   2. Otherwise update `_bmad/config.toml` (team scope, the default).
  *
@@ -239,7 +239,7 @@ async function applySetOverrides(overrides, bmadDir) {
   if (!overrides || typeof overrides !== 'object') return applied;
 
   const teamPath = path.join(bmadDir, 'config.toml');
-  const userPath = path.join(bmadDir, 'config.user.toml');
+  const userPath = path.join(bmadDir, 'custom', 'config.user.toml');
 
   for (const moduleCode of Object.keys(overrides)) {
     // Skip overrides for modules not actually installed. The installer writes
@@ -269,7 +269,8 @@ async function applySetOverrides(overrides, bmadDir) {
       if (await fs.pathExists(targetPath)) {
         content = await fs.readFile(targetPath, 'utf8');
       } else {
-        content = '# Personal overrides for _bmad/config.toml.\n';
+        await fs.ensureDir(path.dirname(targetPath));
+        content = '# Installer-managed personal config for _bmad/config.toml.\n';
       }
 
       const next = upsertTomlKey(content, section, key, valueToml);

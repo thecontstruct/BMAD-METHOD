@@ -389,13 +389,12 @@ def _emit_jit_event(event: dict) -> None:
 
 
 def _build_jit_ctx_config(root: str) -> dict:
-    """Four-layer central config merge for JIT ctx.config.
+    """Three-layer central config merge for JIT ctx.config.
     Uses bmad_compile.toml_merge.merge_layers — not the local _deep_merge."""
     from bmad_compile.toml_merge import merge_layers, load_toml_file
     bmad_dir = posixpath.join(root, "_bmad")
     return merge_layers(
         load_toml_file(posixpath.join(bmad_dir, "config.toml")),
-        load_toml_file(posixpath.join(bmad_dir, "config.user.toml")),
         load_toml_file(posixpath.join(bmad_dir, "custom", "config.toml")),
         load_toml_file(posixpath.join(bmad_dir, "custom", "config.user.toml")),
     )

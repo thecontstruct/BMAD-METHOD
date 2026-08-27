@@ -97,7 +97,7 @@ Activation is complete. If `activation_steps_prepend` or `activation_steps_appen
 
 ## Required Inputs
 
-- `agent_roster` = resolved via `python3 {project-root}/_bmad/scripts/resolve_config.py --project-root {project-root} --key agents` (merges four layers in order: `_bmad/config.toml`, `_bmad/config.user.toml`, `_bmad/custom/config.toml`, `_bmad/custom/config.user.toml`)
+- `agent_roster` = resolved via `python3 {project-root}/_bmad/scripts/resolve_config.py --project-root {project-root} --key agents` (merges three layers in order: `_bmad/config.toml`, `_bmad/custom/config.toml`, `_bmad/custom/config.user.toml`)
 
 ## Execution
 
@@ -1531,4 +1531,3 @@ Charlie (Senior Dev): "Time to knock out that prep work."
 <guideline>Document everything - retrospective insights are valuable for future reference</guideline>
 <guideline>Two-part structure ensures both reflection AND preparation</guideline>
 </facilitation-guidelines>
-

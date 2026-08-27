@@ -45,7 +45,7 @@ When invoked from another prompt or process:
 python3 {project-root}/_bmad/scripts/resolve_config.py --project-root {project-root} --key agents
 ```
 
-The resolver merges four layers in order: `_bmad/config.toml` (installer base, team-scoped), `_bmad/config.user.toml` (installer base, user-scoped), `_bmad/custom/config.toml` (team overrides), and `_bmad/custom/config.user.toml` (personal overrides). Each entry under `agents` is keyed by the agent's `code` and carries `name`, `title`, `icon`, `description`, `module`, and `team`.
+The resolver merges three layers in order: `_bmad/config.toml` (installer base, team-scoped), `_bmad/custom/config.toml` (team overrides), and `_bmad/custom/config.user.toml` (personal installer config, gitignored). Each entry under `agents` is keyed by the agent's `code` and carries `name`, `title`, `icon`, `description`, `module`, and `team`.
 
 #### CSV Structure
 

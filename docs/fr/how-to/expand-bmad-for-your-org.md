@@ -195,7 +195,7 @@ implementation_artifacts = "{project-root}/shared/implementation"
 document_output_language = "English"
 ```
 
-Les paramètres personnels comme `user_name`, `communication_language` ou `user_skill_level` restent dans leur propre fichier `_bmad/config.user.toml` de chaque développeur. Le fichier d’équipe ne doit pas les modifier.
+Les paramètres personnels comme `user_name`, `communication_language` ou `user_skill_level` restent dans leur propre fichier `_bmad/custom/config.user.toml` de chaque développeur. Le fichier d’équipe ne doit pas les modifier.
 
 **Pourquoi la configuration centrale vs le customize.toml par agent :** Les fichiers par agent façonnent la façon dont *un seul* agent se comporte quand il s’active. La configuration centrale façonne ce que les consommateurs du registre *voient* : quels agents existent, comment ils s’appellent, à quelle équipe ils appartiennent, et les paramètres d’installation partagés sur lesquels tout le dépôt s’accorde. Deux surfaces, des rôles différents.
 

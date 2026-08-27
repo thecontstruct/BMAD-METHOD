@@ -420,14 +420,15 @@ class ManifestGenerator {
 
   /**
    * Write central _bmad/config.toml with [core], [modules.<code>], [agents.<code>] tables.
-   * Install-owned. Team-scope answers → config.toml; user-scope answers → config.user.toml.
-   * Both files are regenerated on every install. User overrides live in
-   * _bmad/custom/config.toml and _bmad/custom/config.user.toml (never touched by installer).
+   * Install-owned. Team-scope answers → config.toml; user-scope answers →
+   * custom/config.user.toml. Both files are regenerated on every install.
+   * Team overrides live in _bmad/custom/config.toml (never touched by installer).
    * @returns {string[]} Paths to the written config files
    */
   async writeCentralConfig(bmadDir, moduleConfigs) {
     const teamPath = path.join(bmadDir, 'config.toml');
-    const userPath = path.join(bmadDir, 'config.user.toml');
+    const userPath = path.join(bmadDir, 'custom', 'config.user.toml');
+    await fs.ensureDir(path.dirname(userPath));
 
     // Load each module's source module.yaml to determine scope per prompt key.
     // Default scope is 'team' when the prompt doesn't declare one.
@@ -503,8 +504,8 @@ class ManifestGenerator {
       '# answers are remembered as defaults). To pin a value regardless of',
       '# install answers, or to add custom agents / override descriptors, use:',
       '#   _bmad/custom/config.toml       (team, committed)',
-      '#   _bmad/custom/config.user.toml  (personal, gitignored)',
-      '# Those files are never touched by the installer.',
+      '#   _bmad/custom/config.user.toml  (personal, gitignored; install answers)',
+      '# The team override file is never touched by the installer.',
       '# ─────────────────────────────────────────────────────────────────',
       '',
     ];
@@ -517,8 +518,7 @@ class ManifestGenerator {
       '# Direct edits to this file will be overwritten on the next install.',
       '# To change an answer durably, re-run the installer (your prior answers',
       '# are remembered as defaults). For pinned overrides or custom sections',
-      '# the installer does not know about, use _bmad/custom/config.user.toml',
-      '# — it is never touched by the installer.',
+      '# the installer does not know about, use _bmad/custom/config.toml.',
       '# ─────────────────────────────────────────────────────────────────',
       '',
     ];
@@ -620,8 +620,8 @@ class ManifestGenerator {
   }
 
   /**
-   * Create empty _bmad/custom/config.toml and _bmad/custom/config.user.toml stubs
-   * on first install only. Installer never touches these files again after creation.
+   * Create an empty team override stub on first install. The user config is
+   * written by writeCentralConfig, so it must not be replaced by a stub.
    */
   async ensureCustomConfigStubs(bmadDir) {
     const customDir = path.join(bmadDir, 'custom');
@@ -638,15 +638,6 @@ class ManifestGenerator {
           '#',
           '# [agents.bmad-agent-pm]',
           '# description = "Prefers short, bulleted PRDs over narrative drafts."',
-          '',
-        ],
-      },
-      {
-        file: path.join(customDir, 'config.user.toml'),
-        header: [
-          '# Personal overrides for _bmad/config.toml.',
-          '# NOT committed (gitignored) — applies only to your local install.',
-          '# Wins over both base config and team overrides.',
           '',
         ],
       },

@@ -1817,7 +1817,7 @@ async function runTests() {
   {
     // Use the real src/ tree (core-skills + bmm-skills module.yaml are read via
     // getModulePath). Only the destination bmadDir is a temp dir, which the
-    // installer writes config.toml / config.user.toml / custom/ into.
+    // installer writes config.toml and custom/config.user.toml into.
     const tempBmadDir35 = await fs.mkdtemp(path.join(os.tmpdir(), 'bmad-central-config-'));
 
     try {
@@ -1874,10 +1874,10 @@ async function runTests() {
       assert(maryEntry && maryEntry.module === 'bmm', 'Agent entry module derives from owning module');
       assert(maryEntry && maryEntry.team === 'software-development', 'Agent entry carries explicit team from module.yaml');
 
-      // writeCentralConfig produces the two root files
+      // writeCentralConfig produces the team file and personal custom file.
       const [teamPath, userPath] = await generator35.writeCentralConfig(tempBmadDir35, moduleConfigs);
       assert(teamPath === path.join(tempBmadDir35, 'config.toml'), 'writeCentralConfig returns team config path');
-      assert(userPath === path.join(tempBmadDir35, 'config.user.toml'), 'writeCentralConfig returns user config path');
+      assert(userPath === path.join(tempBmadDir35, 'custom', 'config.user.toml'), 'writeCentralConfig returns user config path');
       assert(await fs.pathExists(teamPath), 'config.toml is written to disk');
       assert(await fs.pathExists(userPath), 'config.user.toml is written to disk');
 
@@ -1957,24 +1957,21 @@ async function runTests() {
     try {
       const generator36 = new ManifestGenerator();
 
-      // First install: both stubs are created
+      // First install: the team override stub is created.
       await generator36.ensureCustomConfigStubs(tempBmadDir36);
 
       const teamStub = path.join(tempBmadDir36, 'custom', 'config.toml');
       const userStub = path.join(tempBmadDir36, 'custom', 'config.user.toml');
 
       assert(await fs.pathExists(teamStub), 'ensureCustomConfigStubs creates custom/config.toml');
-      assert(await fs.pathExists(userStub), 'ensureCustomConfigStubs creates custom/config.user.toml');
+      assert(
+        !(await fs.pathExists(userStub)),
+        'ensureCustomConfigStubs leaves installer-managed custom/config.user.toml to writeCentralConfig',
+      );
 
-      // User writes content into the stub
-      const userEdit = '# User edit\n[agents.kirk]\ndescription = "Enterprise captain"\n';
-      await fs.writeFile(userStub, userEdit);
-
-      // Second install: stubs are NOT overwritten
+      // Second install: the team stub is not overwritten.
       await generator36.ensureCustomConfigStubs(tempBmadDir36);
-
-      const preservedContent = await fs.readFile(userStub, 'utf8');
-      assert(preservedContent === userEdit, 'ensureCustomConfigStubs does not overwrite user-edited custom/config.user.toml');
+      assert(await fs.pathExists(teamStub), 'ensureCustomConfigStubs preserves custom/config.toml');
     } finally {
       await fs.remove(tempBmadDir36).catch(() => {});
     }
@@ -3218,8 +3215,9 @@ async function runTests() {
         '[core]\nproject_name = "demo"\n\n[modules.bmm]\nproject_knowledge = "{project-root}/docs"\n',
         'utf8',
       );
+      await fs.ensureDir(path.join(bmadDir, 'custom'));
       await fs.writeFile(
-        path.join(bmadDir, 'config.user.toml'),
+        path.join(bmadDir, 'custom', 'config.user.toml'),
         '[core]\nuser_name = "OldName"\n\n[modules.bmm]\nuser_skill_level = "intermediate"\n',
         'utf8',
       );
@@ -3241,7 +3239,7 @@ async function runTests() {
       const applied = await applySetOverrides(overrides, bmadDir);
 
       const team = await fs.readFile(path.join(bmadDir, 'config.toml'), 'utf8');
-      const user = await fs.readFile(path.join(bmadDir, 'config.user.toml'), 'utf8');
+      const user = await fs.readFile(path.join(bmadDir, 'custom', 'config.user.toml'), 'utf8');
 
       assert(user.includes('user_name = "Brian"'), 'applySetOverrides updates user-scope key in config.user.toml');
       assert(user.includes('user_skill_level = "expert"'), 'applySetOverrides updates pre-existing user-scope key in config.user.toml');
@@ -3275,7 +3273,7 @@ async function runTests() {
       const team = await fs.readFile(path.join(bmadDir, 'config.toml'), 'utf8');
       assert(team.includes('user_name = "Updated"'), 'applySetOverrides updates team key when user.toml is absent');
       assert(
-        !(await fs.pathExists(path.join(bmadDir, 'config.user.toml'))),
+        !(await fs.pathExists(path.join(bmadDir, 'custom', 'config.user.toml'))),
         'applySetOverrides does not create config.user.toml unnecessarily',
       );
       await fs.remove(tmp).catch(() => {});

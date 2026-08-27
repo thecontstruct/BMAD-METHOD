@@ -285,22 +285,20 @@ If you need a fine-grained knob that isn't exposed yet, either use `activation_s
 
 ## Central Configuration
 
-Per-skill `customize.toml` covers **deep behavior** (hooks, menus, persistent_facts, persona overrides for a single agent or workflow). A separate surface covers **cross-cutting state** — install answers and the agent roster that external skills like `bmad-party-mode`, `bmad-retrospective`, and `bmad-advanced-elicitation` consume. That surface lives in four TOML files at project root:
+Per-skill `customize.toml` covers **deep behavior** (hooks, menus, persistent_facts, persona overrides for a single agent or workflow). A separate surface covers **cross-cutting state** — install answers and the agent roster that external skills like `bmad-party-mode`, `bmad-retrospective`, and `bmad-advanced-elicitation` consume. That surface lives in three TOML files at project root:
 
 ```text
 _bmad/config.toml               (installer-owned)  team scope:   install answers + agent roster
-_bmad/config.user.toml          (installer-owned)  user scope:   user_name, language, skill level
 _bmad/custom/config.toml        (human-authored)   team overrides (committed to git)
-_bmad/custom/config.user.toml   (human-authored)   personal overrides (gitignored)
+_bmad/custom/config.user.toml   (installer-owned)  user scope:   user_name, language, skill level
 ```
 
-### Four-Layer Merge
+### Three-Layer Merge
 
 ```text
 Priority 1 (wins): _bmad/custom/config.user.toml
 Priority 2:        _bmad/custom/config.toml
-Priority 3:        _bmad/config.user.toml
-Priority 4 (base): _bmad/config.toml
+Priority 3 (base): _bmad/config.toml
 ```
 
 Same structural rules as per-skill customize (scalars override, tables deep-merge, `code`/`id`-keyed arrays merge by key, other arrays append).
@@ -309,13 +307,13 @@ Same structural rules as per-skill customize (scalars override, tables deep-merg
 
 The installer partitions answers by the `scope:` declared on each prompt in `module.yaml`:
 
-- `[core]` and `[modules.<code>]` sections — install answers. Scope `team` lands in `_bmad/config.toml`; scope `user` lands in `_bmad/config.user.toml`.
+- `[core]` and `[modules.<code>]` sections — install answers. Scope `team` lands in `_bmad/config.toml`; scope `user` lands in `_bmad/custom/config.user.toml`.
 - `[agents.<code>]` — agent essence (code, name, title, icon, description, team) distilled from each module's `module.yaml` `agents:` block. Always team-scoped.
 
 ### Editing Rules
 
-- `_bmad/config.toml` and `_bmad/config.user.toml` are **regenerated every install** from the answers collected during the installer flow. Treat them as read-only outputs — direct edits will be overwritten on the next install. To change an install answer durably, re-run the installer (it remembers your prior answers as defaults) or shadow the value in `_bmad/custom/config.toml`.
-- `_bmad/custom/config.toml` and `_bmad/custom/config.user.toml` are **never touched** by the installer. This is the correct surface for custom agents, agent descriptor overrides, team-enforced settings, and any value you want to pin regardless of install answers.
+- `_bmad/config.toml` and `_bmad/custom/config.user.toml` are **regenerated every install** from the answers collected during the installer flow. Treat them as read-only outputs — direct edits will be overwritten on the next install.
+- `_bmad/custom/config.toml` is never touched by the installer. This is the correct surface for custom agents, agent descriptor overrides, team-enforced settings, and any value you want to pin regardless of install answers.
 
 ### Example — Rebrand an Agent
 
