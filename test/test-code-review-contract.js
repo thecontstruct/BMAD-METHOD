@@ -29,8 +29,14 @@ const checks = [
     'code review has its default review layers',
     ['blind-hunter', 'edge-case-hunter', 'verification-gap', 'acceptance-auditor'].every((id) => customize.includes(`id = "${id}"`)),
   ],
-  ['review layers receive a staged diff path rather than repeated diff text', gather.includes('diff_file') && customize.includes('{diff_file}') && !customize.includes('{diff_output}')],
-  ['each review finding is verified before grouping or dismissal', triage.includes('before grouping') && triage.includes('never drop a finding silently')],
+  [
+    'review layers receive a staged diff path rather than repeated diff text',
+    gather.includes('diff_file') && customize.includes('{diff_file}') && !customize.includes('{diff_output}'),
+  ],
+  [
+    'each review finding is verified before grouping or dismissal',
+    triage.includes('before grouping') && triage.includes('never drop a finding silently'),
+  ],
 ];
 
 let failed = 0;

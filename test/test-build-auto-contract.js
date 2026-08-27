@@ -70,15 +70,20 @@ test('build-auto steps preserve their frontmatter boundaries', () => {
 
 test('implementation handoff stays thin and spec-led', () => {
   const content = read('src/bmm-skills/ship/bmad-build-auto/customize.toml');
-  assert(content.includes('Read {spec_file} fully and implement it — the spec is the sole source of truth.'),
-    'handoff must make the spec the implementation source of truth');
-  assert(content.includes('Load every file listed in its frontmatter `context:` before you start.'),
-    'handoff must load declared context');
-  assert(content.includes('report what you changed, how you verified it, and anything left incomplete or risky'),
-    'handoff must request a concise completion report');
+  assert(
+    content.includes('Read {spec_file} fully and implement it — the spec is the sole source of truth.'),
+    'handoff must make the spec the implementation source of truth',
+  );
+  assert(content.includes('Load every file listed in its frontmatter `context:` before you start.'), 'handoff must load declared context');
+  assert(
+    content.includes('report what you changed, how you verified it, and anything left incomplete or risky'),
+    'handoff must request a concise completion report',
+  );
   assert(!content.includes('Guardrails:'), 'handoff must not re-expand speculative guardrails');
-  assert(!content.includes('Spec Change Log entries are binding constraints'),
-    'handoff must not duplicate spec detail into dispatch instructions');
+  assert(
+    !content.includes('Spec Change Log entries are binding constraints'),
+    'handoff must not duplicate spec detail into dispatch instructions',
+  );
 });
 
 test('review step safely records deferred findings only in the spec', () => {
