@@ -126,9 +126,9 @@ Vždy začněte nový chat pro každý workflow. Tím předejdete problémům s 
 Projděte fázemi 1–3. **Pro každý workflow používejte nové chaty.**
 
 :::tip[Kontext projektu (volitelné)]
-Před začátkem zvažte vytvoření `project-context.md` pro dokumentaci vašich technických preferencí a pravidel implementace. Tím zajistíte, že všichni AI agenti budou dodržovat vaše konvence v průběhu celého projektu.
+Před začátkem zvažte vytvoření `AGENTS.md` pro dokumentaci vašich technických preferencí a pravidel implementace. Tím zajistíte, že všichni AI agenti budou dodržovat vaše konvence v průběhu celého projektu.
 
-Vytvořte ho ručně na `_bmad-output/project-context.md` nebo ho vygenerujte po architektuře pomocí `bmad-generate-project-context`. [Zjistit více](../explanation/project-context.md).
+Vytvořte ho ručně na `AGENTS.md` nebo ho vygenerujte po architektuře pomocí `bmad-project-context`. [Zjistit více](../explanation/project-context.md).
 :::
 
 ### Fáze 1: Analýza (volitelná)
@@ -216,7 +216,7 @@ váš-projekt/
 │   │   └── epics/                           # Soubory epiců a stories
 │   ├── implementation-artifacts/
 │   │   └── sprint-status.yaml               # Sledování sprintu
-│   └── project-context.md                   # Pravidla implementace (volitelné)
+│   └── AGENTS.md                   # Pravidla implementace (volitelné)
 └── ...
 ```
 
@@ -227,7 +227,7 @@ váš-projekt/
 | **`bmad-help`** ⭐                    | `bmad-help`                               | Jakýkoli  | **Váš inteligentní průvodce — ptejte se na cokoli!** |
 | `bmad-create-prd`                     | `bmad-create-prd`                         | PM        | Vytvoření dokumentu požadavků (PRD)             |
 | `bmad-create-architecture`            | `bmad-create-architecture`                | Architect | Vytvoření dokumentu architektury                |
-| `bmad-generate-project-context`       | `bmad-generate-project-context`           | Analyst   | Vytvoření souboru kontextu projektu             |
+| `bmad-project-context`       | `bmad-project-context`           | Analyst   | Vytvoření souboru kontextu projektu             |
 | `bmad-create-epics-and-stories`       | `bmad-create-epics-and-stories`           | PM        | Rozklad PRD na epicy                            |
 | `bmad-sprint-planning`                | `bmad-sprint-planning`                    | DEV       | Kontrola připravenosti a sledování sprintu      |
 | `bmad-create-story`                   | `bmad-create-story`                       | DEV       | Vytvoření souboru story                         |

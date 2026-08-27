@@ -1,11 +1,11 @@
 ---
 title: "Správa kontextu projektu"
-description: Vytvoření a údržba project-context.md pro vedení AI agentů
+description: Vytvoření a údržba AGENTS.md pro vedení AI agentů
 sidebar:
   order: 7
 ---
 
-Použijte soubor `project-context.md` k zajištění toho, aby AI agenti dodržovali technické preference a pravidla implementace vašeho projektu ve všech workflow. Aby byl vždy dostupný, můžete také přidat řádek `Important project context and conventions are located in [cesta k project context]/project-context.md` do souboru kontextu nebo pravidel vašeho nástroje (jako je `AGENTS.md`).
+Použijte soubor `AGENTS.md` k zajištění toho, aby AI agenti dodržovali technické preference a pravidla implementace vašeho projektu ve všech workflow. Aby byl vždy dostupný, můžete také přidat řádek `Important project context and conventions are located in [cesta k project context]/AGENTS.md` do souboru kontextu nebo pravidel vašeho nástroje (jako je `AGENTS.md`).
 
 :::note[Předpoklady]
 - BMad Method nainstalován
@@ -31,11 +31,11 @@ Použijte soubor `project-context.md` k zajištění toho, aby AI agenti dodržo
 
 ### Možnost A: Ruční vytvoření
 
-Vytvořte soubor na `_bmad-output/project-context.md`:
+Vytvořte soubor na `AGENTS.md`:
 
 ```bash
 mkdir -p _bmad-output
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
 Přidejte váš technologický stack a pravidla implementace:
@@ -77,7 +77,7 @@ sections_completed: ['technology_stack', 'critical_rules']
 Spusťte workflow v novém chatu:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Workflow skenuje váš dokument architektury a soubory projektu a generuje kontextový soubor zachycující učiněná rozhodnutí.
@@ -87,7 +87,7 @@ Workflow skenuje váš dokument architektury a soubory projektu a generuje konte
 Pro existující projekty spusťte:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Workflow analyzuje vaši kódovou bázi, identifikuje konvence a vygeneruje kontextový soubor, který můžete zkontrolovat a upřesnit.
@@ -105,7 +105,7 @@ Ručně upravte pro doplnění chybějícího nebo odstranění nepřesností.
 
 ## Co získáte
 
-Soubor `project-context.md`, který:
+Soubor `AGENTS.md`, který:
 
 - Zajistí, že všichni agenti dodržují stejné konvence
 - Zabrání nekonzistentním rozhodnutím napříč stories

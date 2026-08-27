@@ -1,11 +1,11 @@
 ---
 title: "Project Context"
-description: How project-context.md guides AI agents with your project's rules and preferences
+description: How AGENTS.md guides AI agents with your project's rules and preferences
 sidebar:
   order: 11
 ---
 
-The `project-context.md` file is your project's implementation guide for AI agents. Similar to a "constitution" in other development systems, it captures the rules, patterns, and preferences that ensure consistent code generation across all workflows.
+The `AGENTS.md` file is your project's implementation guide for AI agents. Similar to a "constitution" in other development systems, it captures the rules, patterns, and preferences that ensure consistent code generation across all workflows.
 
 ## What It Does
 
@@ -14,11 +14,11 @@ AI agents make implementation decisions constantly — which patterns to follow,
 - Make inconsistent decisions across different stories
 - Miss project-specific requirements or constraints
 
-The `project-context.md` file solves this by documenting what agents need to know in a concise, LLM-optimized format.
+The `AGENTS.md` file solves this by documenting what agents need to know in a concise, LLM-optimized format.
 
 ## How It Works
 
-Every implementation workflow automatically loads `project-context.md` if it exists. The architect workflow also loads it to respect your technical preferences when designing the architecture.
+Agents load `AGENTS.md` as repository instructions. The Project Context skill keeps a small, verified block there so those rules remain available across planning and implementation.
 
 **Loaded by these workflows:**
 - `bmad-create-architecture` — respects technical preferences during solutioning
@@ -28,13 +28,13 @@ Every implementation workflow automatically loads `project-context.md` if it exi
 
 ## When to Create It
 
-The `project-context.md` file is useful at any stage of a project:
+The `AGENTS.md` file is useful at any stage of a project:
 
 | Scenario | When to Create | Purpose |
 |----------|----------------|---------|
 | **New project, before architecture** | Manually, before `bmad-create-architecture` | Document your technical preferences so the architect respects them |
-| **New project, after architecture** | Via `bmad-generate-project-context` or manually | Capture architecture decisions for implementation agents |
-| **Existing project** | Via `bmad-generate-project-context` | Discover existing patterns so agents follow established conventions |
+| **New project, after architecture** | Via `bmad-project-context` or manually | Capture architecture decisions for implementation agents |
+| **Existing project** | Via `bmad-project-context` | Discover existing patterns so agents follow established conventions |
 | **Quick Flow project** | Before or during `bmad-build` | Ensure quick implementation respects your patterns |
 
 :::tip[Recommended]
@@ -93,39 +93,37 @@ You have three options:
 
 ### Manual Creation
 
-Create the file at `_bmad-output/project-context.md` and add your rules:
+Create `AGENTS.md` at the repository root and add your rules:
 
 ```bash
-# In your project root
-mkdir -p _bmad-output
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
 Edit it with your technology stack and implementation rules. The architect and implementation workflows will automatically find and load it.
 
 ### Generate After Architecture
 
-Run the `bmad-generate-project-context` workflow after completing your architecture:
+Run the `bmad-project-context` workflow after completing your architecture:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
-This scans your architecture document and project files to generate a context file capturing the decisions made.
+This reviews your architecture and repository, then proposes a verified managed block in `AGENTS.md` for your approval.
 
 ### Generate for Existing Projects
 
-For existing projects, run `bmad-generate-project-context` to discover existing patterns:
+For existing projects, run `bmad-project-context` to discover existing patterns:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
-The workflow analyzes your codebase to identify conventions, then generates a context file you can review and refine.
+The workflow analyzes your codebase to identify conventions, then proposes the corresponding `AGENTS.md` rules for review.
 
 ## Why It Matters
 
-Without `project-context.md`, agents make assumptions that may not match your project:
+Without `AGENTS.md`, agents make assumptions that may not match your project:
 
 | Without Context | With Context |
 |----------------|--------------|
@@ -141,15 +139,15 @@ This is especially important for:
 
 ## Editing and Updating
 
-The `project-context.md` file is a living document. Update it when:
+The `AGENTS.md` file is a living document. Update it when:
 
 - Architecture decisions change
 - New conventions are established
 - Patterns evolve during implementation
 - You identify gaps from agent behavior
 
-You can edit it manually at any time, or re-run `bmad-generate-project-context` to update it after significant changes.
+You can edit it manually at any time, or re-run `bmad-project-context` to update it after significant changes.
 
 :::note[File Location]
-The default location is `_bmad-output/project-context.md`. Workflows search for it there, and also check `**/project-context.md` anywhere in your project.
+The primary location is `AGENTS.md` at the repository root. Nested `AGENTS.md` files may carry rules for their subtrees.
 :::

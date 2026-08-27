@@ -24,7 +24,7 @@ activation_steps_append = []
 # Each entry is either a literal sentence, a skill prefixed with `skill:`, or a `file:`-prefixed path/glob
 # whose contents are loaded as facts.
 #
-# Default loads project-context.md if bmad-generate-project-context has produced one — this gives
+# Default loads AGENTS.md if bmad-project-context has produced one — this gives
 # the facilitator persistent awareness of the project's tech, domain, and constraints without
 # re-asking. Common opt-ins (set in team/user override TOML):
 #   "skill:acme-co:terms-and-conditions"                                      # a skill that contains some relevant info

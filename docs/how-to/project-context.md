@@ -1,11 +1,11 @@
 ---
 title: 'Manage Project Context'
-description: Create and maintain project-context.md to guide AI agents
+description: Create and maintain AGENTS.md to guide AI agents
 sidebar:
   order: 8
 ---
 
-Use the `project-context.md` file to ensure AI agents follow your project's technical preferences and implementation rules throughout all workflows. To make sure this is always available, you can also add the line `Important project context and conventions are located in [path to project context]/project-context.md` to your tools context or always rules file (such as `AGENTS.md`)
+Use the repository-root `AGENTS.md` file to ensure AI agents follow your project's technical preferences and implementation rules. `bmad-project-context` maintains a small verified block there; keep any other project instructions in the same file.
 
 :::note[Prerequisites]
 
@@ -32,11 +32,10 @@ Use the `project-context.md` file to ensure AI agents follow your project's tech
 
 ### Option A: Manual Creation
 
-Create the file at `_bmad-output/project-context.md`:
+Create the file at your repository root:
 
 ```bash
-mkdir -p _bmad-output
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
 Add your technology stack and implementation rules:
@@ -81,20 +80,20 @@ sections_completed: ['technology_stack', 'critical_rules']
 Run the workflow in a fresh chat:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
-The workflow scans your architecture document and project files to generate a context file capturing the decisions made.
+The workflow scans your architecture document and project files, then proposes a verified managed block in `AGENTS.md` for your approval.
 
 ### Option C: Generate for Existing Projects
 
 For existing projects, run:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
-The workflow analyzes your codebase to identify conventions, then generates a context file you can review and refine.
+The workflow analyzes your codebase to identify conventions, then proposes `AGENTS.md` rules you can review and refine.
 
 ## Step 3: Verify Content
 
@@ -109,7 +108,7 @@ Edit manually to add anything missing or remove inaccuracies.
 
 ## What You Get
 
-A `project-context.md` file that:
+A `AGENTS.md` file that:
 
 - Ensures all agents follow the same conventions
 - Prevents inconsistent decisions across stories

@@ -26,13 +26,13 @@ Nếu bạn đã hoàn thành toàn bộ epic và story trong PRD theo quy trìn
 ## Bước 2: Tạo Project Context
 
 :::tip[Khuyến dùng cho dự án hiện có]
-Hãy tạo `project-context.md` để ghi lại các pattern và quy ước trong codebase hiện tại. Điều này giúp các agent AI tuân theo các thực hành sẵn có khi thực hiện thay đổi.
+Hãy tạo `AGENTS.md` để ghi lại các pattern và quy ước trong codebase hiện tại. Điều này giúp các agent AI tuân theo các thực hành sẵn có khi thực hiện thay đổi.
 :::
 
 Chạy workflow tạo project context:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Workflow này sẽ quét codebase để nhận diện:
@@ -42,7 +42,7 @@ Workflow này sẽ quét codebase để nhận diện:
 - Cách tiếp cận kiểm thử
 - Các pattern đặc thù framework
 
-Bạn có thể xem lại và chỉnh sửa tệp được tạo, hoặc tự tạo tệp tại `_bmad-output/project-context.md` nếu muốn.
+Bạn có thể xem lại và chỉnh sửa tệp được tạo, hoặc tự tạo tệp tại `AGENTS.md` nếu muốn.
 
 [Tìm hiểu thêm về project context](../explanation/project-context.md)
 

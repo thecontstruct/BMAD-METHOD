@@ -1,11 +1,11 @@
 ---
 title: "Kontext projektu"
-description: Jak project-context.md vede AI agenty s pravidly a preferencemi vašeho projektu
+description: Jak AGENTS.md vede AI agenty s pravidly a preferencemi vašeho projektu
 sidebar:
   order: 9
 ---
 
-Soubor `project-context.md` je implementační průvodce vašeho projektu pro AI agenty. Podobně jako „ústava“ v jiných vývojových systémech zachycuje pravidla, vzory a preference, které zajišťují konzistentní generování kódu napříč všemi workflow.
+Soubor `AGENTS.md` je implementační průvodce vašeho projektu pro AI agenty. Podobně jako „ústava“ v jiných vývojových systémech zachycuje pravidla, vzory a preference, které zajišťují konzistentní generování kódu napříč všemi workflow.
 
 ## Co dělá
 
@@ -14,11 +14,11 @@ AI agenti neustále dělají implementační rozhodnutí — jaké vzory násled
 - Dělat nekonzistentní rozhodnutí napříč různými stories
 - Přehlédnout požadavky nebo omezení specifická pro projekt
 
-Soubor `project-context.md` toto řeší dokumentací toho, co agenti potřebují vědět, ve stručném formátu optimalizovaném pro LLM.
+Soubor `AGENTS.md` toto řeší dokumentací toho, co agenti potřebují vědět, ve stručném formátu optimalizovaném pro LLM.
 
 ## Jak to funguje
 
-Každý implementační workflow automaticky načítá `project-context.md`, pokud existuje. Architektonický workflow ho také načítá, aby respektoval vaše technické preference při navrhování architektury.
+Každý implementační workflow automaticky načítá `AGENTS.md`, pokud existuje. Architektonický workflow ho také načítá, aby respektoval vaše technické preference při navrhování architektury.
 
 **Načítán těmito workflow:**
 - `bmad-create-architecture` — respektuje technické preference během solutioningu
@@ -30,13 +30,13 @@ Každý implementační workflow automaticky načítá `project-context.md`, pok
 
 ## Kdy ho vytvořit
 
-Soubor `project-context.md` je užitečný v jakékoli fázi projektu:
+Soubor `AGENTS.md` je užitečný v jakékoli fázi projektu:
 
 | Scénář                               | Kdy vytvořit                                    | Účel                                                                 |
 | ------------------------------------ | ----------------------------------------------- | -------------------------------------------------------------------- |
 | **Nový projekt, před architekturou** | Ručně, před `bmad-create-architecture`          | Dokumentujte vaše technické preference, aby je architekt respektoval |
-| **Nový projekt, po architektuře**    | Přes `bmad-generate-project-context` nebo ručně | Zachyťte architektonická rozhodnutí pro implementační agenty         |
-| **Existující projekt**               | Přes `bmad-generate-project-context`            | Objevte existující vzory, aby agenti dodržovali zavedené konvence    |
+| **Nový projekt, po architektuře**    | Přes `bmad-project-context` nebo ručně | Zachyťte architektonická rozhodnutí pro implementační agenty         |
+| **Existující projekt**               | Přes `bmad-project-context`            | Objevte existující vzory, aby agenti dodržovali zavedené konvence    |
 | **Quick Flow projekt**               | Před nebo během `bmad-build`                | Zajistěte, aby rychlá implementace respektovala vaše vzory           |
 
 :::tip[Doporučeno]
@@ -95,39 +95,39 @@ Máte tři možnosti:
 
 ### Ruční vytvoření
 
-Vytvořte soubor na `_bmad-output/project-context.md` a přidejte svá pravidla:
+Vytvořte soubor na `AGENTS.md` a přidejte svá pravidla:
 
 ```bash
 # V kořeni projektu
 mkdir -p _bmad-output
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
 Upravte ho s vaším technologickým stackem a pravidly implementace. Architektonický a implementační workflow ho automaticky najdou a načtou.
 
 ### Generování po architektuře
 
-Spusťte workflow `bmad-generate-project-context` po dokončení architektury:
+Spusťte workflow `bmad-project-context` po dokončení architektury:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Toto skenuje váš dokument architektury a soubory projektu a generuje kontextový soubor zachycující učiněná rozhodnutí.
 
 ### Generování pro existující projekty
 
-Pro existující projekty spusťte `bmad-generate-project-context` pro objevení existujících vzorů:
+Pro existující projekty spusťte `bmad-project-context` pro objevení existujících vzorů:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Workflow analyzuje vaši kódovou bázi, identifikuje konvence a vygeneruje kontextový soubor, který můžete zkontrolovat a upřesnit.
 
 ## Proč na tom záleží
 
-Bez `project-context.md` agenti dělají předpoklady, které nemusí odpovídat vašemu projektu:
+Bez `AGENTS.md` agenti dělají předpoklady, které nemusí odpovídat vašemu projektu:
 
 | Bez kontextu                                    | S kontextem                              |
 | ----------------------------------------------- | ---------------------------------------- |
@@ -143,15 +143,15 @@ To je zvláště důležité pro:
 
 ## Editace a aktualizace
 
-Soubor `project-context.md` je živý dokument. Aktualizujte ho, když:
+Soubor `AGENTS.md` je živý dokument. Aktualizujte ho, když:
 
 - Se změní architektonická rozhodnutí
 - Jsou zavedeny nové konvence
 - Vzory se vyvíjejí během implementace
 - Identifikujete mezery z chování agentů
 
-Můžete ho kdykoli ručně upravit, nebo přegenerovat `bmad-generate-project-context` po významných změnách.
+Můžete ho kdykoli ručně upravit, nebo přegenerovat `bmad-project-context` po významných změnách.
 
 :::note[Umístění souboru]
-Výchozí umístění je `_bmad-output/project-context.md`. Workflow ho tam hledají a také kontrolují `**/project-context.md` kdekoli ve vašem projektu.
+Výchozí umístění je `AGENTS.md`. Workflow ho tam hledají a také kontrolují `**/AGENTS.md` kdekoli ve vašem projektu.
 :::

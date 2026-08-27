@@ -355,13 +355,13 @@ bmad-help Tôi cần thêm tính năng export PDF, dùng quick flow hay đầy �
 
 ```bash
 # Tạo tự động sau khi có architecture
-bmad-generate-project-context
+bmad-project-context
 
 # Hoặc tạo thủ công
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
-File `project-context.md` là "bản hiến pháp" kỹ thuật của dự án — được tất cả agent tự động nạp:
+File `AGENTS.md` là "bản hiến pháp" kỹ thuật của dự án — được tất cả agent tự động nạp:
 
 ```markdown
 # Project Context
@@ -445,10 +445,10 @@ ER    # Epic Retrospective
 
 ```bash
 # Chạy trong agent Developer hoặc Architect
-bmad-generate-project-context
+bmad-project-context
 ```
 
-Agent sẽ khám phá codebase và tạo `project-context.md` từ:
+Agent sẽ khám phá codebase và tạo `AGENTS.md` từ:
 - `package.json`, `pyproject.toml`, hoặc build files
 - Cấu trúc thư mục
 - Conventions hiện có trong code
@@ -715,7 +715,7 @@ your-project/
 │   └── bmm/                            # Modules đã cài (TEA, v.v.)
 │
 ├── _bmad-output/                       # Tất cả artifacts sinh ra
-│   ├── project-context.md              # Bản hiến pháp kỹ thuật của dự án
+│   ├── AGENTS.md              # Bản hiến pháp kỹ thuật của dự án
 │   ├── planning-artifacts/
 │   │   ├── product-brief.md            # Giai đoạn 1 output
 │   │   ├── PRD.md                      # Giai đoạn 2 output
@@ -751,9 +751,9 @@ your-project/
 
 Mỗi workflow của BMAD thiết kế để chạy trong context rõ ràng. Việc tiếp tục hội thoại cũ có thể gây ra nhiễu context, đặc biệt với các workflow dài.
 
-### Đọc kỹ `project-context.md` trước khi bắt đầu sprint
+### Đọc kỹ `AGENTS.md` trước khi bắt đầu sprint
 
-Tất cả agent developer tự động nạp `project-context.md`. Đảm bảo file này luôn cập nhật với:
+Tất cả agent developer tự động nạp `AGENTS.md`. Đảm bảo file này luôn cập nhật với:
 - Tech stack và phiên bản chính xác
 - Quy tắc implementation quan trọng
 - Patterns đang dùng trong codebase
@@ -808,7 +808,7 @@ E2E test cần toàn bộ tính năng của epic để test integration. Test s�
 | Core Tools | [reference/core-tools.md](reference/core-tools.md) |
 | Modules | [reference/modules.md](reference/modules.md) |
 | Dự án đã tồn tại | [how-to/established-projects.md](how-to/established-projects.md) |
-| Project Context | [explanation/project-context.md](explanation/project-context.md) |
+| Project Context | [explanation/AGENTS.md](explanation/project-context.md) |
 | Build | [explanation/build.md](explanation/build.md) |
 | Why Solutioning Matters | [explanation/why-solutioning-matters.md](explanation/why-solutioning-matters.md) |
 | Cài đặt BMAD | [how-to/install-bmad.md](how-to/install-bmad.md) |

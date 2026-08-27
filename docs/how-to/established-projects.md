@@ -27,16 +27,16 @@ If you have completed all PRD epics and stories through the BMad process, clean 
 ## Step 2: Create Project Context
 
 :::tip[Recommended for Existing Projects]
-Generate `project-context.md` to capture your existing codebase patterns and conventions. This ensures AI agents follow your established practices when implementing changes.
+Use `bmad-project-context` to capture verified codebase patterns and conventions in `AGENTS.md`. This ensures AI agents follow your established practices when implementing changes.
 :::
 
 Run the generate project context workflow:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
-This scans your codebase to identify:
+It scans your codebase to identify:
 
 - Technology stack and versions
 - Code organization patterns
@@ -44,7 +44,7 @@ This scans your codebase to identify:
 - Testing approaches
 - Framework-specific patterns
 
-You can review and refine the generated file, or create it manually at `_bmad-output/project-context.md` if you prefer.
+You review and approve the proposed managed block before it is written; you can also maintain `AGENTS.md` manually.
 
 [Learn more about project context](../explanation/project-context.md)
 

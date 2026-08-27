@@ -1,14 +1,14 @@
 ---
 title: "管理项目上下文"
-description: 创建并维护 project-context.md 以指导 AI 智能体
+description: 创建并维护 AGENTS.md 以指导 AI 智能体
 sidebar:
   order: 8
 ---
 
-使用 `project-context.md`，确保 AI 智能体在各类工作流中遵循项目的技术偏好与实现规则。
+使用 `AGENTS.md`，确保 AI 智能体在各类工作流中遵循项目的技术偏好与实现规则。
 为了保证这份上下文始终可见，你也可以在工具上下文或 always-rules 文件（如 `AGENTS.md`）
 中加入这句：
-`Important project context and conventions are located in [path to project context]/project-context.md`
+`Important project context and conventions are located in [path to project context]/AGENTS.md`
 
 :::note[前置条件]
 - 已安装 BMad Method
@@ -34,11 +34,11 @@ sidebar:
 
 ### 选项 A：手动创建
 
-在 `_bmad-output/project-context.md` 创建文件：
+在 `AGENTS.md` 创建文件：
 
 ```bash
 mkdir -p _bmad-output
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
 然后补充技术栈与实现规则：
@@ -80,7 +80,7 @@ sections_completed: ['technology_stack', 'critical_rules']
 在新的会话中运行：
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 该工作流会扫描架构文档和项目文件，生成能够反映已做决策的上下文文件。
@@ -90,7 +90,7 @@ bmad-generate-project-context
 对于既有项目，运行：
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 该工作流会分析代码库中的约定，然后生成可供你审阅和完善的上下文文件。
@@ -108,7 +108,7 @@ bmad-generate-project-context
 
 ## 你将获得
 
-一个 `project-context.md` 文件，它可以：
+一个 `AGENTS.md` 文件，它可以：
 
 - 确保所有智能体遵循相同约定
 - 避免在不同用户故事（story）中出现不一致决策

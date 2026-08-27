@@ -77,12 +77,12 @@ Každý dokument se stává kontextem pro další fázi. PRD říká architektov
 ### Kontext projektu
 
 :::tip[Doporučeno]
-Vytvořte `project-context.md` pro zajištění toho, aby AI agenti dodržovali pravidla a preference vašeho projektu. Tento soubor funguje jako ústava vašeho projektu — vede implementační rozhodnutí napříč všemi workflow. Tento volitelný soubor lze vygenerovat na konci tvorby architektury, nebo u existujícího projektu ho lze také vygenerovat pro zachycení toho, co je důležité pro zachování souladu se současnými konvencemi.
+Vytvořte `AGENTS.md` pro zajištění toho, aby AI agenti dodržovali pravidla a preference vašeho projektu. Tento soubor funguje jako ústava vašeho projektu — vede implementační rozhodnutí napříč všemi workflow. Tento volitelný soubor lze vygenerovat na konci tvorby architektury, nebo u existujícího projektu ho lze také vygenerovat pro zachycení toho, co je důležité pro zachování souladu se současnými konvencemi.
 :::
 
 **Jak ho vytvořit:**
 
-- **Ručně** — Vytvořte `_bmad-output/project-context.md` s vaším technologickým stackem a pravidly implementace
-- **Vygenerujte ho** — Spusťte `bmad-generate-project-context` pro automatické generování z vaší architektury nebo kódové báze
+- **Ručně** — Vytvořte `AGENTS.md` s vaším technologickým stackem a pravidly implementace
+- **Vygenerujte ho** — Spusťte `bmad-project-context` pro automatické generování z vaší architektury nebo kódové báze
 
-[**Zjistit více o project-context.md**](../explanation/project-context.md)
+[**Zjistit více o AGENTS.md**](../explanation/project-context.md)

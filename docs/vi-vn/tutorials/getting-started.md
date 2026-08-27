@@ -126,9 +126,9 @@ Luôn bắt đầu một chat mới cho mỗi workflow. Điều này tránh các
 Đi qua các phase 1-3. **Dùng chat mới cho từng workflow.**
 
 :::tip[Project Context (Tùy chọn)]
-Trước khi bắt đầu, hãy cân nhắc tạo `project-context.md` để ghi lại các ưu tiên kỹ thuật và quy tắc triển khai. Nhờ vậy mọi AI agent sẽ tuân theo cùng một quy ước trong suốt dự án.
+Trước khi bắt đầu, hãy cân nhắc tạo `AGENTS.md` để ghi lại các ưu tiên kỹ thuật và quy tắc triển khai. Nhờ vậy mọi AI agent sẽ tuân theo cùng một quy ước trong suốt dự án.
 
-Bạn có thể tạo thủ công tại `_bmad-output/project-context.md` hoặc sinh ra sau phần kiến trúc bằng `bmad-generate-project-context`. [Xem thêm](../explanation/project-context.md).
+Bạn có thể tạo thủ công tại `AGENTS.md` hoặc sinh ra sau phần kiến trúc bằng `bmad-project-context`. [Xem thêm](../explanation/project-context.md).
 :::
 
 ### Phase 1: Analysis (Tùy chọn)
@@ -216,7 +216,7 @@ your-project/
 │   │   └── epics/                           # Các file epic và story
 │   ├── implementation-artifacts/
 │   │   └── sprint-status.yaml               # Theo dõi sprint
-│   └── project-context.md                   # Quy tắc triển khai (tùy chọn)
+│   └── AGENTS.md                   # Quy tắc triển khai (tùy chọn)
 └── ...
 ```
 
@@ -227,7 +227,7 @@ your-project/
 | **`bmad-help`** ⭐ | `bmad-help` | Bất kỳ | **Người dẫn đường thông minh của bạn — hỏi gì cũng được!** |
 | `bmad-create-prd` | `bmad-create-prd` | PM | Tạo tài liệu yêu cầu sản phẩm |
 | `bmad-create-architecture` | `bmad-create-architecture` | Architect | Tạo tài liệu kiến trúc |
-| `bmad-generate-project-context` | `bmad-generate-project-context` | Analyst | Tạo file project context |
+| `bmad-project-context` | `bmad-project-context` | Analyst | Tạo file project context |
 | `bmad-create-epics-and-stories` | `bmad-create-epics-and-stories` | PM | Phân rã PRD thành epics |
 | `bmad-sprint-planning` | `bmad-sprint-planning` | DEV | Kiểm tra mức sẵn sàng và theo dõi sprint |
 | `bmad-create-story` | `bmad-create-story` | DEV | Tạo file story |

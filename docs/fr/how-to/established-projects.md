@@ -26,13 +26,13 @@ Si vous avez terminé tous les epics et stories du PRD[^1] via le processus BMad
 ## Étape 2 : Créer le contexte du projet
 
 :::tip[Recommandé pour les projets existants]
-Générez `project-context.md` pour capturer les patterns et conventions de votre base de code existante. Cela garantit que les agents IA suivent vos pratiques établies lors de l’implémentation des modifications.
+Générez `AGENTS.md` pour capturer les patterns et conventions de votre base de code existante. Cela garantit que les agents IA suivent vos pratiques établies lors de l’implémentation des modifications.
 :::
 
 Exécutez le workflow de génération de contexte du projet :
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Cela analyse votre base de code pour identifier :
@@ -42,7 +42,7 @@ Cela analyse votre base de code pour identifier :
 - Les approches de test
 - Les patterns spécifiques aux frameworks
 
-Vous pouvez examiner et affiner le fichier généré, ou le créer manuellement à `_bmad-output/project-context.md` si vous préférez.
+Vous pouvez examiner et affiner le fichier généré, ou le créer manuellement à `AGENTS.md` si vous préférez.
 
 [En savoir plus sur le contexte du projet](../explanation/project-context.md)
 

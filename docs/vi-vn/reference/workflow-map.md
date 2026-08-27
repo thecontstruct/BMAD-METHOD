@@ -77,12 +77,12 @@ Mỗi tài liệu sẽ trở thành ngữ cảnh cho giai đoạn tiếp theo. P
 ### Bối cảnh dự án
 
 :::tip[Khuyến nghị]
-Hãy tạo `project-context.md` để bảo đảm AI agent tuân theo quy tắc và sở thích của dự án. File này hoạt động như một bản hiến pháp cho dự án của bạn, nó dẫn dắt các quyết định triển khai xuyên suốt mọi quy trình. File tùy chọn này có thể được tạo ở cuối bước tạo kiến trúc, hoặc cũng có thể được sinh trong dự án hiện hữu để ghi lại những điều quan trọng cần giữ đồng bộ với quy ước đang có.
+Hãy tạo `AGENTS.md` để bảo đảm AI agent tuân theo quy tắc và sở thích của dự án. File này hoạt động như một bản hiến pháp cho dự án của bạn, nó dẫn dắt các quyết định triển khai xuyên suốt mọi quy trình. File tùy chọn này có thể được tạo ở cuối bước tạo kiến trúc, hoặc cũng có thể được sinh trong dự án hiện hữu để ghi lại những điều quan trọng cần giữ đồng bộ với quy ước đang có.
 :::
 
 **Cách tạo:**
 
-- **Thủ công** — Tạo `_bmad-output/project-context.md` với stack công nghệ và các quy tắc triển khai của bạn
-- **Tự sinh** — Chạy `bmad-generate-project-context` để sinh tự động từ architecture hoặc codebase
+- **Thủ công** — Tạo `AGENTS.md` với stack công nghệ và các quy tắc triển khai của bạn
+- **Tự sinh** — Chạy `bmad-project-context` để sinh tự động từ architecture hoặc codebase
 
-[**Tìm hiểu thêm về project-context.md**](../explanation/project-context.md)
+[**Tìm hiểu thêm về AGENTS.md**](../explanation/project-context.md)

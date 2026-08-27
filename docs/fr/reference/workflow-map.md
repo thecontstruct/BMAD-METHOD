@@ -102,7 +102,7 @@ ciblé et exhaustif pour l’implémentation. Sans cette structure, les agents p
 ### Contexte du Projet
 
 :::tip[Recommandé]
-Créez `project-context.md` pour que les agents IA respectent les règles et préférences de votre projet. Ce fichier agit
+Créez `AGENTS.md` pour que les agents IA respectent les règles et préférences de votre projet. Ce fichier agit
 comme une charte pour votre projet — il oriente les décisions d’implémentation à travers tous les workflows. Ce fichier
 optionnel peut être généré à la fin de la création de l’architecture, ou, dans un projet existant, pour capturer les
 éléments clés et les garder alignés avec les conventions en vigueur.
@@ -110,10 +110,10 @@ optionnel peut être généré à la fin de la création de l’architecture, ou
 
 **Comment le créer :**
 
-- **Manuellement** — Créez `_bmad-output/project-context.md` avec votre stack technique et vos règles d’implémentation
-- **Générez-le** — Exécutez `bmad-generate-project-context` pour l’auto-générer à partir de votre architecture ou de votre codebase
+- **Manuellement** — Créez `AGENTS.md` avec votre stack technique et vos règles d’implémentation
+- **Générez-le** — Exécutez `bmad-project-context` pour l’auto-générer à partir de votre architecture ou de votre codebase
 
-[**En savoir plus sur project-context.md**](../explanation/project-context.md)
+[**En savoir plus sur AGENTS.md**](../explanation/project-context.md)
 
 ## Glossaire
 

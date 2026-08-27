@@ -70,12 +70,12 @@ BMad Method（BMM）通过分阶段 workflow 逐步构建上下文，让智能�
 每个阶段产出都会成为下一阶段输入：PRD 约束架构，架构约束开发，story 约束实现。没有这条链路，智能体更容易在跨 story 时出现不一致决策。
 
 :::tip[Project Context 建议]
-创建 `project-context.md`，把项目特有约定（技术栈、命名、组织、测试策略）写成共享规则，能显著降低实现偏差。
+创建 `AGENTS.md`，把项目特有约定（技术栈、命名、组织、测试策略）写成共享规则，能显著降低实现偏差。
 :::
 
 **创建方式：**
-- **手动创建**：在 `_bmad-output/project-context.md` 记录项目规则
-- **自动生成**：运行 `bmad-generate-project-context` 从架构或代码库提取
+- **手动创建**：在 `AGENTS.md` 记录项目规则
+- **自动生成**：运行 `bmad-project-context` 从架构或代码库提取
 
 ## 相关参考
 

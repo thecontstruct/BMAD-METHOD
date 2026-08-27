@@ -128,9 +128,9 @@ Démarrez toujours un nouveau chat pour chaque workflow. Cela évite les problè
 Parcourez les phases 1 à 3. **Utilisez un nouveau chat pour chaque workflow.**
 
 :::tip[Contexte projet (optionnel)]
-Avant de commencer, pensez à créer `project-context.md` pour documenter vos préférences techniques et vos règles d’implémentation. Ainsi, tous les agents IA respecteront vos conventions tout au long du projet.
+Avant de commencer, pensez à créer `AGENTS.md` pour documenter vos préférences techniques et vos règles d’implémentation. Ainsi, tous les agents IA respecteront vos conventions tout au long du projet.
 
-Créez-le manuellement à l’emplacement `_bmad-output/project-context.md`, ou générez-le après l’architecture avec `bmad-generate-project-context`. [En savoir plus](../explanation/project-context.md).
+Créez-le manuellement à l’emplacement `AGENTS.md`, ou générez-le après l’architecture avec `bmad-project-context`. [En savoir plus](../explanation/project-context.md).
 :::
 
 ### Phase 1 : Analyse (optionnelle)
@@ -230,7 +230,7 @@ your-project/
 │   │   └── epics/                           # Fichiers epic et story
 │   ├── implementation-artifacts/
 │   │   └── sprint-status.yaml               # Suivi de sprint
-│   └── project-context.md                   # Règles d'implémentation (optionnel)
+│   └── AGENTS.md                   # Règles d'implémentation (optionnel)
 └── ...
 ```
 
@@ -241,7 +241,7 @@ your-project/
 | **`bmad-help`** ⭐                    | `bmad-help`                           | Tous      | **Votre guide intelligent — posez n’importe quelle question !**  |
 | `bmad-prd`                            | `bmad-prd`                            | Tous      | Créer, mettre à jour ou valider un PRD                          |
 | `bmad-create-architecture`            | `bmad-create-architecture`            | Architect | Créer le document d’architecture                                |
-| `bmad-generate-project-context`       | `bmad-generate-project-context`       | Analyst   | Créer le fichier de contexte projet                             |
+| `bmad-project-context`       | `bmad-project-context`       | Analyst   | Créer le fichier de contexte projet                             |
 | `bmad-create-epics-and-stories`       | `bmad-create-epics-and-stories`       | PM        | Décomposer le PRD en epics                                      |
 | `bmad-sprint-planning`                | `bmad-sprint-planning`                | DEV       | Valider la préparation et suivre le sprint                     |
 | `bmad-create-story`                   | `bmad-create-story`                   | DEV       | Créer un fichier story                                          |

@@ -126,9 +126,9 @@ BMad-Help 将检测你已完成的内容，并准确推荐下一步该做什么�
 完成阶段 1-3。**为每个工作流使用新对话。**
 
 :::tip[项目上下文（可选）]
-在开始之前，考虑创建 `project-context.md` 来记录你的技术偏好和实现规则。这确保所有 AI 智能体在整个项目中遵循你的约定。
+在开始之前，考虑创建 `AGENTS.md` 来记录你的技术偏好和实现规则。这确保所有 AI 智能体在整个项目中遵循你的约定。
 
-在 `_bmad-output/project-context.md` 手动创建它，或在架构之后使用 `bmad-generate-project-context` 生成它。[了解更多](../explanation/project-context.md)。
+在 `AGENTS.md` 手动创建它，或在架构之后使用 `bmad-project-context` 生成它。[了解更多](../explanation/project-context.md)。
 :::
 
 ### 阶段 1：分析（可选）
@@ -215,7 +215,7 @@ your-project/
 │   │   └── epics/                           # 史诗和故事文件
 │   ├── implementation-artifacts/
 │   │   └── sprint-status.yaml               # 冲刺跟踪
-│   └── project-context.md                   # 实现规则（可选）
+│   └── AGENTS.md                   # 实现规则（可选）
 └── ...
 ```
 
@@ -226,7 +226,7 @@ your-project/
 | **`bmad-help`** ⭐                  | `bmad-help`                            | 任意     | **你的智能向导 —— 随时询问任何问题！**        |
 | `bmad-create-prd`                   | `bmad-create-prd`                      | PM       | 创建产品需求文档                             |
 | `bmad-create-architecture`          | `bmad-create-architecture`             | Architect | 创建架构文档                                |
-| `bmad-generate-project-context`     | `bmad-generate-project-context`        | Analyst  | 创建项目上下文文件                           |
+| `bmad-project-context`     | `bmad-project-context`        | Analyst  | 创建项目上下文文件                           |
 | `bmad-create-epics-and-stories`     | `bmad-create-epics-and-stories`        | PM       | 将 PRD 分解为史诗                            |
 | `bmad-sprint-planning`              | `bmad-sprint-planning`                 | DEV      | 检查就绪度并跟踪冲刺                         |
 | `bmad-create-story`                 | `bmad-create-story`                    | DEV      | 创建故事文件                                 |

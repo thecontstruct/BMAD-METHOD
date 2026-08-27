@@ -1,11 +1,11 @@
 ---
 title: "Quản lý bối cảnh dự án"
-description: Tạo và duy trì project-context.md để định hướng cho các agent AI
+description: Tạo và duy trì AGENTS.md để định hướng cho các agent AI
 sidebar:
   order: 8
 ---
 
-Sử dụng tệp `project-context.md` để đảm bảo các agent AI tuân theo ưu tiên kỹ thuật và quy tắc triển khai của dự án trong suốt mọi workflow. Để đảm bảo tệp này luôn sẵn có, bạn cũng có thể thêm dòng `Important project context and conventions are located in [path to project context]/project-context.md` vào file context của công cụ hoặc file always rules của bạn (như `AGENTS.md`).
+Sử dụng tệp `AGENTS.md` để đảm bảo các agent AI tuân theo ưu tiên kỹ thuật và quy tắc triển khai của dự án trong suốt mọi workflow. Để đảm bảo tệp này luôn sẵn có, bạn cũng có thể thêm dòng `Important project context and conventions are located in [path to project context]/AGENTS.md` vào file context của công cụ hoặc file always rules của bạn (như `AGENTS.md`).
 
 :::note[Điều kiện tiên quyết]
 - Đã cài BMad Method
@@ -31,11 +31,11 @@ Sử dụng tệp `project-context.md` để đảm bảo các agent AI tuân th
 
 ### Lựa chọn A: Tạo thủ công
 
-Tạo tệp tại `_bmad-output/project-context.md`:
+Tạo tệp tại `AGENTS.md`:
 
 ```bash
 mkdir -p _bmad-output
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
 Thêm stack công nghệ và các quy tắc triển khai của bạn:
@@ -77,7 +77,7 @@ sections_completed: ['technology_stack', 'critical_rules']
 Chạy workflow trong một phiên chat mới:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Workflow sẽ quét tài liệu kiến trúc và tệp dự án để tạo tệp context ghi lại các quyết định đã được đưa ra.
@@ -87,7 +87,7 @@ Workflow sẽ quét tài liệu kiến trúc và tệp dự án để tạo tệ
 Với các dự án hiện có, chạy:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Workflow sẽ phân tích codebase để nhận diện quy ước, sau đó tạo tệp context để bạn xem lại và chỉnh sửa.
@@ -105,7 +105,7 @@ Chỉnh sửa thủ công để thêm phần còn thiếu hoặc loại bỏ nh�
 
 ## Bạn nhận được gì
 
-Một tệp `project-context.md` sẽ:
+Một tệp `AGENTS.md` sẽ:
 
 - Đảm bảo tất cả agent tuân theo cùng một bộ quy ước
 - Ngăn các quyết định không nhất quán giữa các story

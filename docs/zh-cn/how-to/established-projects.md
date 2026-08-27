@@ -26,13 +26,13 @@ sidebar:
 ## 步骤 2：创建项目上下文（project context）
 
 :::tip[推荐用于既有项目]
-生成 `project-context.md`，梳理现有代码库的模式与约定，确保 AI 智能体在实施变更时遵循你既有的工程实践。
+生成 `AGENTS.md`，梳理现有代码库的模式与约定，确保 AI 智能体在实施变更时遵循你既有的工程实践。
 :::
 
 运行生成项目上下文工作流：
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 这将扫描你的代码库以识别：
@@ -43,7 +43,7 @@ bmad-generate-project-context
 - 框架相关模式
 
 你可以先审阅并完善生成内容；如果更希望手动维护，也可以直接在
-`_bmad-output/project-context.md` 创建并编辑。
+`AGENTS.md` 创建并编辑。
 
 [了解更多关于项目上下文](../explanation/project-context.md)
 

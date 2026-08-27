@@ -26,13 +26,13 @@ Pokud jste dokončili všechny PRD epicy a stories procesem BMad, vyčistěte ty
 ## Krok 2: Vytvořte kontext projektu
 
 :::tip[Doporučeno pro existující projekty]
-Vygenerujte `project-context.md` pro zachycení vzorů a konvencí vaší existující kódové báze. Tím zajistíte, že AI agenti budou při implementaci změn dodržovat vaše zavedené postupy.
+Vygenerujte `AGENTS.md` pro zachycení vzorů a konvencí vaší existující kódové báze. Tím zajistíte, že AI agenti budou při implementaci změn dodržovat vaše zavedené postupy.
 :::
 
 Spusťte workflow pro generování kontextu projektu:
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Toto skenuje vaši kódovou bázi a identifikuje:
@@ -42,7 +42,7 @@ Toto skenuje vaši kódovou bázi a identifikuje:
 - Přístupy k testování
 - Vzory specifické pro framework
 
-Vygenerovaný soubor můžete zkontrolovat a upravit, nebo ho vytvořit ručně na `_bmad-output/project-context.md`.
+Vygenerovaný soubor můžete zkontrolovat a upravit, nebo ho vytvořit ručně na `AGENTS.md`.
 
 [Zjistit více o kontextu projektu](../explanation/project-context.md)
 

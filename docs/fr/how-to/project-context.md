@@ -1,11 +1,11 @@
 ---
 title: "Gérer le contexte du projet"
-description: Créer et maintenir project-context.md pour guider les agents IA
+description: Créer et maintenir AGENTS.md pour guider les agents IA
 sidebar:
   order: 8
 ---
 
-Utilisez le fichier `project-context.md` pour garantir que les agents IA respectent les préférences techniques et les règles d’implémentation de votre projet tout au long des workflows. Pour vous assurer qu’il est toujours disponible, vous pouvez également ajouter la ligne `Le contexte et les conventions importantes du projet se trouvent dans [chemin vers le contexte du projet]/project-context.md` à votre fichier de contexte ou de règles permanentes (comme `AGENTS.md`).
+Utilisez le fichier `AGENTS.md` pour garantir que les agents IA respectent les préférences techniques et les règles d’implémentation de votre projet tout au long des workflows. Pour vous assurer qu’il est toujours disponible, vous pouvez également ajouter la ligne `Le contexte et les conventions importantes du projet se trouvent dans [chemin vers le contexte du projet]/AGENTS.md` à votre fichier de contexte ou de règles permanentes (comme `AGENTS.md`).
 
 :::note[Prérequis]
 - Méthode BMad installée
@@ -31,11 +31,11 @@ Utilisez le fichier `project-context.md` pour garantir que les agents IA respect
 
 ### Option A : Création manuelle
 
-Créez le fichier à l’emplacement `_bmad-output/project-context.md` :
+Créez le fichier à l’emplacement `AGENTS.md` :
 
 ```bash
 mkdir -p _bmad-output
-touch _bmad-output/project-context.md
+touch AGENTS.md
 ```
 
 Ajoutez votre pile technologique et vos règles d’implémentation :
@@ -77,7 +77,7 @@ sections_completed: ['technology_stack', 'critical_rules']
 Exécutez le workflow dans une nouvelle conversation :
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Le workflow analyse votre document d’architecture et vos fichiers projet pour générer un fichier de contexte qui capture les décisions prises.
@@ -87,7 +87,7 @@ Le workflow analyse votre document d’architecture et vos fichiers projet pour 
 Pour les projets existants, exécutez :
 
 ```bash
-bmad-generate-project-context
+bmad-project-context
 ```
 
 Le workflow analyse votre base de code pour identifier les conventions, puis génère un fichier de contexte que vous pouvez réviser et affiner.
@@ -105,7 +105,7 @@ Modifiez manuellement pour ajouter les éléments manquants ou supprimer les ine
 
 ## Ce que vous obtenez
 
-Un fichier `project-context.md` qui :
+Un fichier `AGENTS.md` qui :
 
 - Garantit que tous les agents suivent les mêmes conventions
 - Évite les décisions incohérentes entre les stories
