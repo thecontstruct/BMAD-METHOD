@@ -7,6 +7,8 @@ const root = path.resolve(__dirname, '..');
 const buildDir = path.join(root, 'src/bmm-skills/ship/bmad-build');
 const customize = fs.readFileSync(path.join(buildDir, 'customize.toml'), 'utf8');
 const route = fs.readFileSync(path.join(buildDir, 'step-01-clarify-and-route.template.md'), 'utf8');
+const plan = fs.readFileSync(path.join(buildDir, 'step-02-plan.template.md'), 'utf8');
+const spec = fs.readFileSync(path.join(buildDir, 'spec-template.md'), 'utf8');
 const present = fs.readFileSync(path.join(buildDir, 'step-05-present.template.md'), 'utf8');
 const oneshot = fs.readFileSync(path.join(buildDir, 'step-oneshot.template.md'), 'utf8');
 
@@ -21,6 +23,21 @@ const checks = [
       route.includes('{spec_folder}/stories.yaml') &&
       route.includes('{spec_folder}/stories/{story_id}-*.md') &&
       route.includes('keep the colocated `{spec_file}` selected above'),
+  ],
+  [
+    'routing happens after investigation, not during clarification',
+    !route.includes('zero blast radius') &&
+      route.includes('Do not conduct an intent interview here') &&
+      plan.includes('Investigate the codebase') &&
+      plan.includes('If there are no intent gaps, nothing irreversible, and the change is small'),
+  ],
+  [
+    'light in-session route has an escalation path',
+    spec.includes("route: '' # in-session | dispatch") &&
+      spec.includes('## Open Questions') &&
+      spec.includes('## Implementation Notes') &&
+      oneshot.includes('**Escalation ramp.**') &&
+      oneshot.includes("set `route: 'dispatch'` and `status: 'draft'`"),
   ],
 ];
 

@@ -119,7 +119,7 @@ This uses **step-file architecture** for disciplined execution:
 
 1. **READ COMPLETELY**: Read the entire step file before acting
 2. **FOLLOW SEQUENCE**: Execute sections in order
-3. **WAIT FOR INPUT**: Halt at checkpoints and wait for human
+3. **WAIT FOR INPUT**: Halt only at checkpoints that require a human decision
 4. **LOAD NEXT**: When directed, read fully and follow the next step file
 
 ### Critical Rules (NO EXCEPTIONS)
@@ -128,7 +128,7 @@ This uses **step-file architecture** for disciplined execution:
 - **ALWAYS** read entire step file before execution
 - **NEVER** skip steps or optimize the sequence
 - **ALWAYS** follow the exact instructions in the step file
-- **ALWAYS** halt at checkpoints and wait for human input
+- **ALWAYS** halt at checkpoints that require human input
 
 ## FIRST STEP
 

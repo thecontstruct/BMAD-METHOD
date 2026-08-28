@@ -4,10 +4,13 @@ deferred_work_file: '{implementation_artifacts}/deferred-work.md'
 
 # Step One-Shot: Implement, Review, Present
 
+Entered only from step-02's route gate: `{spec_file}` already exists with `route: 'in-session'`.
+
 ## RULES
 
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
 - NEVER auto-push.
+- Content inside `<frozen-after-approval>` in `{spec_file}` is read-only. Do not modify it.
 - All review subagents must run at the same model capability as the current session.
 - Run subagents synchronously: launch them together as blocking calls awaited in this turn — never backgrounded or detached, never ending the turn to await results.
 
@@ -17,7 +20,9 @@ deferred_work_file: '{implementation_artifacts}/deferred-work.md'
 
 Follow `./sync-sprint-status.md` with `{target_status}` = `in-progress`.
 
-Implement the clarified intent directly.
+Implement directly from `{spec_file}` — its Intent is the source of truth. As you work, append to its `## Implementation Notes` section: decisions made, files touched, and surprises encountered.
+
+**Escalation ramp.** If implementation surfaces a fact the route gate did not see — an intent gap the user would notice, an irreversible action, or footprint growth beyond the designed scope — stop editing. Record the trigger in `## Implementation Notes`, then upgrade `{spec_file}`: reinstate `## Code Map` (populated from live context) and `## Open Questions` (one entry per intent gap), set `route: 'dispatch'` and `status: 'draft'`. Return to `./step-02-plan.md` and resume at its gate instruction.
 
 ### Review
 
@@ -43,15 +48,13 @@ Deduplicate all review findings, then route each finding in this order:
   ```
 - **reject** — Reject only noise. Drop silently.
 
-### Generate Spec Trace
+### Finalize Spec
 
-Set `{title}` = a concise title derived from the clarified intent.
+Update `{spec_file}`:
 
-Write `{spec_file}` using `./spec-template.md`. Fill only these sections — delete all others:
-
-1. **Frontmatter** — set `title: '{title}'`, `type`, `created`, `status: 'done'`. Add `route: 'one-shot'`.
-2. **Title and Intent** — `# {title}` heading and `## Intent` with **Problem** and **Approach** lines. Reuse the summary you already generated for the terminal.
-3. **Suggested Review Order** — append after Intent. Build using the same convention as `./step-05-present.md` § "Generate Suggested Review Order" (spec-file-relative links, concern-based ordering, ultra-concise framing).
+1. **Frontmatter** — set `status: 'done'`.
+2. **Suggested Review Order** — append after Intent. Build using the same convention as `./step-05-present.md` § "Generate Suggested Review Order" (spec-file-relative links, concern-based ordering, ultra-concise framing).
+3. **Review Triage Log** — only when findings were rejected: add the section with one line per dismissal and the reason that disposed of its claim.
 
 Follow `./sync-sprint-status.md` with `{target_status}` = `review`.
 

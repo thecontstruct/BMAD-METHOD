@@ -8,28 +8,40 @@ deferred_work_file: '{implementation_artifacts}/deferred-work.md'
 
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
 - No intermediate approvals.
+- **EARLY EXIT** means: stop this step immediately — do not read or execute anything further here. Read and fully follow the target file instead. Return here ONLY if a later step explicitly says to loop back.
 
 ## INSTRUCTIONS
 
 1. Draft resume check. If `{spec_file}` exists with `status: draft`, read it and capture the verbatim `<frozen-after-approval>...</frozen-after-approval>` block as `preserved_intent`. Otherwise `preserved_intent` is empty.
-2. Investigate codebase. _Isolate deep exploration in synchronous subagents/tasks where available. To prevent context snowballing, instruct subagents to give you distilled summaries only._
-3. Read `./spec-template.md` fully. Fill it out based on the intent and investigation. If `{preserved_intent}` is non-empty, substitute it for the `<frozen-after-approval>` block in your filled spec before writing. Write the result to `{spec_file}`.
-4. Self-review against READY FOR DEVELOPMENT standard.
-5. If intent gaps exist, do not fantasize, do not leave open questions, HALT and ask the human.
-6. Token count check (see SCOPE STANDARD). If spec exceeds 1600 tokens:
-   - Show user the token count.
-   - HALT and give the user a choice:
-     - **Split** — carve off secondary goals.
-     - **Keep full spec** — accept the risks.
-   - If the user chooses **Split**: Propose the split — name each secondary goal. For each deferred goal, append one new entry to `{deferred_work_file}` using this format. Do not modify existing entries or look for duplicates. Rewrite the current spec to cover only the main goal — do not surgically carve sections out; regenerate the spec for the narrowed scope. Continue to checkpoint.
+2. Investigate the codebase. Isolate deep exploration in synchronous subagents/tasks where available, and ask them for distilled summaries only. Keep only what the work needs: the specific files, symbols or lines, what to reuse, and what not to change. Write that into the Code Map. Do not retell the investigation when implementation starts — the spec already has it.
+
+   Do not ask the human during investigation. When something is unclear, look in the repository, planning artifacts, or history first. Keep looking until you know, or until those sources have nothing more to say. Leave any remaining choice for the next step.
+3. Decide the path. Write down three facts about the finished design — not predictions:
+   - **Intent gaps** — things the request does not say, the code cannot settle, and the user would notice in the result. Only the human can answer these. Choices the user would not notice are yours: decide and record them in the spec.
+   - **Irreversibles** — migrations, data deletion or mutation, external side effects, deploy or config triggers.
+   - **Footprint** — files you will change, and anything new that other code will call or depend on.
+
+   If there are no intent gaps, nothing irreversible, and the change is small: read `./spec-template.md` fully and write `{spec_file}` with only frontmatter, `## Intent` inside `<frozen-after-approval>`, and `## Implementation Notes`. Delete every other section. Set `route: 'in-session'` and `status: 'in-progress'`, resolving `{date}` to the current system date. If `{preserved_intent}` is non-empty, use it as the frozen block. **EARLY EXIT** → `./step-oneshot.md`.
+
+   Otherwise write the full spec. Set `route: 'dispatch'` and continue.
+4. Read `./spec-template.md` fully. Fill it out from the intent and investigation, resolving `{date}` to the current system date. Put investigation into `## Code Map`: paths, symbols or lines, what to reuse, and what not to change. For each intent gap, add one `## Open Questions` entry: the choice, the options, and what each means. Never write an intent gap into the frozen block as an assumption. If `{preserved_intent}` is non-empty, replace the `<frozen-after-approval>` block with it before writing. Write the result to `{spec_file}`.
+5. Self-review against READY FOR DEVELOPMENT standard. For anything important that's missing: if the repository can tell you, go look and fix the spec; if a human has to decide, add an `## Open Questions` entry. Do not invent the answer.
+6. Resolve the gates before the checkpoint. Token count and Open Questions must both be settled; combine them in one message when both apply.
+   - **Token count** (see SCOPE STANDARD). If the spec exceeds 1600 tokens:
+     - Show the count and give the user a choice:
+       - **Split** — carve off secondary goals.
+       - **Keep full spec** — accept the risks.
+     - If the user chooses **Split**: Propose the split — name each secondary goal. For each deferred goal, append one new entry to `{deferred_work_file}` using this format. Do not modify existing entries or look for duplicates. Rewrite the current spec to cover only the main goal — do not surgically carve sections out; regenerate the spec for the narrowed scope.
      ```markdown
      - source_spec: `{spec_file}`
        summary: <one sentence naming the deferred goal>
        evidence: <why this was split from the current spec>
      ```
-   - If the user chooses **Keep full spec**: Continue to checkpoint with the full spec.
+   - **Open Questions.** Present every entry as a numbered question with its options and consequences, and HALT for the human's answers. Write each answer into `<frozen-after-approval>` as a decision and delete the entry. An answer may expose a new intent gap — add it and ask again. When the last entry is gone, delete the section.
 
 ### CHECKPOINT 1
+
+Only when Open Questions is empty.
 
 Present summary. Display the spec file path as a CWD-relative path (no leading `/`) so it is clickable in the terminal. If token count exceeded 1600 and the user chose to keep the full spec, include the token count and explain why it may be a problem.
 

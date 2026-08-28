@@ -83,7 +83,7 @@ Launch a subagent with no prior conversation context, with this prompt:
 > {diff_output}
 """
 
-# Review layers for the one-shot route.
+# Review layers for the in-session (light) route.
 
 [[workflow.oneshot_review_layers]]
 id = "blind-hunter"
