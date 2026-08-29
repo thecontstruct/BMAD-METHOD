@@ -1,21 +1,21 @@
 ---
-title: "Checkpoint Preview"
+title: "Walkthrough"
 description: LLM-assisted human-in-the-loop review that guides you through a change from purpose to details
 sidebar:
   order: 8
 ---
 
-`bmad-checkpoint-preview` is an interactive, LLM-assisted human-in-the-loop review workflow. It walks you through a code change — from purpose and context into details — so you can make an informed decision about whether to ship, rework, or dig deeper.
+`bmad-walkthrough` is an interactive, LLM-assisted human-in-the-loop review workflow. It walks you through a code change — from purpose and context into details — so you can make an informed decision about whether to ship, rework, or dig deeper.
 
-![Checkpoint Preview workflow diagram](/diagrams/checkpoint-preview-diagram.png)
+![Walkthrough workflow diagram](/diagrams/walkthrough-diagram.png)
 
 ## The Typical Flow
 
 You run `bmad-build`. It clarifies your intent, builds a spec, implements the change, and when it's done it appends a review trail to the spec file and shows it to you. You look at the spec and see the change touched 20 files across several modules.
 
-You could eyeball the diff. But 20 files is where eyeballing starts to fail — you lose the thread, miss a connection between two distant changes, or approve something you didn't fully understand. So instead, you say "checkpoint" and the LLM walks you through it.
+You could eyeball the diff. But 20 files is where eyeballing starts to fail — you lose the thread, miss a connection between two distant changes, or approve something you didn't fully understand. So instead, you say "walkthrough" and the LLM walks you through it.
 
-That handoff — from autonomous implementation back to human judgment — is the primary use case. Quick-dev runs long with minimal supervision. Checkpoint Preview is where you take back the wheel.
+That handoff — from autonomous implementation back to human judgment — is the primary use case. Build runs long with minimal supervision. Walkthrough is where you take back the wheel.
 
 ## Why It Exists
 
@@ -23,7 +23,7 @@ Code review has two failure modes. In one, the reviewer skims the diff, nothing 
 
 The underlying issue is sequencing. A raw diff presents changes in file order, which is almost never the order that builds understanding. You see a helper function before you know why it exists. You see a schema change before you understand what feature it supports. The reviewer has to reconstruct the author's intent from scattered clues, and that reconstruction is where attention fails.
 
-Checkpoint Preview solves this by making the LLM do the reconstruction work. It reads the diff, the spec (if one exists), and the surrounding codebase, then presents the change in an order designed for comprehension — not for `git diff`.
+Walkthrough solves this by making the LLM do the reconstruction work. It reads the diff, the spec (if one exists), and the surrounding codebase, then presents the change in an order designed for comprehension — not for `git diff`.
 
 ## How It Works
 
@@ -67,7 +67,7 @@ The workflow presents each step as a starting point, not a final word. Between s
 - **"party mode on whether this schema migration is safe"** — bring multiple agent perspectives into a focused debate
 - **"run code review"** — generate structured agentic findings with adversarial and edge-case analysis
 
-The checkpoint workflow doesn't lock you into a linear path. It gives you structure when you want it and gets out of the way when you want to explore. The five steps are there to make sure you see the whole picture, but how deep you go at each step — and what tools you bring in — is entirely up to you.
+The walkthrough workflow doesn't lock you into a linear path. It gives you structure when you want it and gets out of the way when you want to explore. The five steps are there to make sure you see the whole picture, but how deep you go at each step — and what tools you bring in — is entirely up to you.
 
 ## The Review Trail
 
@@ -77,7 +77,7 @@ When no author-produced trail exists, the workflow generates one from the diff a
 
 ## When to Use It
 
-The primary scenario is the handoff from `bmad-build`: the implementation is done, the spec file is open in your editor with a review trail appended, and you need to decide whether to ship. Say "checkpoint" and go.
+The primary scenario is the handoff from `bmad-build`: the implementation is done, the spec file is open in your editor with a review trail appended, and you need to decide whether to ship. Say "walkthrough" and go.
 
 It also works standalone:
 
@@ -85,8 +85,8 @@ It also works standalone:
 - **Onboarding to a change** — when you need to understand what happened on a branch you didn't write
 - **Sprint review** — the workflow can pick up stories marked `review` in your sprint status file
 
-Invoke it by saying "checkpoint" or "walk me through this change." It works in any terminal, but you'll get more out of it inside an IDE — VS Code, Cursor, or similar — because the workflow produces `path:line` references at every step. In an IDE-embedded terminal those are clickable, so you can jump from file to file as you follow the review trail.
+Invoke it by saying "walkthrough" or "walk me through this change." It works in any terminal, but you'll get more out of it inside an IDE — VS Code, Cursor, or similar — because the workflow produces `path:line` references at every step. In an IDE-embedded terminal those are clickable, so you can jump from file to file as you follow the review trail.
 
 ## What It Is Not
 
-Checkpoint Preview is not a substitute for automated review. It does not run linters, type checkers, or test suites. It does not assign severity scores or produce pass/fail verdicts. It is a reading guide that helps a human apply their judgment where it matters most.
+Walkthrough is not a substitute for automated review. It does not run linters, type checkers, or test suites. It does not assign severity scores or produce pass/fail verdicts. It is a reading guide that helps a human apply their judgment where it matters most.

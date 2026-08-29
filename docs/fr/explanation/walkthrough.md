@@ -1,13 +1,13 @@
 ---
-title: "Checkpoint Preview"
+title: "Parcourir un changement"
 description: Revue assistée par LLM, avec intervention humaine, qui vous guide à travers une modification, de son objectif jusqu’aux détails
 sidebar:
   order: 8
 ---
 
-`bmad-checkpoint-preview` est un workflow de revue interactif, assisté par LLM, avec intervention humaine. Il vous guide à travers une modification de code — de l’intention et du contexte jusqu’aux détails — afin que vous puissiez prendre une décision éclairée sur la mise en production, la refonte ou l’approfondissement.
+`bmad-walkthrough` est un workflow de revue interactif, assisté par LLM, avec intervention humaine. Il vous guide à travers une modification de code — de l’intention et du contexte jusqu’aux détails — afin que vous puissiez prendre une décision éclairée sur la mise en production, la refonte ou l’approfondissement.
 
-![Diagramme du workflow Checkpoint Preview](/diagrams/checkpoint-preview-diagram-fr.webp)
+![Diagramme du workflow Walkthrough](/diagrams/walkthrough-diagram-fr.webp)
 
 ## Le Flux Typique
 
@@ -15,7 +15,7 @@ Vous lancez `bmad-build`. Il clarifie votre intention, construit une spécificat
 
 Vous pourriez survoler le diff. Mais 20 fichiers, c’est le moment où le survol commence à échouer — on perd le fil, on rate un lien entre deux modifications éloignées, ou on approuve quelque chose qu’on n’a pas pleinement compris. Alors au lieu de cela, vous dites « checkpoint » et le LLM vous guide à travers la modification.
 
-Ce passage de relais — de l’implémentation autonome au jugement humain — est le cas d’usage principal. Quick-dev s’exécute longtemps avec une supervision minimale. Checkpoint Preview, c’est là où vous reprenez le volant.
+Ce passage de relais — de l’implémentation autonome au jugement humain — est le cas d’usage principal. Build s’exécute longtemps avec une supervision minimale. Walkthrough, c’est là où vous reprenez le volant.
 
 ## Pourquoi
 
@@ -23,7 +23,7 @@ La revue de code a deux modes d’échec. Dans le premier, le réviseur survole 
 
 Le problème sous-jacent est le séquençage. Un diff brut présente les modifications dans l’ordre des fichiers, ce qui est presque jamais l’ordre qui construit la compréhension. Vous voyez une fonction utilitaire avant de savoir pourquoi elle existe. Vous voyez une modification de schéma avant de comprendre quelle fonctionnalité elle supporte. Le réviseur doit reconstruire l’intention de l’auteur à partir d’indices dispersés, et c’est cette reconstruction qui fait défaut à l’attention.
 
-Checkpoint Preview résout ce problème en confiant le travail de reconstruction au LLM. Il lit le diff, la spécification (si elle existe) et la base de code environnante, puis présente la modification dans un ordre conçu pour la compréhension — et non pour `git diff`.
+Walkthrough résout ce problème en confiant le travail de reconstruction au LLM. Il lit le diff, la spécification (si elle existe) et la base de code environnante, puis présente la modification dans un ordre conçu pour la compréhension — et non pour `git diff`.
 
 ## Comment ça fonctionne
 
@@ -89,4 +89,4 @@ Invoquez-le en disant « checkpoint » ou « guide-moi à travers cette mo
 
 ## Ce que ce n’est pas
 
-Checkpoint Preview ne remplace pas la revue automatisée. Il ne lance pas de linters, de vérificateurs de types ou de suites de tests. Il n’attribue pas de scores de sévérité et ne produit pas de verdicts pass/échec. C’est un guide de lecture qui aide un humain à appliquer son jugement là où cela compte le plus.
+Walkthrough ne remplace pas la revue automatisée. Il ne lance pas de linters, de vérificateurs de types ou de suites de tests. Il n’attribue pas de scores de sévérité et ne produit pas de verdicts pass/échec. C’est un guide de lecture qui aide un humain à appliquer son jugement là où cela compte le plus.
