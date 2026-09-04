@@ -32,6 +32,8 @@ Substitute the runtime placeholders (e.g. `{diff_output}`) into each layer's `in
 
 ### Classify
 
+If `## Review Triage Log` already has rows — a loopback or a resumed review — check each finding against them first. Same location and same claim as a logged row, and the code there still reads as the row describes: keep the row's category, write the row again with `carried` in front of the evidence, and skip re-verifying or re-routing it. Route everything else as below.
+
 1. Deduplicate only findings with the same claim and same required action. Then evaluate each remaining finding independently. Do not reject a finding because a related finding was rejected.
 2. Assign severity to each finding by consequence for the artifact's main consumer (software user, document reader, etc).
    Disregard any severity assigned by a reviewing subagent. Review subagents operate under by-design information asymmetry and do not have enough context to set final severity for this workflow.
