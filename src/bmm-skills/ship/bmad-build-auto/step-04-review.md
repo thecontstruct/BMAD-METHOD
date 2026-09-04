@@ -95,7 +95,7 @@ Prepare `Auto Run Result` details:
 - Summary of implemented change
 - Files changed with one-line descriptions
 - Review findings breakdown: patches applied, items deferred, items rejected
-- Follow-up review recommendation: count only this pass's findings triaged `patch` — never defer or reject. `true` if any patched finding was `high` severity, or if `3 × medium count + 1 × low count` is 5 or more; otherwise `false`. Record the patched counts by severity and the score.
+- Follow-up review recommendation: default `false`. Count only this pass's findings triaged `patch` — never defer or reject. On a first pass, `true` if any patched finding was `high` severity, or if `3 × medium count + 1 × low count` is 5 or more. On a follow-up pass (`{followup_pass}` = `true`), `true` only if this pass patched a `high` — otherwise the work has converged; patch volume is never grounds. A `true` names the specific unverified risk under `## Auto Run Result`; if none can be named, it is `false`. Record the patched counts by severity and the score.
 - Verification performed, including command outcomes or manual inspection notes
 - Any residual risks
 
