@@ -87,10 +87,11 @@ Emit each gap with the canonical fields plus this lens's extras:
 
 - `location` — the changed surface: the exact behavior or contract that changed, `file:line`
 - `trigger_condition` — the gap, in one line
-- `guard_snippet` — the missing verification: the precise assertion or check that's absent, optionally with the test shape that would close it, fit to the repo's own way of verifying — don't impose a generic test pyramid
+- `guard_snippet` — the missing verification: the precise assertion or check that's absent
 - `potential_consequence` — the concrete thing that ships wrong: the regression the checked evidence would not catch, or the site that should use the new behavior and doesn't, with why the tests you checked would not fail
 - `gap_shape` — `"regression-gap"`, `"missing-adoption-gap"`, `"broken-verification-gap"`, or `"other"`
 - `consumer` — the impacted consumer or site, named concretely with `file:line` (e.g. "the `createInvoice` mutation used by the billing dashboard at `billing/dashboard.ts:88`", not "callers of this function")
 - `evidence` — what you actually checked: what the relevant test asserts with `file:line`; or, if none, the symbol/import-reference searches run and their result; for a broken-verification gap, the apparent test and why it does not count
+- `disposition` — required for any `gap_shape` other than `"other"`: `patch` — name the test to add, fit to the repo's own way of verifying (don't impose a generic test pyramid) — or `defer` when the gap is real but not worth closing as part of this change, with one sentence of why. Triage trusts a gap finding as filed and does not re-verify it, so its `evidence` and `disposition` must stand on their own.
 
-For `gap_shape: "other"` findings the four canonical fields suffice (description only); `consumer` and `evidence` are optional. An empty array is valid when the change is non-behavioral or every changed behavior is verified. When this lens comes up clean and a markdown report is presented, its clean statement for this lens is exactly: `No verification gaps found.`
+For `gap_shape: "other"` findings the four canonical fields suffice (description only); `consumer`, `evidence`, and `disposition` are optional — these are ordinary defects for standard triage, however this lens found them. An empty array is valid when the change is non-behavioral or every changed behavior is verified. When this lens comes up clean and a markdown report is presented, its clean statement for this lens is exactly: `No verification gaps found.`
