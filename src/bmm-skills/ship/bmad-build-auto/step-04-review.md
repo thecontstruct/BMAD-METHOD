@@ -30,6 +30,8 @@ Announce skipped layers first, then launch every active layer before handling an
 
 ### Classify
 
+If `## Review Triage Log` already has rows — a loopback, a resumed review, or a follow-up pass on a `done` spec — check each finding against them first. Same location and same claim as a logged row, and the code there still reads as the row describes: keep the row's category, write the row again with `carried` in front of the evidence, and skip re-verifying or re-routing it. Route everything else as below.
+
 1. Deduplicate only findings with the same claim and same required action. Then evaluate each remaining finding independently. Do not reject a finding because a related finding was rejected.
 2. Assign severity to each finding by consequence for the artifact's main consumer (software user, document reader, etc).
    Disregard any severity assigned by a reviewing subagent. Review subagents operate under by-design information asymmetry and do not have enough context to set final severity for this workflow.
@@ -62,7 +64,17 @@ Announce skipped layers first, then launch every active layer before handling an
 5. Process findings in cascading order. If intent_gap exists, lower findings are moot; follow the intent_gap branch below. If bad_spec exists, lower findings are moot since code will be re-derived. If neither exists, process patch and defer normally. Before each bad_spec loopback, read `{spec_file}` frontmatter `review_loop_iteration` (missing means `0`), increment it by 1, and write it back. If it exceeds 5, append the triage-log entry for this pass with `addressed_findings: none`, then HALT with status `blocked` and blocking condition `review repair loop exceeded 5 iterations (non-convergence)`.
    - **intent_gap** — Root cause is inside `<intent-contract>`. Save the attempted change as a patch file in `{implementation_artifacts}` and reference it from the triage-log entry, then revert code changes. Append the triage-log entry for this pass with `addressed_findings: none`, then HALT with status `blocked`, blocking condition `intent gap`, and include the unresolved questions and the saved patch path.
    - **bad_spec** — Root cause is outside `<intent-contract>`. Do not modify content inside `<intent-contract>`. Before reverting code: extract KEEP instructions for positive preservation (what worked well and must survive re-derivation). Revert code changes. Read the `## Spec Change Log` in `{spec_file}` and strictly respect all logged constraints when amending the sections outside `<intent-contract>` that contain the root cause. Append a new change-log entry recording: the triggering finding, what was amended, the known-bad state avoided, and the KEEP instructions. Append the triage-log entry for this pass, listing every bad_spec finding that triggered the spec amendment and implementation loopback under `addressed_findings`. Read fully and follow `./step-03-implement.md` to re-derive the code, then this step will run again.
-   - **patch** — Auto-fix. These are the only findings that survive loopbacks. If the step-03 implementation subagent can be re-engaged with its context intact, send it all patch findings in one synchronous message — for each: the file, what is wrong, and what the fix must do. If it cannot be re-engaged, apply the patches yourself. Then re-run the commands in `{spec_file}`'s `## Verification` section (or perform its manual checks); if verification fails and the failure cannot be fixed, HALT with status `blocked` and blocking condition `patch verification failed`. Append the triage-log entry for this pass, listing every patch fixed in this pass under `addressed_findings`.
+   - **patch** — Auto-fix. These are the only findings that survive loopbacks. Re-engage the step-03 implementation subagent — the same one, addressed by the name or id its launch returned; a fresh launch is not re-engagement. Send it one message, exactly this, with the findings filled in:
+
+     ```text
+     Review of your implementation found problems. Fix each one below with the smallest change that does the job.
+
+     Run only the tests that cover the files you edit — nothing wider. Full verification runs on my side after you return. Reply with what you changed.
+
+     - <file> — <what is wrong> — <what the smallest fix must do>
+     ```
+
+     If it cannot be continued, apply the patches yourself. Then re-run the commands in `{spec_file}`'s `## Verification` section (or perform its manual checks); if verification fails and the failure cannot be fixed, HALT with status `blocked` and blocking condition `patch verification failed`. Rewrite `{diff_output}` so it reflects the patched tree. Append the triage-log entry for this pass, listing every patch fixed in this pass under `addressed_findings`.
    - **defer** — Update the single `deferred` list in `{spec_file}` frontmatter. If the field is absent (including on specs created before this field existed), add it once as an empty list. If it is `deferred: []`, replace that empty value when adding the first item; otherwise append to the existing list. Preserve every existing item, do not look for duplicates, and never add a second `deferred:` key. Serialize free-form values as YAML block scalars so characters such as `:`, `#`, quotes, and line breaks remain data. Each item uses this shape:
      ```yaml
      deferred:
@@ -83,7 +95,7 @@ Prepare `Auto Run Result` details:
 - Summary of implemented change
 - Files changed with one-line descriptions
 - Review findings breakdown: patches applied, items deferred, items rejected
-- Follow-up review recommendation: count only this pass's findings triaged `patch` — never defer or reject. `true` if any patched finding was `high` severity, or if `3 × medium count + 1 × low count` is 5 or more; otherwise `false`. Record the patched counts by severity and the score.
+- Follow-up review recommendation: default `false`. Count only this pass's findings triaged `patch` — never defer or reject. On a first pass, `true` if any patched finding was `high` severity, or if `3 × medium count + 1 × low count` is 5 or more. On a follow-up pass (`{followup_pass}` = `true`), `true` only if this pass patched a `high` — otherwise the work has converged; patch volume is never grounds. A `true` names the specific unverified risk under `## Auto Run Result`; if none can be named, it is `false`. Record the patched counts by severity and the score.
 - Verification performed, including command outcomes or manual inspection notes
 - Any residual risks
 
