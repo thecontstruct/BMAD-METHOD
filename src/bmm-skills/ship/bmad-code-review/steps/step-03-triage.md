@@ -18,8 +18,6 @@
 
 2. **Render a verdict on each finding before grouping.** Once every layer has reported, verify each claim at its named location independently. Read past the diff hunk into callers, guards, and validation far enough to determine whether its claimed consequence actually occurs. A neighboring finding's outcome never settles this one.
 
-   A gap finding from the verification-gap layer arrives pre-verified — that layer's evidence rules made it read the tests and run the searches it cites, and triage trusts the claim as filed. Skip verification, render the verdict from the filed evidence, and weigh its filed `disposition` when routing. That layer's `gap_shape: "other"` findings are verified like everything else.
-
 3. **Assign severity** from that verified consequence for the artifact's main consumer (software user, document reader, etc).
    Disregard any severity assigned by a reviewing subagent. Review subagents operate under by-design information asymmetry and do not have enough context to set final severity for this workflow.
    - `low` -- none or cosmetic
