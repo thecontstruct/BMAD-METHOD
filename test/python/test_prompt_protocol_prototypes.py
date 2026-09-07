@@ -49,7 +49,7 @@ class TestPromptProtocolPilots(unittest.TestCase):
             review = (install / "bmm" / "bmad-code-review" / "steps" / "step-02-review.md").read_text(encoding="utf-8")
             lock = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
 
-            self.assertIn("--skill {skill-root} --key agent", agent)
+            self.assertIn("--skill {skill-root} --project-root {project-root} --key agent", agent)
             self.assertIn("Adopt the Amelia / Senior Software Engineer identity", agent)
             self.assertIn("Entries prefixed `file:`", agent)
             self.assertIn("Do not begin the main workflow until all activation steps have been completed.", agent)

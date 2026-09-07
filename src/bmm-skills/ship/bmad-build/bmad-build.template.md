@@ -71,7 +71,7 @@ A specification should target a **single user-facing goal** within **900–1600 
 
 ### Step 1: Resolve the Workflow Block
 
-Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`
+Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --project-root {project-root} --key workflow`
 
 <<include path="_shared/fragments/resolver-fallback.md" skill_kind="workflow">>
 ### Step 2: Execute Prepend Steps

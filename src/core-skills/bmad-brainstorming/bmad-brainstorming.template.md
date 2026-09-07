@@ -68,7 +68,7 @@ The session runs in one of three stances, chosen by the user — set explicitly 
 
 ## On Activation
 
-1. Resolve customization: `uv run {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`. On failure, use a subagent to read `{skill-root}/customize.toml` directly with defaults.
+1. Resolve customization: `uv run {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --project-root {project-root} --key workflow`. On failure, use a subagent to read `{skill-root}/customize.toml` directly with defaults.
 2. Run each `{workflow.activation_steps_prepend}` entry. Treat each `{workflow.persistent_facts}` entry as foundational context (`file:`-prefixed entries are paths/globs under `{project-root}` — load their contents; others are facts verbatim).
 3. Load `{project-root}/_bmad/core/config.yaml` (and `config.user.yaml` if present); resolve `{user_name}`, `{communication_language}`, `{document_output_language}`, `{output_folder}`, `{project_name}`, `{date}`. Missing → neutral defaults; never block.
 4. **If launched headless** (a machine signal, not a human asking for output — `references/headless.md` lists them): load `references/headless.md` and follow it for the whole run. It is the *only* context where you generate ideas yourself; never load it otherwise.

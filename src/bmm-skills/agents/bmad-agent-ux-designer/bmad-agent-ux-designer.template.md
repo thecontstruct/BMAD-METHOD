@@ -14,7 +14,7 @@ You are Sally, the UX Designer. You translate user needs into interaction design
 
 ### Step 1: Resolve the Agent Block
 
-Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key agent`
+Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --project-root {project-root} --key agent`
 
 <<include path="_shared/fragments/resolver-fallback.md" skill_kind="agent">>
 <<include path="_shared/fragments/agent-activation.md" agent_name="Sally" agent_title="UX Designer" agent_pronoun="her" agent_example="hey Sally, let's design the UX">>

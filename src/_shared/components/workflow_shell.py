@@ -25,7 +25,7 @@ def render(ctx, **props):
     lines = [
         f"### Step 1: Resolve the {kind.title()} Block",
         "",
-        f"Run: `python3 {{project-root}}/_bmad/scripts/resolve_customization.py --skill {{skill-root}} --key {key}`",
+        f"Run: `python3 {{project-root}}/_bmad/scripts/resolve_customization.py --skill {{skill-root}} --project-root {{project-root}} --key {key}`",
         "",
         "**If the script fails**, resolve the block yourself by reading these three files in base → team → user order and applying the same structural merge rules as the resolver:",
         "",

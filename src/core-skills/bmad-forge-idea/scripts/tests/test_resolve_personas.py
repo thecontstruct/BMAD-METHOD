@@ -5,6 +5,7 @@
 """Unit tests for resolve_personas.py — pool merge, alias, party resolution."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,22 @@ class TestAlias(unittest.TestCase):
 
     def test_passes_through_unprefixed(self):
         self.assertEqual(rp._alias("morpheus"), "morpheus")
+
+
+class TestResolverInvocation(unittest.TestCase):
+    def test_passes_project_root_to_the_customization_resolver(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            captured = []
+            original = rp._run_json
+            rp._run_json = lambda cmd: captured.append(cmd) or {"workflow": {}}
+            try:
+                rp.load_party_workflow(Path(temp_dir) / "project", Path(temp_dir) / "skill")
+            finally:
+                rp._run_json = original
+
+            command = captured[0]
+            self.assertIn("--project-root", command)
+            self.assertEqual(command[command.index("--project-root") + 1], str(Path(temp_dir) / "project"))
 
 
 class TestBuildPool(unittest.TestCase):

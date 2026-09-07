@@ -58,14 +58,60 @@ _MISSING = object()
 
 
 def find_project_root(start: Path) -> Path | None:
+    """Nearest ancestor holding `_bmad/`, falling back to the nearest `.git`."""
+    git_root: Path | None = None
     current = start.resolve()
     while True:
-        if (current / "_bmad").exists() or (current / ".git").exists():
+        if (current / "_bmad").is_dir():
             return current
+        if git_root is None and (current / ".git").exists():
+            git_root = current
         parent = current.parent
         if parent == current:
-            return None
+            return git_root
         current = parent
+
+
+def script_project_root() -> Path | None:
+    """Return the project root implied by an installed resolver path."""
+    parents = Path(__file__).resolve().parents
+    if len(parents) >= 3 and parents[0].name == "scripts" and parents[1].name == "_bmad":
+        return parents[2]
+    return None
+
+
+def candidate_project_roots(skill_dir: Path) -> list[Path]:
+    """Return plausible project roots, ordered by the trustworthy context."""
+    ordered: list[Path] = []
+    for root in (
+        find_project_root(skill_dir),
+        find_project_root(Path.cwd()),
+        script_project_root(),
+    ):
+        if root is not None and root not in ordered:
+            ordered.append(root)
+    return ordered
+
+
+def has_override(root: Path, skill_name: str) -> bool:
+    custom_dir = root / "_bmad" / "custom"
+    return any(
+        (custom_dir / name).is_file()
+        for name in (f"{skill_name}.toml", f"{skill_name}.user.toml")
+    )
+
+
+def warn_on_masked_override(chosen: Path, rejected: list[Path], skill_name: str) -> None:
+    if has_override(chosen, skill_name):
+        return
+    for root in rejected:
+        if has_override(root, skill_name):
+            sys.stderr.write(
+                f"note: resolved project root {chosen} has no customization for "
+                f"`{skill_name}`, but {root} does. Using {chosen}; pass "
+                f"--project-root to select the other explicitly.\n"
+            )
+            return
 
 
 def load_toml(file_path: Path, required: bool = False) -> dict[str, Any]:
@@ -129,6 +175,10 @@ def main() -> None:
         "--key", "-k", action="append", default=[],
         help="Dotted field path to resolve (repeatable). Omit for full dump.",
     )
+    parser.add_argument(
+        "--project-root",
+        help="Project root whose _bmad/custom overrides apply.",
+    )
     args = parser.parse_args()
 
     skill_dir = Path(args.skill).resolve()
@@ -137,11 +187,13 @@ def main() -> None:
 
     defaults = load_toml(defaults_path, required=True)
 
-    # Prefer the project that contains this skill. Only fall back to cwd if
-    # the skill isn't inside a recognizable project tree (unusual but possible
-    # for standalone skills invoked directly). Using cwd first is unsafe when
-    # an ancestor of cwd happens to have a stray _bmad/ from another project.
-    project_root = find_project_root(skill_dir) or find_project_root(Path.cwd())
+    if args.project_root:
+        project_root = Path(args.project_root).resolve()
+    else:
+        candidates = candidate_project_roots(skill_dir)
+        project_root = candidates[0] if candidates else None
+        if project_root is not None:
+            warn_on_masked_override(project_root, candidates[1:], skill_name)
 
     team: dict[str, Any] = {}
     user: dict[str, Any] = {}

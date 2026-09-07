@@ -14,7 +14,7 @@ description: 'Generate end to end automated tests for existing features. Use whe
 
 ### Step 1: Resolve the Workflow Block
 
-Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow`
+Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --project-root {project-root} --key workflow`
 
 <<include path="_shared/fragments/resolver-fallback.md" skill_kind="workflow">>
 <<include path="_shared/fragments/workflow-activation.md" config_path="{project-root}/_bmad/bmm/config.yaml" skill_kind="workflow">>
