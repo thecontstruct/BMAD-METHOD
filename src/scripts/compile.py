@@ -266,7 +266,7 @@ def _run_install_phase(install_dir: Path) -> int:
                     errors += 1
             return  # do not recurse into skill subdirs
 
-        for entry in entries:
+        for entry in sorted(entries, key=lambda entry: entry.name):
             if entry.is_dir():
                 _walk(entry, depth + 1)
 

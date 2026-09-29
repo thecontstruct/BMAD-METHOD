@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
@@ -53,6 +54,47 @@ def _run_compile_skill(install_dir: Path, args: list[str]) -> tuple[int, str, st
         text=True,
     )
     return result.returncode, result.stdout, result.stderr
+
+
+def _compile_runtime_owner(
+    install_str: str,
+    module: str,
+    skill: str,
+    barrier: multiprocessing.synchronize.Barrier,
+    result_path: str,
+) -> None:
+    """Compile one prepared runtime-artifact skill in a separate process."""
+    scripts_dir = str(Path(__file__).resolve().parents[2] / "src" / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from bmad_compile import engine as child_engine
+
+    original_records = child_engine._method_runtime_artifact_records
+
+    def synchronized_records(*args: object, **kwargs: object) -> object:
+        records = original_records(*args, **kwargs)
+        # The fixed compiler reaches this hook while holding the lock. Its first
+        # caller times out and commits; the second then sees that ownership.
+        # Without the transaction, both callers pass ownership validation here.
+        try:
+            barrier.wait(timeout=2)
+        except Exception:
+            pass
+        return records
+
+    child_engine._method_runtime_artifact_records = synchronized_records
+    try:
+        install = Path(install_str)
+        child_engine.compile_skill(
+            install / module / skill,
+            install,
+            target_ide=None,
+            lockfile_root=install,
+            override_root=install / "custom",
+        )
+        Path(result_path).write_text("ok", encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - child result is asserted by parent
+        Path(result_path).write_text(f"fail:{type(exc).__name__}:{exc}", encoding="utf-8")
 
 
 class TestInstallPhaseHappyPath(unittest.TestCase):
@@ -106,6 +148,137 @@ class TestInstallPhaseHappyPath(unittest.TestCase):
             self.assertTrue((install / "core" / "my-core-skill" / "SKILL.md").is_file())
             # Must NOT be at install/my-core-skill/SKILL.md (old per-skill layout)
             self.assertFalse((install / "my-core-skill" / "SKILL.md").is_file())
+
+    def test_method_runtime_artifact_installs_to_fixed_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            skill_dir = install / "core" / "runtime-skill"
+            _write(
+                skill_dir / "runtime-skill.template.md",
+                """---
+name: runtime-skill
+description: Runtime artifact fixture.
+artifacts:
+  - path: runtime/tool.bin
+    source: assets/tool.bin
+    kind: method-runtime-verbatim
+---
+
+# Runtime Skill
+""",
+            )
+            source_bytes = b"\x00runtime\r\nbytes\xff"
+            source = skill_dir / "assets" / "tool.bin"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(source_bytes)
+            (install / "custom").mkdir(parents=True, exist_ok=True)
+
+            code, events, _ = _run_install_phase(install)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(next(e for e in events if e["kind"] == "summary")["errors"], 0)
+            self.assertEqual((install / "method" / "runtime" / "tool.bin").read_bytes(), source_bytes)
+            lock = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry = next(e for e in lock["entries"] if e["skill"] == "runtime-skill")
+            self.assertEqual(entry["artifacts"], [{
+                "hash": hashlib.sha256(source_bytes).hexdigest(),
+                "kind": "method-runtime-verbatim",
+                "owner": "core/runtime-skill",
+                "path": "runtime/tool.bin",
+            }])
+
+    def test_method_runtime_destination_conflict_is_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            for module, skill, content in (
+                ("alpha", "first", b"first"),
+                ("zeta", "second", b"second"),
+            ):
+                skill_dir = install / module / skill
+                _write(
+                    skill_dir / f"{skill}.template.md",
+                    f"""---
+name: {skill}
+description: Runtime artifact fixture.
+artifacts:
+  - path: runtime/tool.bin
+    source: tool.bin
+    kind: method-runtime-verbatim
+---
+
+# {skill}
+""",
+                )
+                (skill_dir / "tool.bin").write_bytes(content)
+            (install / "custom").mkdir(parents=True, exist_ok=True)
+
+            code, events, _ = _run_install_phase(install)
+
+            self.assertEqual(code, 1)
+            self.assertEqual((install / "method" / "runtime" / "tool.bin").read_bytes(), b"first")
+            errors = [event for event in events if event["kind"] == "error"]
+            self.assertEqual(len(errors), 1)
+            self.assertIn("already owned by 'alpha/first'", errors[0]["message"])
+
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX advisory locks")
+    def test_concurrent_runtime_ownership_is_one_transaction(self) -> None:
+        """Concurrent compilers leave one owner, matching bytes, and one record."""
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            owners = (("alpha", "first", b"first-bytes"), ("zeta", "second", b"second-bytes"))
+            for module, skill, content in owners:
+                skill_dir = install / module / skill
+                _write(
+                    skill_dir / f"{skill}.template.md",
+                    "---\n"
+                    f"name: {skill}\n"
+                    "description: Runtime artifact fixture.\n"
+                    "artifacts:\n"
+                    "  - path: runtime/tool.bin\n"
+                    "    source: tool.bin\n"
+                    "    kind: method-runtime-verbatim\n"
+                    "---\n\n"
+                    f"# {skill}\n",
+                )
+                (skill_dir / "tool.bin").write_bytes(content)
+            (install / "custom").mkdir(parents=True, exist_ok=True)
+
+            context = multiprocessing.get_context("spawn")
+            barrier = context.Barrier(2)
+            result_paths = [install / "first.result", install / "second.result"]
+            processes = [
+                context.Process(
+                    target=_compile_runtime_owner,
+                    args=(str(install), module, skill, barrier, str(result_path)),
+                )
+                for (module, skill, _), result_path in zip(owners, result_paths)
+            ]
+            for process in processes:
+                process.start()
+            for process in processes:
+                process.join(timeout=30)
+                self.assertFalse(process.is_alive(), "compiler process did not finish")
+                self.assertEqual(process.exitcode, 0)
+
+            outcomes = [path.read_text(encoding="utf-8") for path in result_paths]
+            self.assertEqual(sum(outcome == "ok" for outcome in outcomes), 1)
+            self.assertEqual(sum(outcome.startswith("fail:CompilerError:") for outcome in outcomes), 1)
+            lock = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            runtime_entries = [
+                (entry["skill"], artifact)
+                for entry in lock["entries"]
+                for artifact in entry.get("artifacts", [])
+                if artifact.get("kind") == "method-runtime-verbatim"
+            ]
+            self.assertEqual(len(runtime_entries), 1)
+            owner_skill, artifact = runtime_entries[0]
+            expected = next(
+                content
+                for module, skill, content in owners
+                if f"{module}/{skill}" == artifact["owner"]
+            )
+            self.assertEqual(owner_skill, artifact["owner"].split("/", 1)[1])
+            self.assertEqual((install / "method" / artifact["path"]).read_bytes(), expected)
 
 
 class TestInstallPhaseNoSkills(unittest.TestCase):

@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import json
 import sys  # pragma: allow-raw-io  (stderr write for AC-5 defensive warning)
+from contextlib import contextmanager
 from typing import Any, Callable
 
 from . import errors, io, resolver
@@ -170,6 +171,31 @@ def _lockfile_lock_path(install_dir_or_lockfile_path: PurePosixPath) -> str:
         return str(posix.parent / ".bmad.lock.lock")
     # Install-dir form — canonical _config/.bmad.lock.lock subpath.
     return str(posix / "_config" / ".bmad.lock.lock")
+
+
+@contextmanager
+def locked(lockfile_path: str, *, timeout_seconds: float = 300.0):
+    """Hold the lockfile's advisory lock for one compound transaction.
+
+    Callers that need to mutate files whose validity depends on lockfile state
+    can use this to extend the existing lockfile transaction, then call
+    ``write_skill_entry_locked`` before releasing it.
+    """
+    lockfile_posix = io.to_posix(lockfile_path)
+    lock_dir = lockfile_posix.parent
+    if not io.is_dir(str(lock_dir)):
+        from pathlib import Path as _Path  # pragma: allow-raw-io
+        _Path(str(lock_dir)).mkdir(parents=True, exist_ok=True)  # pragma: allow-raw-io
+    lock_fd = io.acquire_lock(
+        _lockfile_lock_path(lockfile_posix), timeout_seconds=timeout_seconds
+    )
+    try:
+        yield
+    finally:
+        try:
+            io.release_lock(lock_fd)
+        except OSError:
+            pass
 
 
 def _normalize_path(absolute_path: str, scenario_root: PurePosixPath) -> str:
@@ -327,22 +353,8 @@ def write_skill_entry(
     ``lazy_compile.py``'s ``--lock-timeout-seconds`` default). On timeout,
     ``LockTimeoutError`` propagates without modifying the lockfile.
     """
-    # Derive the lock-file path from the lockfile_path itself (sibling
-    # in the same directory). _lockfile_lock_path detects the basename
-    # form and chooses the right placement.
-    _lockfile_posix = io.to_posix(lockfile_path)
-    _lock_path = _lockfile_lock_path(_lockfile_posix)
-    # Ensure the lockfile's parent dir exists so the lock fd can be
-    # created. The lockfile itself may not exist yet (first compile),
-    # but its directory must.
-    _lock_dir = _lockfile_posix.parent
-    if not io.is_dir(str(_lock_dir)):
-        from pathlib import Path as _Path  # pragma: allow-raw-io
-        _Path(str(_lock_dir)).mkdir(parents=True, exist_ok=True)  # pragma: allow-raw-io
-
-    _lock_fd = io.acquire_lock(_lock_path, timeout_seconds=lock_timeout_seconds)
-    try:
-        _do_write_skill_entry(
+    with locked(lockfile_path, timeout_seconds=lock_timeout_seconds):
+        write_skill_entry_locked(
             lockfile_path,
             scenario_root,
             skill_basename,
@@ -358,16 +370,42 @@ def write_skill_entry(
             shared_data_files=shared_data_files,  # Story 10.58: v4 field
             emit_fn=emit_fn,
         )
-    finally:
-        # io.release_lock is documented no-throw (swallows OSError per
-        # Story 5.5a), but defensive try/except OSError ensures an
-        # exception inside the RMW body is not masked by a release-side
-        # fault. AC-2: "if release_lock ever raises, wrap ... so the
-        # in-flight write-window exception is not masked".
-        try:
-            io.release_lock(_lock_fd)
-        except OSError:
-            pass
+
+
+def write_skill_entry_locked(
+    lockfile_path: str,
+    scenario_root: PurePosixPath,
+    skill_basename: str,
+    *,
+    source_text: str,
+    compiled_text: str,
+    dep_tree: list[Any],
+    var_scope: resolver.VariableScope,
+    target_ide: str | None,
+    cache: resolver.CompileCache,
+    components: list[dict] | None = None,
+    artifacts: list[dict[str, Any]] | None = None,
+    deprecations: list[dict[str, Any]] | None = None,
+    shared_data_files: list[str] | None = None,
+    emit_fn: "Callable[[dict], None] | None" = None,
+) -> None:
+    """Update one lockfile entry while ``locked(lockfile_path)`` is held."""
+    _do_write_skill_entry(
+        lockfile_path,
+        scenario_root,
+        skill_basename,
+        source_text=source_text,
+        compiled_text=compiled_text,
+        dep_tree=dep_tree,
+        var_scope=var_scope,
+        target_ide=target_ide,
+        cache=cache,
+        components=components,
+        artifacts=artifacts,
+        deprecations=deprecations,
+        shared_data_files=shared_data_files,
+        emit_fn=emit_fn,
+    )
 
 
 def _do_write_skill_entry(

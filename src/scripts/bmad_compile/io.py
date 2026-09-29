@@ -108,6 +108,36 @@ def write_text(path: PathLike, content: str) -> None:
         raise
 
 
+def write_bytes(path: PathLike, content: bytes) -> None:
+    """Atomically write bytes without newline or encoding normalization."""
+    dest = _fs(path)
+    fd: int | None = None
+    tmp: Path | None = None
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)  # pragma: allow-raw-io
+        fd, tmp_str = tempfile.mkstemp(  # pragma: allow-raw-io
+            dir=str(dest.parent), prefix=".tmp-bmad-", suffix=".write"
+        )
+        tmp = Path(tmp_str)  # pragma: allow-raw-io
+        with os.fdopen(fd, "wb") as f:  # pragma: allow-raw-io
+            fd = None  # fdopen now owns the descriptor
+            f.write(content)
+        os.replace(tmp, dest)  # pragma: allow-raw-io
+        tmp = None  # replace succeeded; nothing to clean up
+    except BaseException:
+        if tmp is not None:
+            try:
+                tmp.unlink(missing_ok=True)  # pragma: allow-raw-io
+            except OSError:
+                pass
+        if fd is not None:
+            try:
+                os.close(fd)  # pragma: allow-raw-io
+            except OSError:
+                pass
+        raise
+
+
 def is_dir(path: PathLike) -> bool:
     """Return True if `path` exists and is a directory."""
     return _fs(path).is_dir()  # pragma: allow-raw-io

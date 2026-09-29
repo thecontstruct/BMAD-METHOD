@@ -74,7 +74,7 @@ class Artifact:
     """
     path: str    # install-dir-relative POSIX path
     source: str  # skill_dir-relative POSIX path
-    kind: Literal["scaffold-verbatim", "step-template"]
+    kind: Literal["scaffold-verbatim", "step-template", "method-runtime-verbatim"]
 
 
 def _extract_artifacts_from_frontmatter(source: str) -> "list[Artifact]":
@@ -122,10 +122,11 @@ def _extract_artifacts_from_frontmatter(source: str) -> "list[Artifact]":
                 f"frontmatter `artifacts:` entry must be a dict, got {type(entry).__name__!r}"
             )
         kind = entry.get("kind")
-        if kind not in ("scaffold-verbatim", "step-template"):
+        if kind not in ("scaffold-verbatim", "step-template", "method-runtime-verbatim"):
             raise errors.CompilerError(
                 f"frontmatter artifact `kind` {kind!r} is not supported"
-                " (valid kinds: 'scaffold-verbatim', 'step-template')"
+                " (valid kinds: 'scaffold-verbatim', 'step-template', "
+                "'method-runtime-verbatim')"
             )
         _source = str(entry["source"])
         if kind == "step-template" and not _source.endswith(".template.md"):
@@ -139,6 +140,124 @@ def _extract_artifacts_from_frontmatter(source: str) -> "list[Artifact]":
             kind=kind,
         ))
     return result
+
+
+def _safe_relative_artifact_path(path: str, *, label: str) -> None:
+    """Reject artifact paths that could escape their declared destination root."""
+    segments = path.split("/")
+    if (
+        not path
+        or path.startswith("/")
+        or any(segment in ("", ".", "..") for segment in segments)
+        or (len(segments[0]) >= 2 and segments[0][1] == ":")
+    ):
+        raise errors.CompilerError(
+            f"artifact {label} {path!r} is not a safe relative POSIX path"
+        )
+
+
+def _method_runtime_destination(
+    runtime_root: "io.PathLike", artifact_path: str
+) -> "io.PurePosixPath":
+    """Return a contained destination for a method-runtime artifact."""
+    return io.ensure_within_root(
+        io.to_posix(runtime_root) / artifact_path,
+        runtime_root,
+    )
+
+
+def _method_runtime_artifact_records(
+    artifacts: "list[Artifact]",
+    skill_posix: "io.PurePosixPath",
+    lockfile_path: str,
+    owner: str,
+    runtime_root: "io.PathLike",
+) -> "list[tuple[Artifact, bytes, dict[str, Any]]]":
+    """Read and validate method-runtime artifacts before the write barrier."""
+    runtime_artifacts = [a for a in artifacts if a.kind == "method-runtime-verbatim"]
+    prepared: list[tuple[Artifact, bytes, dict[str, Any]]] = []
+    seen_paths: set[str] = set()
+    for artifact in sorted(runtime_artifacts, key=lambda a: (a.path, a.source)):
+        if "\\" in artifact.path or "\\" in artifact.source:
+            raise errors.CompilerError(
+                "method-runtime artifact path and source must use POSIX separators"
+            )
+        _safe_relative_artifact_path(artifact.path, label="path")
+        _safe_relative_artifact_path(artifact.source, label="source")
+        if artifact.path in seen_paths:
+            raise errors.CompilerError(
+                f"method-runtime artifact destination {artifact.path!r} is declared more than once"
+            )
+        seen_paths.add(artifact.path)
+
+        source_abs = io.ensure_within_root(skill_posix / artifact.source, skill_posix)
+        _method_runtime_destination(runtime_root, artifact.path)
+        if not io.is_file(str(source_abs)):
+            raise errors.CompilerError(
+                f"method-runtime artifact source {artifact.source!r} is not a file within '{skill_posix}'"
+            )
+        content = io.read_bytes(str(source_abs))
+        prepared.append((artifact, content, {
+            "hash": io.sha256_hex(content),
+            "kind": artifact.kind,
+            "owner": owner,
+            "path": artifact.path,
+        }))
+
+    if not prepared or not io.is_file(lockfile_path):
+        return prepared
+    try:
+        existing = json.loads(io.read_template(lockfile_path))
+    except (json.JSONDecodeError, OSError, UnicodeError, ValueError) as exc:
+        raise errors.CompilerError(
+            "cannot verify method-runtime artifact ownership because the existing "
+            f"lockfile is unreadable or malformed: {lockfile_path}"
+        ) from exc
+    if not isinstance(existing, dict):
+        raise errors.CompilerError(
+            "cannot verify method-runtime artifact ownership because the existing "
+            f"lockfile is malformed: {lockfile_path}"
+        )
+
+    claimed: dict[str, set[str]] = {}
+    for entry in existing.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        fallback_owner = entry.get("skill")
+        for recorded in entry.get("artifacts") or []:
+            if (
+                isinstance(recorded, dict)
+                and recorded.get("kind") == "method-runtime-verbatim"
+                and isinstance(recorded.get("path"), str)
+            ):
+                recorded_owner = recorded.get("owner", fallback_owner)
+                if isinstance(recorded_owner, str):
+                    claimed.setdefault(recorded["path"], set()).add(recorded_owner)
+
+    ambiguous_claims = [
+        (path, sorted(owners))
+        for path, owners in claimed.items()
+        if len(owners) > 1
+    ]
+    if ambiguous_claims:
+        destination, owners = sorted(ambiguous_claims)[0]
+        raise errors.CompilerError(
+            f"existing lockfile has conflicting method-runtime artifact owners for "
+            f"{destination!r}: {owners!r}"
+        )
+
+    conflicts = [
+        (record["path"], next(iter(claimed[record["path"]])))
+        for _, _, record in prepared
+        if record["path"] in claimed and owner not in claimed[record["path"]]
+    ]
+    if conflicts:
+        destination, existing_owner = sorted(conflicts)[0]
+        raise errors.CompilerError(
+            f"method-runtime artifact destination {destination!r} is already owned by "
+            f"{existing_owner!r}; {owner!r} cannot also install it"
+        )
+    return prepared
 
 
 def _resolve_step_template_source(
@@ -1316,7 +1435,6 @@ def compile_skill(
     # combined invocation buffer has unique keys (DN-TOKEN-INDEX-REMAP r1).
     _step_template_arts = [a for a in artifacts if a.kind == "step-template"]
     _scaffold_verbatim_arts = [a for a in artifacts if a.kind == "scaffold-verbatim"]
-
     # Initial offset: conservative upper bound on root token index space.
     _token_offset = len(flat_nodes)
     # Each step-result tuple: (enriched_nodes, compile_invs, jit_invs, bare_ide, source_text, source_hash, artifact)
@@ -1400,72 +1518,91 @@ def compile_skill(
     # Any exception above (scan, discover, batch, assemble) leaves the install
     # dir untouched — FR-6.1 atomicity extended to all roots (AC-18).
     install_posix = io.to_posix(install_dir)
-    io.write_text(str(output_path), rendered)
+    # A method-runtime destination is shared by all skills. Validate its
+    # declaration and ownership before writing *any* output. The same lock
+    # continues through the raw-byte write and lockfile update so concurrent
+    # compilers cannot both claim the destination.
+    with lockfile.locked(lockfile_path):
+        _method_runtime_arts = _method_runtime_artifact_records(
+            artifacts,
+            skill_posix,
+            lockfile_path,
+            f"{_current_module}/{basename}",
+            install_posix / "method",
+        )
 
-    # Step-template output writes (Story 10.63).
-    for _i, _sr in enumerate(_step_results):
-        _st_art_ref = _sr[6]
-        if lockfile_root is not None:
-            _step_dest = install_posix / _current_module / basename / _st_art_ref.path
-        else:
-            _step_dest = install_posix / basename / _st_art_ref.path
-        io.write_text(str(_step_dest), _step_rendered[_i])
+        io.write_text(str(output_path), rendered)
 
-    # Story 10.25: FR-3 scaffold-verbatim artifact emission (unchanged).
-    artifacts_records: list[dict[str, Any]] = []
-    for artifact in _scaffold_verbatim_arts:
-        # Path safety: source escape guard (raises OverrideOutsideRootError on escape).
-        source_abs = io.ensure_within_root(skill_posix / artifact.source, skill_posix)
-        # Path safety: path must be non-absolute POSIX without .. segments.
-        _path_segs = artifact.path.split("/")
-        if (
-            artifact.path.startswith("/")
-            or any(seg == ".." for seg in _path_segs)
-            or (len(_path_segs[0]) >= 2 and _path_segs[0][1] == ":")
-        ):
-            raise errors.CompilerError(
-                f"artifact path {artifact.path!r} is not a safe relative POSIX path"
+        # Step-template output writes (Story 10.63).
+        for _i, _sr in enumerate(_step_results):
+            _st_art_ref = _sr[6]
+            if lockfile_root is not None:
+                _step_dest = install_posix / _current_module / basename / _st_art_ref.path
+            else:
+                _step_dest = install_posix / basename / _st_art_ref.path
+            io.write_text(str(_step_dest), _step_rendered[_i])
+
+        # Story 10.25: FR-3 scaffold-verbatim artifact emission (unchanged).
+        artifacts_records: list[dict[str, Any]] = []
+        for artifact in _scaffold_verbatim_arts:
+            # Path safety: source escape guard (raises OverrideOutsideRootError on escape).
+            source_abs = io.ensure_within_root(skill_posix / artifact.source, skill_posix)
+            # Path safety: path must be non-absolute POSIX without .. segments.
+            _path_segs = artifact.path.split("/")
+            if (
+                artifact.path.startswith("/")
+                or any(seg == ".." for seg in _path_segs)
+                or (len(_path_segs[0]) >= 2 and _path_segs[0][1] == ":")
+            ):
+                raise errors.CompilerError(
+                    f"artifact path {artifact.path!r} is not a safe relative POSIX path"
+                )
+            if lockfile_root is not None:
+                artifact_dest = install_posix / _current_module / basename / artifact.path
+            else:
+                artifact_dest = install_posix / basename / artifact.path
+            content = io.read_template(str(source_abs))
+            io.write_text(str(artifact_dest), content)
+            artifacts_records.append({
+                "hash": io.hash_text(content),
+                "kind": artifact.kind,
+                "path": str(io.to_posix(artifact.path)),
+            })
+
+        # Story 10.63: step-template artifact records (additive within existing artifacts[]).
+        # kind: "step-template"; includes source_hash and variant for drift detection.
+        for _i, _sr in enumerate(_step_results):
+            _st_art_ref = _sr[6]
+            artifacts_records.append({
+                "hash": io.hash_text(_step_rendered[_i]),
+                "kind": "step-template",
+                "path": str(io.to_posix(_st_art_ref.path)),
+                "source_hash": _sr[5],   # source_hash
+                "variant": _sr[3],       # bare IDE name or None
+            })
+
+        for artifact, content, _record in _method_runtime_arts:
+            io.write_bytes(
+                str(_method_runtime_destination(install_posix / "method", artifact.path)),
+                content,
             )
-        if lockfile_root is not None:
-            artifact_dest = install_posix / _current_module / basename / artifact.path
-        else:
-            artifact_dest = install_posix / basename / artifact.path
-        content = io.read_template(str(source_abs))
-        io.write_text(str(artifact_dest), content)
-        artifacts_records.append({
-            "hash": io.hash_text(content),
-            "kind": artifact.kind,
-            "path": str(io.to_posix(artifact.path)),
-        })
-
-    # Story 10.63: step-template artifact records (additive within existing artifacts[]).
-    # kind: "step-template"; includes source_hash and variant for drift detection.
-    for _i, _sr in enumerate(_step_results):
-        _st_art_ref = _sr[6]
-        artifacts_records.append({
-            "hash": io.hash_text(_step_rendered[_i]),
-            "kind": "step-template",
-            "path": str(io.to_posix(_st_art_ref.path)),
-            "source_hash": _sr[5],   # source_hash
-            "variant": _sr[3],       # bare IDE name or None
-        })
-
-    lockfile.write_skill_entry(
-        lockfile_path,
-        scenario_root,
-        basename,
-        source_text=source_text,
-        compiled_text=rendered,
-        dep_tree=dep_tree,
-        var_scope=var_scope,
-        target_ide=tid,
-        cache=cache,
-        components=component_records,
-        artifacts=artifacts_records,  # Story 10.25/10.63: scaffold-verbatim + step-template records
-        deprecations=deprecations,    # Story 10.27: FR-13
-        shared_data_files=_shared_data_file_names,  # Story 10.58: v3→v4 field
-        emit_fn=emit_fn,
-    )
+        artifacts_records.extend(record for _, _, record in _method_runtime_arts)
+        lockfile.write_skill_entry_locked(
+            lockfile_path,
+            scenario_root,
+            basename,
+            source_text=source_text,
+            compiled_text=rendered,
+            dep_tree=dep_tree,
+            var_scope=var_scope,
+            target_ide=tid,
+            cache=cache,
+            components=component_records,
+            artifacts=artifacts_records,
+            deprecations=deprecations,
+            shared_data_files=_shared_data_file_names,
+            emit_fn=emit_fn,
+        )
 
     # Story 10.27: FR-13 deprecation channel — warn on deprecated customize.toml keys.
     # Fires once per deprecated key per compile. For all 22 current skills,

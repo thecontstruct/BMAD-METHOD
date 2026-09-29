@@ -12,6 +12,7 @@ Tests:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io as _stdlib_io
 import json
 import sys
@@ -178,6 +179,19 @@ artifacts:
 Body text.
 """
 
+METHOD_RUNTIME_TEMPLATE = """\
+---
+name: runtime-skill
+description: Test skill with a method runtime artifact.
+artifacts:
+  - path: runtime/tool.bin
+    source: assets/tool.bin
+    kind: method-runtime-verbatim
+---
+
+# Runtime Skill
+"""
+
 CSV_CONTENT = "method,description\nmethod_a,First\nmethod_b,Second\n"
 
 
@@ -219,6 +233,13 @@ class TestExtractArtifactsFromFrontmatter(unittest.TestCase):
         result = _extract_artifacts_from_frontmatter("# Just a title\n\nBody.\n")
         self.assertEqual(result, [])
 
+    def test_method_runtime_verbatim_artifact_is_accepted(self) -> None:
+        result = _extract_artifacts_from_frontmatter(METHOD_RUNTIME_TEMPLATE)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].kind, "method-runtime-verbatim")
+        self.assertEqual(result[0].path, "runtime/tool.bin")
+        self.assertEqual(result[0].source, "assets/tool.bin")
+
 
 # ---------------------------------------------------------------------------
 # AC-5: Path traversal / absolute path rejection in compile_skill
@@ -255,6 +276,174 @@ class TestArtifactPathSafety(unittest.TestCase):
             with self.assertRaises(errors.CompilerError):
                 engine.compile_skill(skill_dir, install,
                                      component_runner=_mock_runner())
+
+
+class TestMethodRuntimeArtifactIntegration(unittest.TestCase):
+
+    def _make_runtime_skill(
+        self,
+        root: Path,
+        module: str,
+        skill: str,
+        *,
+        path: str = "runtime/tool.bin",
+        source: str = "assets/tool.bin",
+        content: bytes = b"\x00runtime\r\nbytes\xff",
+    ) -> Path:
+        skill_dir = root / module / skill
+        template = METHOD_RUNTIME_TEMPLATE.replace("runtime-skill", skill).replace(
+            "runtime/tool.bin", path
+        ).replace("assets/tool.bin", source)
+        _make_skill(skill_dir, template)
+        if source and not source.startswith("/") and ".." not in source.split("/"):
+            source_path = skill_dir / source
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_bytes(content)
+        return skill_dir
+
+    def test_installs_bytes_verbatim_and_records_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            source_bytes = b"\x00runtime\r\nbytes\xff"
+            skill_dir = self._make_runtime_skill(
+                install, "core", "runtime-skill", content=source_bytes
+            )
+
+            engine.compile_skill(
+                skill_dir, install, lockfile_root=install, component_runner=_mock_runner()
+            )
+
+            destination = install / "method" / "runtime" / "tool.bin"
+            self.assertEqual(destination.read_bytes(), source_bytes)
+            lock = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            entry = next(e for e in lock["entries"] if e["skill"] == "runtime-skill")
+            artifact = entry["artifacts"][0]
+            self.assertEqual(artifact["kind"], "method-runtime-verbatim")
+            self.assertEqual(artifact["path"], "runtime/tool.bin")
+            self.assertEqual(artifact["owner"], "core/runtime-skill")
+            self.assertEqual(artifact["hash"], hashlib.sha256(source_bytes).hexdigest())
+
+    def test_rejects_unsafe_runtime_paths_and_sources(self) -> None:
+        cases = (
+            ("../escape.bin", "assets/tool.bin"),
+            ("runtime/tool.bin", "../escape.bin"),
+            ("/outside.bin", "assets/tool.bin"),
+            ("runtime/tool.bin", "/outside.bin"),
+            ("runtime\\tool.bin", "assets/tool.bin"),
+            ("runtime/tool.bin", "assets\\tool.bin"),
+        )
+        for path, source in cases:
+            with self.subTest(path=path, source=source), tempfile.TemporaryDirectory() as tmp:
+                install = Path(tmp) / "_bmad"
+                skill_dir = self._make_runtime_skill(install, "core", "runtime-skill", path=path, source=source)
+                with self.assertRaises(errors.CompilerError):
+                    engine.compile_skill(
+                        skill_dir, install, lockfile_root=install, component_runner=_mock_runner()
+                    )
+                self.assertFalse((install / "method").exists())
+                self.assertFalse((install / "core" / "runtime-skill" / "SKILL.md").exists())
+                self.assertFalse((install / "_config" / "bmad.lock").exists())
+
+    def test_rejects_existing_lockfile_with_conflicting_runtime_owners(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            skill_dir = self._make_runtime_skill(install, "core", "runtime-skill")
+            lock_path = install / "_config" / "bmad.lock"
+            _write(lock_path, json.dumps({"entries": [
+                {"skill": "alpha/first", "artifacts": [{
+                    "kind": "method-runtime-verbatim",
+                    "owner": "alpha/first",
+                    "path": "runtime/tool.bin",
+                }]},
+                {"skill": "zeta/second", "artifacts": [{
+                    "kind": "method-runtime-verbatim",
+                    "owner": "zeta/second",
+                    "path": "runtime/tool.bin",
+                }]},
+            ]}))
+
+            with self.assertRaisesRegex(errors.CompilerError, "conflicting method-runtime artifact owners"):
+                engine.compile_skill(
+                    skill_dir, install, lockfile_root=install, component_runner=_mock_runner()
+                )
+
+            self.assertFalse((install / "method").exists())
+            self.assertFalse((install / "core" / "runtime-skill" / "SKILL.md").exists())
+
+    def test_same_owner_recompile_updates_runtime_bytes_and_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            skill_dir = self._make_runtime_skill(
+                install, "core", "runtime-skill", content=b"first-bytes"
+            )
+            source = skill_dir / "assets" / "tool.bin"
+            destination = install / "method" / "runtime" / "tool.bin"
+            lock_path = install / "_config" / "bmad.lock"
+
+            engine.compile_skill(
+                skill_dir, install, lockfile_root=install, component_runner=_mock_runner()
+            )
+            first_hash = json.loads(lock_path.read_text(encoding="utf-8"))["entries"][0]["artifacts"][0]["hash"]
+
+            source.write_bytes(b"second-bytes")
+            engine.compile_skill(
+                skill_dir, install, lockfile_root=install, component_runner=_mock_runner()
+            )
+
+            second_hash = json.loads(lock_path.read_text(encoding="utf-8"))["entries"][0]["artifacts"][0]["hash"]
+            self.assertEqual(destination.read_bytes(), b"second-bytes")
+            self.assertEqual(second_hash, hashlib.sha256(b"second-bytes").hexdigest())
+            self.assertNotEqual(second_hash, first_hash)
+
+    def test_rejects_destination_owned_by_another_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            first = self._make_runtime_skill(
+                install, "alpha", "first", content=b"first"
+            )
+            second = self._make_runtime_skill(
+                install, "zeta", "second", content=b"second"
+            )
+            second_template = second / "second.template.md"
+            second_template.write_text(
+                second_template.read_text(encoding="utf-8").replace(
+                    "    kind: method-runtime-verbatim\n",
+                    "    kind: method-runtime-verbatim\n"
+                    "  - path: scaffold.txt\n"
+                    "    source: assets/scaffold.txt\n"
+                    "    kind: scaffold-verbatim\n",
+                ),
+                encoding="utf-8",
+            )
+            _write(second / "assets" / "scaffold.txt", "must not be emitted\n")
+            engine.compile_skill(
+                first, install, lockfile_root=install, component_runner=_mock_runner()
+            )
+            with self.assertRaisesRegex(errors.CompilerError, "already owned by 'alpha/first'"):
+                engine.compile_skill(
+                    second, install, lockfile_root=install, component_runner=_mock_runner()
+                )
+            self.assertEqual((install / "method" / "runtime" / "tool.bin").read_bytes(), b"first")
+            self.assertFalse((install / "zeta" / "second" / "SKILL.md").exists())
+            self.assertFalse((install / "zeta" / "second" / "scaffold.txt").exists())
+            lock = json.loads((install / "_config" / "bmad.lock").read_text(encoding="utf-8"))
+            self.assertEqual([entry["skill"] for entry in lock["entries"]], ["first"])
+
+    def test_rejects_malformed_existing_lockfile_before_writing_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            install = Path(tmp) / "_bmad"
+            skill_dir = self._make_runtime_skill(install, "core", "runtime-skill")
+            lock_path = install / "_config" / "bmad.lock"
+            _write(lock_path, "{ malformed lockfile")
+
+            with self.assertRaisesRegex(errors.CompilerError, "cannot verify method-runtime artifact ownership"):
+                engine.compile_skill(
+                    skill_dir, install, lockfile_root=install, component_runner=_mock_runner()
+                )
+
+            self.assertEqual(lock_path.read_text(encoding="utf-8"), "{ malformed lockfile")
+            self.assertFalse((install / "method").exists())
+            self.assertFalse((install / "core" / "runtime-skill" / "SKILL.md").exists())
 
 
 # ---------------------------------------------------------------------------
@@ -560,8 +749,33 @@ class TestArtifactDriftDetection(unittest.TestCase):
         self.assertEqual(report.toml_default_changes, [])
         self.assertTrue(report.has_drift())
 
-    def test_artifact_drift_no_module_inference_returns_empty(self) -> None:
-        """Entry with no fragments or variables → _infer_module returns None → []."""
+    def test_method_runtime_artifact_drift_needs_no_module_inference(self) -> None:
+        """Shared method artifacts are addressable without a skill module."""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario_root = Path(tmp)
+            runtime_path = scenario_root / "method" / "runtime" / "tool.bin"
+            runtime_path.parent.mkdir(parents=True, exist_ok=True)
+            runtime_path.write_bytes(b"original\x00bytes")
+            entry = {
+                "skill": "orphan-skill",
+                "fragments": [],
+                "variables": [],
+                "artifacts": [{
+                    "hash": io.sha256_hex(b"original\x00bytes"),
+                    "kind": "method-runtime-verbatim",
+                    "path": "runtime/tool.bin",
+                }],
+            }
+            self.assertEqual(_detect_artifact_drift(entry, scenario_root), [])
+            runtime_path.write_bytes(b"changed\xffbytes")
+            result = _detect_artifact_drift(entry, scenario_root)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0].artifact_path, "runtime/tool.bin")
+            self.assertEqual(result[0].tier, "method-runtime-verbatim")
+            self.assertEqual(result[0].install_hash, io.sha256_hex(b"changed\xffbytes"))
+
+    def test_ordinary_artifact_without_module_inference_returns_empty(self) -> None:
+        """Ordinary artifacts still require a module to reconstruct their path."""
         with tempfile.TemporaryDirectory() as tmp:
             entry = {
                 "skill": "orphan-skill",

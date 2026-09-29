@@ -469,11 +469,8 @@ def _detect_artifact_drift(
     if not artifact_entries:
         return []  # fast path — all 22 current skills have artifacts: []
 
-    module = _infer_module(entry)
-    if module is None:
-        return []  # cannot reconstruct install path; skip safely
-
     skill_basename: str = entry["skill"]
+    module = _infer_module(entry)
     result: list[ArtifactDrift] = []
 
     for art in artifact_entries:
@@ -481,12 +478,20 @@ def _detect_artifact_drift(
         old_hash: str = art["hash"]
         tier: str = art.get("kind", "scaffold-verbatim")
 
-        install_abs = scenario_root / module / skill_basename / art_path
+        if tier == "method-runtime-verbatim":
+            install_abs = scenario_root / "method" / art_path
+        else:
+            if module is None:
+                # Ordinary artifacts live under the inferred module/skill
+                # directory, so they remain unverifiable without that context.
+                continue
+            install_abs = scenario_root / module / skill_basename / art_path
 
         if install_abs.is_file():  # pragma: allow-raw-io
-            # Use CRLF-normalized read (same path as io.write_text used at emit time).
-            install_hash: str | None = io.hash_text(
-                io.read_template(str(install_abs))  # pragma: allow-raw-io
+            install_hash: str | None = (
+                io.sha256_hex(str(install_abs))
+                if tier == "method-runtime-verbatim"
+                else io.hash_text(io.read_template(str(install_abs)))
             )
         else:
             install_hash = None  # artifact missing from install dir
