@@ -12,13 +12,13 @@ const customize = fs.readFileSync(path.join(root, 'src/bmm-skills/ship/bmad-code
 const triage = fs.readFileSync(path.join(root, 'src/bmm-skills/ship/bmad-code-review/steps/step-03-triage.md'), 'utf8');
 
 const checks = [
-  ['explicit no-spec requests skip the spec question', gather.includes('explicitly') && gather.includes('Do **not** ask for a spec')],
-  ['unspecified context requires a user choice', gather.includes('ask the user to choose') && gather.includes('Continue without a spec')],
+  ['explicit no-plan requests skip the plan question', gather.includes('explicitly') && gather.includes('Do not ask.') && gather.includes('no-plan')],
+  ['unspecified context requires a user choice', gather.includes('ask the user to provide a plan') && gather.includes('continue without one')],
   ['test-only removals can be verification gaps', lens.includes('test-only change') && lens.includes('broken-verification gap')],
   ['verification lens stops at inference boundaries', lens.includes('stop at the inference boundary')],
   [
     'claims narrative is staged without exposing it to every layer',
-    gather.includes('claims_file') && gather.includes('edge-case layer only'),
+    gather.includes('claims_file') && gather.includes('Do not analyze or summarize it.'),
   ],
   [
     'edge-case lens falsifies claims after path tracing',

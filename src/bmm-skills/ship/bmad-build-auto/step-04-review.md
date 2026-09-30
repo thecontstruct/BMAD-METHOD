@@ -8,11 +8,11 @@
 
 ## INSTRUCTIONS
 
-Change `{spec_file}` status to `in-review` in the frontmatter before continuing.
+Change `{plan_file}` status to `in-review` in the frontmatter before continuing.
 
 ### Construct Diff
 
-Read `{baseline_revision}` from `{spec_file}` frontmatter. If `{baseline_revision}` is missing or `NO_VCS`, use best effort to determine what changed. Otherwise, construct `{diff_output}` covering all changes — tracked and untracked — since `{baseline_revision}`.
+Read `{baseline_revision}` from `{plan_file}` frontmatter. If `{baseline_revision}` is missing or `NO_VCS`, use best effort to determine what changed. Otherwise, construct `{diff_output}` covering all changes — tracked and untracked — since `{baseline_revision}`.
 
 Do NOT `git add` anything — this is read-only inspection.
 
@@ -22,9 +22,9 @@ The review layers are `{workflow.review_layers}`, resolved during activation.
 
 Skip every layer whose `instruction` is empty or missing — that is how an override disables a default layer — and every layer whose `when` condition (if present) does not hold in the current context. If no layers remain, HALT with status `blocked` and blocking condition `no active review layers`.
 
-Runtime placeholders: `{diff_output}` is the diff constructed above. `{verbatim_intent}` is the invocation intent exactly as this run received it at step-01; if the run started from an existing spec file rather than a fresh intent, it is the spec's `<intent-contract>` block instead.
+Runtime placeholders: `{diff_output}` is the diff constructed above. `{verbatim_intent}` is the invocation intent exactly as this run received it at step-01; if the run started from an existing plan file rather than a fresh intent, it is the plan's `<intent-contract>` block instead.
 
-   Scope authority: a finding may be routed to defer or reject *as out of scope* only on the authority of the intent itself. The spec's scope language, the plan, and the diff's own shape are not admissible scope authorities — if only they exclude a finding, treat it as evidence against the chosen reading (intent_gap or bad_spec), not as out of scope.
+   Scope authority: a finding may be routed to defer or reject *as out of scope* only on the authority of the intent itself. The spec's scope language, the plan, and the diff's own shape are not admissible scope authorities — if only they exclude a finding, treat it as evidence against the chosen reading (intent_gap or bad_plan), not as out of scope.
 
 Announce skipped layers first, then launch every active layer before handling any layer's result. Try running all active layers simultaneously: substitute the runtime placeholders (e.g. `{diff_output}`) into each layer's `instruction`, then follow it verbatim. Parallel means several blocking calls awaited together in this turn — never backgrounded or detached, never ending the turn to await results (see SKILL.md → Subagents). Spawn every reviewer subagent before reading or reacting to any of their output; begin collection and triage only once all are launched.
 
@@ -39,31 +39,31 @@ If `## Review Triage Log` already has rows — a loopback, a resumed review, or 
    - `medium`: tolerable
    - `high`: intolerable
 3. Route each finding into exactly one triage category. The first three categories are **this story's problem** — caused or exposed by the current change. The last two are **not this story's problem**.
-   - **intent_gap** — caused by the change; cannot be resolved from the spec because the captured intent is incomplete. Do not infer intent unless there is exactly one possible reading.
-   - **bad_spec** — caused by the change, including direct deviations from spec. The spec should have been clear enough to prevent it. When in doubt between bad_spec and patch, prefer bad_spec — a spec-level fix is more likely to produce coherent code.
+   - **intent_gap** — caused by the change; cannot be resolved from the plan because the captured intent is incomplete. Do not infer intent unless there is exactly one possible reading.
+   - **bad_plan** — caused by the change, including direct deviations from spec. The spec should have been clear enough to prevent it. When in doubt between bad_plan and patch, prefer bad_plan — a plan-level fix is more likely to produce coherent code.
    - **patch** — caused by the change; trivially fixable without human input. Just part of the diff.
    - **defer** — pre-existing issue not caused by this story, surfaced incidentally by the review. Collect for later focused attention.
    - **reject** — noise. Drop silently. When unsure between defer and reject, prefer reject — only defer findings you are confident are real.
-4. Append a new entry to the `## Review Triage Log` section in `{spec_file}`, in this format:
+4. Append a new entry to the `## Review Triage Log` section in `{plan_file}`, in this format:
    ```markdown
    ### {date} — Review pass
    - intent_gap: count
-   - bad_spec: count
+   - bad_plan: count
    - patch: count
    - defer: count
    - reject: count
    - addressed_findings:
-     - `[high|medium|low]` `[patch|bad_spec]` <finding summary and action taken in this pass>
+     - `[high|medium|low]` `[patch|bad_plan]` <finding summary and action taken in this pass>
    ```
    Where `count` is either just `0`, or total with breakdown by severity `N: (high Nhigh, medium Nmedium, low Nlow)`.
-   If no patch was fixed and no bad_spec repair loopback was triggered in this pass, write:
+   If no patch was fixed and no bad_plan repair loopback was triggered in this pass, write:
    ```markdown
    - addressed_findings:
      - none
    ```
-5. Process findings in cascading order. If intent_gap exists, lower findings are moot; follow the intent_gap branch below. If bad_spec exists, lower findings are moot since code will be re-derived. If neither exists, process patch and defer normally. Before each bad_spec loopback, read `{spec_file}` frontmatter `review_loop_iteration` (missing means `0`), increment it by 1, and write it back. If it exceeds 5, append the triage-log entry for this pass with `addressed_findings: none`, then HALT with status `blocked` and blocking condition `review repair loop exceeded 5 iterations (non-convergence)`.
+5. Process findings in cascading order. If intent_gap exists, lower findings are moot; follow the intent_gap branch below. If bad_plan exists, lower findings are moot since code will be re-derived. If neither exists, process patch and defer normally. Before each bad_plan loopback, read `{plan_file}` frontmatter `review_loop_iteration` (missing means `0`), increment it by 1, and write it back. If it exceeds 5, append the triage-log entry for this pass with `addressed_findings: none`, then HALT with status `blocked` and blocking condition `review repair loop exceeded 5 iterations (non-convergence)`.
    - **intent_gap** — Root cause is inside `<intent-contract>`. Save the attempted change as a patch file in `{implementation_artifacts}` and reference it from the triage-log entry, then revert code changes. Append the triage-log entry for this pass with `addressed_findings: none`, then HALT with status `blocked`, blocking condition `intent gap`, and include the unresolved questions and the saved patch path.
-   - **bad_spec** — Root cause is outside `<intent-contract>`. Do not modify content inside `<intent-contract>`. Before reverting code: extract KEEP instructions for positive preservation (what worked well and must survive re-derivation). Revert code changes. Read the `## Spec Change Log` in `{spec_file}` and strictly respect all logged constraints when amending the sections outside `<intent-contract>` that contain the root cause. Append a new change-log entry recording: the triggering finding, what was amended, the known-bad state avoided, and the KEEP instructions. Append the triage-log entry for this pass, listing every bad_spec finding that triggered the spec amendment and implementation loopback under `addressed_findings`. Read fully and follow `./step-03-implement.md` to re-derive the code, then this step will run again.
+   - **bad_plan** — Root cause is outside `<intent-contract>`. Do not modify content inside `<intent-contract>`. Before reverting code: extract KEEP instructions for positive preservation (what worked well and must survive re-derivation). Revert code changes. Read the `## Plan Change Log` in `{plan_file}` and strictly respect all logged constraints when amending the sections outside `<intent-contract>` that contain the root cause. Append a new change-log entry recording: the triggering finding, what was amended, the known-bad state avoided, and the KEEP instructions. Append the triage-log entry for this pass, listing every bad_plan finding that triggered the plan amendment and implementation loopback under `addressed_findings`. Read fully and follow `./step-03-implement.md` to re-derive the code, then this step will run again.
    - **patch** — Auto-fix. These are the only findings that survive loopbacks. Re-engage the step-03 implementation subagent — the same one, addressed by the name or id its launch returned; a fresh launch is not re-engagement. Send it one message, exactly this, with the findings filled in:
 
      ```text
@@ -74,8 +74,8 @@ If `## Review Triage Log` already has rows — a loopback, a resumed review, or 
      - <file> — <what is wrong> — <what the smallest fix must do>
      ```
 
-     If it cannot be continued, apply the patches yourself. Then re-run the commands in `{spec_file}`'s `## Verification` section (or perform its manual checks); if verification fails and the failure cannot be fixed, HALT with status `blocked` and blocking condition `patch verification failed`. Rewrite `{diff_output}` so it reflects the patched tree. Append the triage-log entry for this pass, listing every patch fixed in this pass under `addressed_findings`.
-   - **defer** — Update the single `deferred` list in `{spec_file}` frontmatter. If the field is absent (including on specs created before this field existed), add it once as an empty list. If it is `deferred: []`, replace that empty value when adding the first item; otherwise append to the existing list. Preserve every existing item, do not look for duplicates, and never add a second `deferred:` key. Serialize free-form values as YAML block scalars so characters such as `:`, `#`, quotes, and line breaks remain data. Each item uses this shape:
+     If it cannot be continued, apply the patches yourself. Then re-run the commands in `{plan_file}`'s `## Verification` section (or perform its manual checks); if verification fails and the failure cannot be fixed, HALT with status `blocked` and blocking condition `patch verification failed`. Rewrite `{diff_output}` so it reflects the patched tree. Append the triage-log entry for this pass, listing every patch fixed in this pass under `addressed_findings`.
+   - **defer** — Update the single `deferred` list in `{plan_file}` frontmatter. If the field is absent (including on plans created before this field existed), add it once as an empty list. If it is `deferred: []`, replace that empty value when adding the first item; otherwise append to the existing list. Preserve every existing item, do not look for duplicates, and never add a second `deferred:` key. Serialize free-form values as YAML block scalars so characters such as `:`, `#`, quotes, and line breaks remain data. Each item uses this shape:
      ```yaml
      deferred:
        - summary: >-
@@ -99,10 +99,10 @@ Prepare `Auto Run Result` details:
 - Verification performed, including command outcomes or manual inspection notes
 - Any residual risks
 
-Set `{spec_file}` frontmatter `followup_review_recommended` from the computation above.
+Set `{plan_file}` frontmatter `followup_review_recommended` from the computation above.
 
-If version control is available, commit every file in the reviewed diff — including `{spec_file}` when it is tracked. Do not push. After committing, verify the commit contains each file from the reviewed diff; if any is missing, add it and amend before proceeding. Anything still visible in `git status --porcelain` is by definition not part of the change: leave it in place — do not commit, delete, or gitignore it — and list it under `Auto Run Result` as residual artifacts.
+If version control is available, commit every file in the reviewed diff — including `{plan_file}` when it is tracked. Do not push. After committing, verify the commit contains each file from the reviewed diff; if any is missing, add it and amend before proceeding. Anything still visible in `git status --porcelain` is by definition not part of the change: leave it in place — do not commit, delete, or gitignore it — and list it under `Auto Run Result` as residual artifacts.
 
-Set `{spec_file}` frontmatter `status: done` before that final commit. Do not record `final_revision`: it creates a self-referential revision boundary and is no longer part of the spec contract.
+Set `{plan_file}` frontmatter `status: built` before that final commit. A ticket-tree plan never advances itself to `done`; only a user or orchestrator may run `tickets.py mark`. Do not record `final_revision`: it creates a self-referential revision boundary and is no longer part of the plan contract.
 
-HALT with status `done`.
+HALT with status `built`.

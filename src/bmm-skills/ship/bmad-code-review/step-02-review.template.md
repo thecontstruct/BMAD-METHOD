@@ -16,18 +16,18 @@ failed_layers: '' # set at runtime: comma-separated list of layers that failed o
 
 2. For each layer in `{workflow.review_layers}`:
    - `instruction` empty or missing → drop the layer silently (an override disabled it).
-   - `when` condition present and not satisfied by the current context (`{review_mode}`, `{spec_file}`) → drop the layer and tell the user, e.g. "Acceptance Auditor skipped — no spec file provided."
+   - `when` condition present and not satisfied by the current context (`{review_mode}`, `{plan_file}`) → drop the layer and tell the user, e.g. "Acceptance Auditor skipped — no plan file provided."
    - otherwise → the layer is active.
 
    If no layer is active, HALT with status `blocked` and blocking condition `no active review layers`.
 
-3. Announce skipped layers first, then launch every active layer before handling any layer's result. Try running all active layers simultaneously. <<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch parallel subagents without conversation context." fallback_action="generate prompt files in `{implementation_artifacts}` for each layer and HALT. Ask the user to run each in a separate session (ideally a different LLM) and paste back the findings. When findings are pasted, resume from this point.">> Substitute the runtime placeholders (`{diff_file}`, `{claims_file}`, `{spec_file}`) into each layer's `instruction`, then follow it verbatim. `{diff_file}` is an absolute path: let the layer read it; do not paste its contents into a launch prompt. For the no-subagents fallback only, inline the staged diff into each generated prompt because that session may not share this filesystem.
+3. Announce skipped layers first, then launch every active layer before handling any layer's result. Try running all active layers simultaneously. <<include path="_shared/fragments/sub-agent-activation.template.md" spawn_action="Launch parallel subagents without conversation context." fallback_action="generate prompt files in `{implementation_artifacts}` for each layer and HALT. Ask the user to run each in a separate session (ideally a different LLM) and paste back the findings. When findings are pasted, resume from this point.">> Substitute the runtime placeholders (`{diff_file}`, `{claims_file}`, `{plan_file}`) into each layer's `instruction`, then follow it verbatim. `{diff_file}` is an absolute path: let the layer read it; do not paste its contents into a launch prompt. For the no-subagents fallback only, inline the staged diff into each generated prompt because that session may not share this filesystem.
 
 4. **Layer failure handling**: If any layer fails, times out, or returns empty results, append the layer's `name` to `{failed_layers}` (comma-separated) and proceed with findings from the remaining layers.
 
 5. Collect all findings from the completed layers, keeping track of each finding's originating layer `id`.
 
-<EvidenceGate subject="the collected code-review findings" dimensions="correctness,acceptance criteria,edge cases,operability" evidence="source location,observed behavior,diff or specification context" deletion_check="required" />
+<EvidenceGate subject="the collected code-review findings" dimensions="correctness,acceptance criteria,edge cases,operability" evidence="source location,observed behavior,diff or plan context" deletion_check="required" />
 
 ## NEXT
 

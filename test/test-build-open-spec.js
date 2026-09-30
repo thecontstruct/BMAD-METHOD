@@ -11,16 +11,15 @@ const present = fs.readFileSync(path.join(buildDir, 'step-05-present.template.md
 const oneshot = fs.readFileSync(path.join(buildDir, 'step-oneshot.template.md'), 'utf8');
 
 const checks = [
-  ['customize exposes open_spec', /open_spec\s*=\s*"""[\s\S]*\{project-root\}[\s\S]*\{spec_file\}/.test(customize)],
-  ['present route delegates editor behavior to open_spec', present.includes('{workflow.open_spec}') && !present.includes('code -r')],
-  ['one-shot route delegates editor behavior to open_spec', oneshot.includes('{workflow.open_spec}') && !oneshot.includes('code -r')],
+  ['customize exposes open_plan', /open_plan\s*=\s*"""[\s\S]*\{project-root\}[\s\S]*\{plan_file\}/.test(customize)],
+  ['present route delegates editor behavior to open_plan', present.includes('{workflow.open_plan}') && !present.includes('code -r')],
+  ['one-shot route delegates editor behavior to open_plan', oneshot.includes('{workflow.open_plan}') && !oneshot.includes('code -r')],
   [
-    'folder-plus-id dispatch keeps story specs beside stories.yaml',
-    route.includes("spec_folder: ''") &&
-      route.includes("story_id: ''") &&
-      route.includes('{spec_folder}/stories.yaml') &&
-      route.includes('{spec_folder}/stories/{story_id}-*.md') &&
-      route.includes('keep the colocated `{spec_file}` selected above'),
+    'ticket-tree routing resolves plans through the shared runtime',
+    route.includes("ticket_args: ''") &&
+      route.includes('tickets.py --project-root {project-root} find') &&
+      route.includes('tickets.py --project-root {project-root} next') &&
+      route.includes('find.plan'),
   ],
 ];
 

@@ -26,23 +26,39 @@ activation_steps_append = []
 
 persistent_facts = []
 
+# Execution route: oneshot implements directly, full uses a coding handoff, and auto chooses after planning.
+route = "auto"
+
+route_selection = """
+Choose oneshot for a clear, localized change of about 100 lines or fewer. Choose full otherwise, especially for non-mechanical work touching more than five files.
+"""
+
+# Handoff for the full route. The plan is the sole source of truth.
+implementation_handoff = """
+Launch a subagent with no prior conversation context, with this prompt:
+
+> Read {plan_file} fully and implement it — the plan is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.
+>
+> When done, report what you changed, how you verified it, and anything left incomplete or risky.
+"""
+
 # Instruction run after Build completes.
 # Empty means no extra completion behavior.
 
 on_complete = ""
 
-# How Build opens a completed spec for human review. Override with the editor
+# How Build opens a completed plan for human review. Override with the editor
 # and equivalent behavior you prefer, or set this to an empty string to
 # disable automatic opening and all related completion output. `{project-root}`
-# and `{spec_file}` are substituted at run time.
+# and `{plan_file}` are substituted at run time.
 #
 # Example overrides:
-# - `Run \`cursor -r "{project-root}" "{spec_file}"\`, root first.`
-# - `Run \`cd "{project-root}" && vim "{spec_file}"\`.`
+# - `Run \`cursor -r "{project-root}" "{plan_file}"\`, root first.`
+# - `Run \`cd "{project-root}" && vim "{plan_file}"\`.`
 # - `""` to disable automatic opening.
 
-open_spec = """
-Run `code -r "{project-root}" "{spec_file}"` — the repository root first so VS Code opens in the right context, then the spec file. Always double-quote both paths to handle spaces and special characters. If `code` is unavailable or the command fails, skip gracefully and tell the user the spec file path instead. In the completion summary, note that the spec was sent to VS Code and that it contains a Suggested Review Order, then add this navigation tip: "Ctrl+click (Cmd+click on macOS) the links in the Suggested Review Order to jump to each stop."
+open_plan = """
+Run `code -r "{project-root}" "{plan_file}"` — the repository root first so VS Code opens in the right context, then the plan file. Always double-quote both paths to handle spaces and planial characters. If `code` is unavailable or the command fails, skip gracefully and tell the user the plan file path instead. In the completion summary, note that the plan was sent to VS Code and that it contains a Suggested Review Order, then add this navigation tip: "Ctrl+click (Cmd+click on macOS) the links in the Suggested Review Order to jump to each stop."
 """
 
 # Review layers for the review step. `instruction` is the layer's whole

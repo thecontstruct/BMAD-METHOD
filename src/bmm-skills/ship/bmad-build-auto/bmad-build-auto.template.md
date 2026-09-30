@@ -1,6 +1,25 @@
 ---
 name: bmad-build-auto
 description: 'One iteration of an unattended development loop. Use when invoked by name.'
+artifacts:
+  - path: customize.toml
+    source: customize.toml
+    kind: scaffold-verbatim
+  - path: plan-template.md
+    source: plan-template.md
+    kind: scaffold-verbatim
+  - path: step-01-clarify-and-route.md
+    source: step-01-clarify-and-route.md
+    kind: scaffold-verbatim
+  - path: step-02-plan.md
+    source: step-02-plan.md
+    kind: scaffold-verbatim
+  - path: step-03-implement.md
+    source: step-03-implement.md
+    kind: scaffold-verbatim
+  - path: step-04-review.md
+    source: step-04-review.md
+    kind: scaffold-verbatim
 ---
 
 # Build Auto Workflow
@@ -13,28 +32,10 @@ description: 'One iteration of an unattended development loop. Use when invoked 
 
 To HALT with a final status and optional blocking condition:
 
-1. **Folder+id dispatch** (`{spec_folder}` and `{story_id}` are set): the write-back always lands at the id-keyed story spec. The `{implementation_artifacts}` fallback in step 2 below is never used in this mode, even for halts before planning starts.
-   - If `{spec_file}` is still empty, resolve it now:
-     - **Entry not resolved** (`stories.yaml` is missing/unparseable, or `{story_id}` has no matching entry): use the fixed slug segment `unresolved`: `{spec_file}` = `{spec_folder}/stories/{story_id}-unresolved.md`.
-     - **Ambiguous on-disk match** (the halt is `ambiguous story file match` — more than one file already matches `{spec_folder}/stories/{story_id}-*.md`): use the fixed slug segment `ambiguous` instead of deriving from the title, so the write-back neither creates a third title-derived candidate nor risks silently landing on one of the existing ambiguous files: `{spec_file}` = `{spec_folder}/stories/{story_id}-ambiguous.md`.
-     - **Otherwise** (the entry was resolved and no ambiguous on-disk match exists): derive `{spec_file}` = `{spec_folder}/stories/{story_id}-{slug}.md`, where `{slug}` is a kebab-case slug from `title` (and `description` if needed) with no `{story_id}` prefix — the same derivation step-01's Route uses.
-   - If `{spec_file}` exists on disk, update `status` in frontmatter and append missing result details under `## Auto Run Result`.
-   - If it does not exist, create it as a skeletal story spec:
-     ```markdown
-     ---
-     status: <final status>
-     ---
-
-     # <entry title, or "Story {story_id}" if the entry could not be resolved or the on-disk match was ambiguous>
-
-     ## Auto Run Result
-
-     Status: <final status>
-     Blocking condition: <blocking condition, if any>
-     ```
+1. **A ticket from the tree** (`{ticket_args}` is set) and final status `blocked`: run `uv run {project-root}/_bmad/method/scripts/tickets.py --project-root {project-root} mark {ticket_args} blocked --blocked <blocking condition>`. It writes status, blocked_at, and blocked_reason to `{plan_file}` and creates the plan when needed. Append missing result details under `## Auto Run Result`. If mark fails, use step 2. A `blocked plan supplied` halt leaves the existing reason untouched.
 2. **Otherwise:**
-   - If `{spec_file}` is known and exists, update `status` in frontmatter and append missing result details under `## Auto Run Result`.
-   - If `{spec_file}` is unknown or missing, create `{implementation_artifacts}/bmad-build-auto-result-<slug-or-timestamp>.md` with:
+   - If `{plan_file}` is known and exists, update `status` in frontmatter and append missing result details under `## Auto Run Result`.
+   - If `{plan_file}` is unknown or missing, create `{implementation_artifacts}/bmad-build-auto-result-<slug-or-timestamp>.md` with:
      ```markdown
      ---
      status: <final status>

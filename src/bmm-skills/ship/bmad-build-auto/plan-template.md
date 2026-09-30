@@ -1,10 +1,11 @@
 ---
 title: '{title}'
 type: 'feature' # feature | bugfix | refactor | chore
+ticket: '' # set from find.id, or find.story_file stem when no id; empty outside a tree; never find.ref
 created: '{date}'
-status: 'draft' # draft | ready-for-dev | in-progress | in-review | done | blocked
+status: 'draft' # draft | ready-for-dev | in-progress | in-review | built | done | blocked
 review_loop_iteration: 0 # incremented by step-04 before each review loopback
-followup_review_recommended: false # set by step-04 on status: done — true if the LLM decided another review pass is worthwhile
+followup_review_recommended: false # set by step-04 on status: built — true if the LLM decided another review pass is worthwhile
 context: [] # optional: `{project-root}/`-prefixed paths to project-wide standards/docs the implementation agent should load. Keep short — only what isn't already distilled into the spec body.
 warnings: [] # optional: machine-readable warnings for orchestration, e.g. oversized, multiple-goals
 deferred: [] # append-only machine-readable deferred review findings; each item carries summary/evidence and optional location/severity
@@ -63,17 +64,17 @@ deferred: [] # append-only machine-readable deferred review findings; each item 
 **Acceptance Criteria:**
 - Given PRECONDITION, when ACTION, then EXPECTED_RESULT
 
-## Spec Change Log
+## Plan Change Log
 
 <!-- Append-only. Populated by step-04 during review loops. Do not modify or delete existing entries.
      Each entry records: what finding triggered the change, what was amended, what known-bad state
      the amendment avoids, and any KEEP instructions (what worked well and must survive re-derivation).
-     Empty until the first bad_spec loopback. -->
+     Empty until the first bad_plan loopback. -->
 
 ## Review Triage Log
 
 <!-- Append-only. Populated by step-04 on EVERY review pass, including loopbacks and blocked exits.
-     Each entry records triage decision counts for intent_gap, bad_spec, patch, defer, and reject,
+     Each entry records triage decision counts for intent_gap, bad_plan, patch, defer, and reject,
      with per-category severity breakdowns using low/medium/high, plus the findings addressed in
      that pass. Empty until the first review pass. -->
 

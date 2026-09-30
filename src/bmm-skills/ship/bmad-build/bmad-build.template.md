@@ -20,6 +20,12 @@ artifacts:
   - path: step-oneshot.md
     source: step-oneshot.template.md
     kind: step-template
+  - path: customize.toml
+    source: customize.toml
+    kind: scaffold-verbatim
+  - path: plan-template.md
+    source: plan-template.md
+    kind: scaffold-verbatim
 ---
 
 # Build Workflow
@@ -112,7 +118,7 @@ This uses **step-file architecture** for disciplined execution:
 - **Micro-file Design**: Each step is self-contained and followed exactly
 - **Just-In-Time Loading**: Only load the current step file
 - **Sequential Enforcement**: Complete steps in order, no skipping
-- **State Tracking**: Persist progress via spec frontmatter and in-memory variables
+- **State Tracking**: Persist progress via plan frontmatter and in-memory variables
 - **Append-Only Building**: Build artifacts incrementally
 
 ### Step Processing Rules

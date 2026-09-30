@@ -46,20 +46,19 @@ function dedent(content) {
   return lines.map((line) => line.slice(width)).join('\n');
 }
 
-test('spec template exposes machine-readable deferred frontmatter', () => {
-  const relativePath = 'src/bmm-skills/ship/bmad-build-auto/spec-template.md';
+test('plan template exposes machine-readable deferred frontmatter', () => {
+  const relativePath = 'src/bmm-skills/ship/bmad-build-auto/plan-template.md';
   const frontmatter = parseFrontmatter(read(relativePath), relativePath);
-  assert(Array.isArray(frontmatter.deferred), 'spec-template.md frontmatter must declare deferred as a list');
-  assert(frontmatter.deferred.length === 0, 'spec-template.md deferred list must start empty');
+  assert(Array.isArray(frontmatter.deferred), 'plan-template.md frontmatter must declare deferred as a list');
+  assert(frontmatter.deferred.length === 0, 'plan-template.md deferred list must start empty');
 });
 
 test('build-auto steps preserve their frontmatter boundaries', () => {
   const root = 'src/bmm-skills/ship/bmad-build-auto';
   const stepOnePath = `${root}/step-01-clarify-and-route.md`;
   const stepOneFrontmatter = parseFrontmatter(read(stepOnePath), stepOnePath);
-  assert(stepOneFrontmatter.spec_file === '', 'step-01 must define spec_file in frontmatter');
-  assert(stepOneFrontmatter.spec_folder === '', 'step-01 must define spec_folder in frontmatter');
-  assert(stepOneFrontmatter.story_id === '', 'step-01 must define story_id in frontmatter');
+  assert(stepOneFrontmatter.plan_file === '', 'step-01 must define plan_file in frontmatter');
+  assert(stepOneFrontmatter.ticket_args === '', 'step-01 must define ticket_args in frontmatter');
 
   for (const filename of ['step-02-plan.md', 'step-04-review.md']) {
     const relativePath = `${root}/${filename}`;
@@ -68,11 +67,11 @@ test('build-auto steps preserve their frontmatter boundaries', () => {
   }
 });
 
-test('implementation handoff stays thin and spec-led', () => {
+test('implementation handoff stays thin and plan-led', () => {
   const content = read('src/bmm-skills/ship/bmad-build-auto/customize.toml');
   assert(
-    content.includes('Read {spec_file} fully and implement it — the spec is the sole source of truth.'),
-    'handoff must make the spec the implementation source of truth',
+    content.includes('Read {plan_file} fully and implement it — the plan is the sole source of truth.'),
+    'handoff must make the plan the implementation source of truth',
   );
   assert(content.includes('Load every file listed in its frontmatter `context:` before you start.'), 'handoff must load declared context');
   assert(
@@ -81,7 +80,7 @@ test('implementation handoff stays thin and spec-led', () => {
   );
   assert(!content.includes('Guardrails:'), 'handoff must not re-expand speculative guardrails');
   assert(
-    !content.includes('Spec Change Log entries are binding constraints'),
+    !content.includes('Plan Change Log entries are binding constraints'),
     'handoff must not duplicate spec detail into dispatch instructions',
   );
 });

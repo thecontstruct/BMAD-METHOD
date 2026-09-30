@@ -1,93 +1,70 @@
 ---
 diff_file: '' # set at runtime: absolute path to the staged unified diff
 claims_file: '' # set at runtime (path or empty)
-spec_file: '' # set at runtime (path or empty)
-review_mode: '' # set at runtime: "full" or "no-spec"
-story_key: '' # set at runtime when discovered from sprint status
+plan_file: '' # set at runtime (path or empty; a ticket plan or legacy story/spec)
+review_mode: '' # set at runtime: "full" or "no-plan"
+ticket_args: '' # set at runtime: resolved ticket folder/ref arguments
+story_key: '' # set only by legacy sprint-status routing
 ---
 
 # Step 1: Gather Context
 
 ## RULES
 
-- YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
+- YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`.
 - The prompt that triggered this workflow IS the intent — not a hint.
-- Writing `{diff_file}` is the only change this step may make. Otherwise it is read-only.
+- Writing `{diff_file}` and `{claims_file}` is the only change this step may make. Otherwise it is read-only.
+- Ticket-tree reads use only `uv run {project-root}/_bmad/method/scripts/tickets.py --project-root {project-root}`. Never open, edit, pull, or infer ticket state from ticket files directly.
 
 ## INSTRUCTIONS
 
 1. **Find the review target.** The conversation context before this skill was triggered IS your starting point — not a blank slate. Check in this order — stop as soon as the review target is identified:
 
-   **Tier 1 — Explicit argument.**
-   Did the user pass a PR, commit SHA, branch, spec file, or diff source this message?
+   **Tier 1 — Explicit argument or recent conversation.**
+   Did the user provide a PR, commit SHA, branch, plan or story/spec file, or diff source in this message or the recent conversation?
    - PR reference → resolve to branch/commit via `gh pr view`. If resolution fails, ask for a SHA or branch.
    - Commit or branch → use directly.
-   - Spec file → set `{spec_file}` to the provided path. Check its frontmatter for `baseline_commit`. If found, use as diff baseline. If not found, continue the cascade (a spec alone does not identify a diff source).
-   - Also scan the argument for diff-mode keywords that narrow the scope:
-     - "staged" / "staged changes" → Staged changes only
-     - "uncommitted" / "working tree" / "all changes" → Uncommitted changes (staged + unstaged)
-     - "branch diff" / "vs main" / "against main" / "compared to <branch>" → Branch diff (extract base branch if mentioned)
-     - "commit range" / "last N commits" / "<from-sha>..<to-sha>" → Specific commit range
-     - "this diff" / "provided diff" / "paste" → User-provided diff (do not match bare "diff" — it appears in other modes)
-   - When multiple keywords match, prefer the most specific (e.g., "branch diff" over bare "diff").
+   - Plan or story/spec file → set `{plan_file}` to the provided path. If its frontmatter has `baseline_revision` other than `NO_VCS`, use that as the diff baseline. For a legacy story/spec, also accept `baseline_commit`. A file without a usable baseline provides context only; continue the cascade to identify a diff source.
+   - Also scan the argument for diff-mode keywords that narrow the scope: staged changes, uncommitted/working-tree changes, branch diff, commit range, or a provided diff/file list. Prefer the most specific match.
 
-   **Tier 2 — Recent conversation.**
-   Do the last few messages reveal what the user wants to be reviewed? Look for spec paths, commit refs, branches, PRs, or descriptions of a change. Apply the same diff-mode keyword scan and routing as Tier 1.
+   **Tier 2 — Ticket tree.**
+   Run `uv run {project-root}/_bmad/method/scripts/tickets.py --project-root {project-root} status`. If it exits non-zero, say nothing about ticketing and continue to Tier 3. Otherwise offer every returned `tickets` row whose `state` is `review`, showing its `<ref>` and `<title>`, plus **Choose another target**, then HALT for the user's choice. If there are no review rows, or the user chooses another target, continue.
 
-   **Tier 3 — Sprint tracking.**
-   Look for a sprint status file (`*sprint-status*`) in `{implementation_artifacts}` or `{planning_artifacts}`. If found, scan for stories with status `review`:
-   - **Exactly one `review` story:** Set `{story_key}` to the story's key (e.g., `1-2-user-auth`). HALT and give the user a choice:
-     - **Review this story** — review the detected story `<story-id>` (status `review`).
-     - **Choose another target** — pick a different review target.
-     If the user chooses **Review this story**, use the story context to determine the diff source (branch name derived from story slug, or uncommitted changes). If they choose **Choose another target**, clear `{story_key}` and fall through.
-   - **Multiple `review` stories:** Present them as numbered options alongside a manual choice option. Wait for user selection. If a story is selected, set `{story_key}` and use its context to determine the diff source. If manual choice is selected, clear `{story_key}` and fall through.
-   - **None:** Fall through.
+   For a selected row, run `uv run {project-root}/_bmad/method/scripts/tickets.py --project-root {project-root} find <ref>`. On an error, show it and HALT. Set `{ticket_args}` to the resolved folder/ref arguments. `find.plan` is a computed path and may not exist yet (a tracker-backed ticket with no local plan). If it exists, set `{plan_file}` to it and treat that plan as the explicit context source. If it does not exist, leave `{plan_file}` empty and set `{review_mode}` = `"no-plan"` directly — do not ask the user for a plan. Either way, do not scan sprint status or legacy story records for this ticket.
+
+   **Tier 3 — Legacy sprint tracking.**
+   Only when no ticket target was resolved, look for a sprint-status file in `{implementation_artifacts}` or `{planning_artifacts}`. If found, scan for stories with status `review` and offer the existing one-or-many selection behavior. Set `{story_key}` only for that legacy selection; use its story context to determine the diff source.
 
    **Tier 4 — Current git state.**
-   If version control is unavailable, skip to Tier 5. Otherwise, check the current branch and HEAD. If the branch is not `main` (or the default branch), confirm: "I see HEAD is `<short-sha>` on `<branch>` — do you want to review this branch's changes?" If confirmed, treat as a branch diff against `main`. If declined, fall through.
+   If version control is available and HEAD is not on the default branch, confirm whether to review this branch's changes against the default branch. If declined, continue.
 
-   **Tier 5 — Ask.**
-   Fall through to instruction 2.
+   **Tier 5 — Ask.** Go to instruction 2.
 
-   Never ask extra questions beyond what the cascade prescribes. If a tier above already identified the target, skip the remaining tiers and proceed to instruction 3 (construct diff).
+   Never ask extra questions beyond this cascade. If a tier identified the target, skip remaining tiers and proceed to instruction 3.
 
-2. HALT. Ask the user: **What do you want to review?** Present these options:
-   - **Uncommitted changes** (staged + unstaged)
-   - **Staged changes only**
-   - **Branch diff** vs a base branch (ask which base branch)
-   - **Specific commit range** (ask for the range)
-   - **Provided diff or file list** (user pastes or provides a path)
+2. HALT. Ask the user: **What do you want to review?** Present: uncommitted changes, staged changes only, branch diff (ask base), commit range, or provided diff/file list.
 
-3. Stage the selected diff once in a unique system-temp file and set `{diff_file}` to its absolute path. Review layers receive this path, never the diff text.
-   - For **staged changes only**: run `git diff --cached > {diff_file}`.
-   - For **uncommitted changes** (staged + unstaged): run `git diff HEAD > {diff_file}`.
-   - For **branch diff**: verify the base branch exists before running `git diff <base-branch>...HEAD > {diff_file}`. If it does not exist, HALT and ask the user for a valid branch.
-   - For **commit range**: verify the range resolves before running `git diff <range> > {diff_file}`. If it does not resolve, HALT and ask the user for a valid range.
-   - For **provided diff**: validate the content is non-empty and parseable as a unified diff, then write it to `{diff_file}`. If it is not parseable, HALT and ask the user to provide a valid diff.
-   - For **file list**: validate each path exists in the working tree. Run `git diff HEAD -- <path1> <path2> ... > {diff_file}`. If any paths are untracked (new files not yet staged), append them with `git diff --no-index /dev/null <path> >> {diff_file}`. If the diff is empty, ask the user whether to review the full file contents or to specify a different baseline.
-   - After writing `{diff_file}`, verify it is non-empty. If empty, HALT and tell the user there is nothing to review. Read it yourself wherever later steps need the diff.
+3. **Stage the selected diff once** in a unique system-temp file and set `{diff_file}` to its absolute path. Review layers receive this path, never the diff text.
+   - A usable plan baseline diffs every tracked change from `baseline_revision` (or legacy `baseline_commit`) to `HEAD`, then appends each untracked file with `git diff --no-index /dev/null <path>`. Verify the baseline resolves first. `NO_VCS` is not a baseline: state that and use the selected source.
+   - For staged changes run `git diff --cached`; for uncommitted changes run `git diff HEAD`; for a branch diff verify the base then run `git diff <base>...HEAD`; for a commit range verify it then run `git diff <range>`.
+   - For a provided diff, validate it is non-empty unified diff text. For a file list, validate paths and include untracked files with `git diff --no-index`.
+   - If the source does not resolve, HALT and ask for a valid source. If the staged diff is empty, HALT and say there is nothing to review. Read `{diff_file}` yourself wherever later steps need the diff.
 
-4. **Stage the claims file.** Collect the change's own narrative: for a branch diff or commit range, the commit messages it covers (`git log <base>..<head>`); for other sources, whatever description of the change the user or conversation supplied. Write it verbatim to a file in the system temp directory and set `{claims_file}` to its path. If there is no narrative, set `{claims_file}` = `''`. Do not analyze or summarize the narrative — it is input for the edge-case layer only, staged as a file precisely so the other layers never see it.
+4. **Stage the claims file.** For a plan baseline, branch diff, or commit range, write the covered commit messages verbatim (`git log <baseline>..HEAD` for a plan baseline) to another unique system-temp file and set `{claims_file}`. For other sources use the user or conversation narrative. If there is no narrative, set `{claims_file}` to `''`. Do not analyze or summarize it.
 
-5. **Set the spec context.**
-   - If the triggering request or recent conversation **explicitly** states there is no spec (e.g., "no spec", "without a spec", "no-spec"): set `{review_mode}` = `"no-spec"` and clear `{spec_file}` (set it to `''`). Do **not** ask for a spec. Do **not** infer no-spec mode merely because the invocation omitted a spec path.
-   - Else if `{spec_file}` is already set (from Tier 1 or Tier 2): verify the file exists and is readable, then set `{review_mode}` = `"full"`.
-   - Else (neither a spec path nor an explicit no-spec declaration is present): ask the user to choose:
-     1. Provide a spec or story file path for context; or
-     2. Continue without a spec.
-     - If the user provides a path: set `{spec_file}` to that path, verify the file exists and is readable, then set `{review_mode}` = `"full"`.
-     - If the user explicitly chooses to continue without a spec: set `{review_mode}` = `"no-spec"`.
+5. **Set the plan context.**
+   - If `{review_mode}` is already `"no-plan"` from Tier 2's planless-ticket case, skip this step.
+   - If the request explicitly says no plan, without a plan, or no-plan: set `{review_mode}` = `"no-plan"` and clear `{plan_file}`. Do not ask.
+   - If `{plan_file}` is set: verify it exists and is readable, then set `{review_mode}` = `"full"`.
+   - Otherwise ask the user to provide a plan or legacy story/spec path, or continue without one. Do not infer no-plan mode merely because no path was supplied.
 
-6. If `{review_mode}` = `"full"` and the file at `{spec_file}` has a `context` field in its frontmatter listing additional docs, load each referenced document. Warn the user about any docs that cannot be found.
+6. If `{review_mode}` is `"full"` and `{plan_file}` frontmatter has a `context` list, load each referenced document and warn about missing docs.
 
-7. Sanity check: if `wc -l {diff_file}` exceeds approximately 3000 lines, warn the user and offer to chunk the review by file group.
-   - If the user opts to chunk: agree on the first group, rebuild `{diff_file}` narrowed to that group, and list the remaining groups for the user to note for follow-up runs.
-   - If the user declines: proceed as-is with the full diff.
+7. If `wc -l {diff_file}` exceeds approximately 3000 lines, warn the user and offer to chunk by file group. If accepted, rebuild `{diff_file}` for the first group and list remaining groups for follow-up runs.
 
 ### CHECKPOINT
 
-Present a summary before proceeding: diff stats (files changed, lines added/removed), `{review_mode}`, and loaded spec/context docs (if any). HALT and wait for user confirmation to proceed.
-
+Present diff stats, `{review_mode}`, and loaded plan/context docs. HALT and wait for user confirmation.
 
 ## NEXT
 

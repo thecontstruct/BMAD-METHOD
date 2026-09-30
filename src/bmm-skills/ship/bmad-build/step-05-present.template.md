@@ -12,9 +12,9 @@
 
 ### Generate Suggested Review Order
 
-Read `{baseline_commit}` from `{spec_file}` frontmatter and construct the diff of all changes since that commit.
+Read `{baseline_commit}` from `{plan_file}` frontmatter and construct the diff of all changes since that commit.
 
-Append the review order as a `## Suggested Review Order` section to `{spec_file}` **after the last existing section**. Do not modify the Code Map.
+Append the review order as a `## Suggested Review Order` section to `{plan_file}` **after the last existing section**. Do not modify the Code Map.
 
 Build the trail as an ordered sequence of **stops** — clickable `path:line` references with brief framing — optimized for a human reviewer reading top-down to understand the change:
 
@@ -22,7 +22,7 @@ Build the trail as an ordered sequence of **stops** — clickable `path:line` re
 2. **Lead with the entry point** — the single highest-leverage file:line a reviewer should look at first to grasp the design intent.
 3. **Inside each concern**, order stops from most important / architecturally interesting to supporting. Lightly bias toward higher-risk or boundary-crossing stops.
 4. **End with peripherals** — tests, config, types, and other supporting changes come last.
-5. **Every code reference is a clickable spec-file-relative link.** Compute each link target as a relative path from `{spec_file}`'s directory to the changed file. Format each stop as a markdown link: `[short-name:line](../../path/to/file.ts#L42)`. Use a `#L` line anchor. Use the file's basename (or shortest unambiguous suffix) plus line number as the link text. The relative path must be dynamically derived — never hardcode the depth.
+5. **Every code reference is a clickable plan-file-relative link.** Compute each link target as a relative path from `{plan_file}`'s directory to the changed file. Format each stop as a markdown link: `[short-name:line](../../path/to/file.ts#L42)`. Use a `#L` line anchor. Use the file's basename (or shortest unambiguous suffix) plus line number as the link text. The relative path must be dynamically derived — never hardcode the depth.
 6. **Each stop gets one ultra-concise line of framing** (≤15 words) — why this approach was chosen here and what it achieves in the context of the change. No paragraphs.
 
 Format each stop as framing first, link on the next indented line:
@@ -44,21 +44,21 @@ Format each stop as framing first, link on the next indented line:
   [`file.ts:88`](../../src/path/to/file.ts#L88)
 ```
 
-> The `../../` prefix above is illustrative — compute the actual relative path from `{spec_file}`'s directory to each target file.
+> The `../../` prefix above is illustrative — compute the actual relative path from `{plan_file}`'s directory to each target file.
 
 When there is only one concern, omit the bold label — just list the stops directly.
 
-### Mark Spec Done
+### Mark Plan Built
 
-Change `{spec_file}` status to `done` in the frontmatter.
+Change `{plan_file}` status to `built` in the frontmatter.
 
-Follow `./sync-sprint-status.md` with `{target_status}` = `review`.
+For a ticket-tree plan, finish at `built`. `done` belongs only to the user or an orchestrator through `tickets.py mark`; do not advance it here.
 
 ### Commit and Complete
 
-If version control is available and the tree is dirty, create a local commit with a conventional message derived from the spec title.
+If version control is available and the tree is dirty, create a local commit with a conventional message derived from the plan title.
 
-{workflow.open_spec}
+{workflow.open_plan}
 
 ### Display Summary
 

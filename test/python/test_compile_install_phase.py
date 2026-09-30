@@ -21,7 +21,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.scripts.bmad_compile import engine, errors, io as bmad_io
+# The compiler's lazy dependencies retain the installed-runtime
+# ``bmad_compile.*`` imports. Make that source-tree package name available
+# before exercising ``compile_skill()`` directly.
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "src" / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from bmad_compile import engine, errors, io as bmad_io
 
 
 def _write(path: Path, content: str) -> None:

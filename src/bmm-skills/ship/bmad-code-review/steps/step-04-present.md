@@ -7,7 +7,8 @@ deferred_work_file: '{implementation_artifacts}/deferred-work.md'
 ## RULES
 
 - YOU MUST ALWAYS SPEAK OUTPUT in your Agent communication style with the config `{communication_language}`
-- When `{spec_file}` is set, always write findings to the story file before offering action choices.
+- When `{ticket_args}` is set, append findings only to the resolved ticket plan. Never run `tickets.py mark` or edit sprint status for a ticket review.
+- When `{ticket_args}` is empty and `{plan_file}` is a legacy story/spec, retain the legacy story and sprint-status behavior below.
 - `decision-needed` findings must be resolved before handling `patch` findings.
 
 ## INSTRUCTIONS
@@ -16,9 +17,11 @@ deferred_work_file: '{implementation_artifacts}/deferred-work.md'
 
 If zero findings remain after triage (all dismissed or none raised): state that and proceed to section 6 (Sprint Status Update).
 
-### 2. Write findings to the story file
+### 2. Persist findings
 
-If `{spec_file}` exists and contains a Tasks/Subtasks section, append a `### Review Findings` subsection. Write all findings in this order:
+When `{ticket_args}` is set, append one dated `## Code Review` block to `{plan_file}`. Include every triaged finding, its category, source location, disposition, and each deferred reason. Do not edit any ticket file, story file, or tracker state; the ticket remains at its current status.
+
+Otherwise, if `{plan_file}` exists and contains a Tasks/Subtasks section, append a `### Review Findings` subsection. Write all findings in this order:
 
 1. **`decision-needed`** findings (unchecked):
    `- [ ] [Review][Decision] <Title> — <Detail>`
@@ -29,7 +32,7 @@ If `{spec_file}` exists and contains a Tasks/Subtasks section, append a `### Rev
 3. **`defer`** findings (checked off, marked deferred):
    `- [x] [Review][Defer] <Title> [<file>:<line>] — deferred, pre-existing`
 
-Also append each `defer` finding to `{deferred_work_file}` under a heading `## Deferred from: code review ({date})`. If `{spec_file}` is set, include its basename in the heading (e.g., `code review of story-3.3 (2026-03-18)`). One bullet per finding with description.
+For legacy reviews only (`{ticket_args}` empty), also append each `defer` finding to `{deferred_work_file}` under a heading `## Deferred from: code review ({date})`. If `{plan_file}` is set, include its basename in the heading. One bullet per finding with description.
 
 ### 3. Present summary
 
@@ -37,7 +40,8 @@ Announce what was written:
 
 > **Code review complete.** <D> `decision-needed`, <P> `patch`, <W> `defer`, <R> dismissed as noise.
 
-If `{spec_file}` is set, add: `Findings written to the review findings section in {spec_file}.`
+If `{ticket_args}` is set, add: `Findings written to the Code Review section in {plan_file}; ticket status was not changed.`
+Otherwise, if `{plan_file}` is set, add: `Findings written to the review findings section in {plan_file}.`
 Otherwise add: `Findings are listed above. No story file was provided, so nothing was persisted.`
 
 ### 4. Resolve decision-needed findings
@@ -52,14 +56,14 @@ If the user chooses to defer, ask: Quick one-line reason for deferring this item
 
 If `patch` findings exist (including any resolved from step 4), HALT. Ask the user:
 
-If `{spec_file}` is set, present all three options:
+If `{plan_file}` is set, present all three options:
 
 > **How would you like to handle the `<P>` `patch` findings?**
 > 1. **Apply every patch** — fix all of them now, no per-finding confirmation. Defer and decision-needed items are not touched.
 > 2. **Leave as action items** — they are already in the story file
 > 3. **Walk through each patch** — show details for each before deciding
 
-If `{spec_file}` is **not** set, present only options 1 and 2 (omit "Leave as action items" — findings were not written to a file):
+If `{plan_file}` is **not** set, present only options 1 and 2 (omit "Leave as action items" — findings were not written to a file):
 
 > **How would you like to handle the `<P>` `patch` findings?**
 > 1. **Apply every patch** — fix all of them now, no per-finding confirmation. Defer and decision-needed items are not touched.
@@ -67,8 +71,8 @@ If `{spec_file}` is **not** set, present only options 1 and 2 (omit "Leave as ac
 
 **HALT** — I am waiting for your numbered choice. Reply with only the number. Do not proceed until you select an option.
 
-- **Apply every patch**: Apply every patch finding without per-finding confirmation. Do not modify defer or decision-needed items. After all patches are applied, present a summary of changes made. If `{spec_file}` is set, check off the patch items in the story file (leave defer items as-is).
-- **Leave as action items** (only when `{spec_file}` is set): Done — findings are already written to the story.
+- **Apply every patch**: Apply every patch finding without per-finding confirmation. Do not modify defer or decision-needed items. After all patches are applied, present a summary of changes made. If `{plan_file}` is set, check off the patch items in the story file (leave defer items as-is).
+- **Leave as action items** (only when `{plan_file}` is set): Done — findings are already written to the story.
 - **Walk through each patch**: Present each finding with full detail, diff context, and suggested fix. After walkthrough, re-offer the applicable options above.
 
   **HALT** — I am waiting for your numbered choice. Do not proceed until you select an option.
@@ -80,11 +84,11 @@ If `{spec_file}` is **not** set, present only options 1 and 2 (omit "Leave as ac
 - Deferred: <W>
 - Dismissed: <R>
 
-### 6. Update story status and sync sprint tracking
+### 6. Update legacy story status and sprint tracking
 
-Skip this section if `{spec_file}` is not set.
+Skip this entire section when `{ticket_args}` is set or `{plan_file}` is not set. A ticket review never mutates ticket status or legacy sprint status.
 
-#### Determine new status based on review outcome
+#### Determine new legacy status based on review outcome
 
 - If all `decision-needed` and `patch` findings were resolved (fixed or dismissed) AND no unresolved `high`/`medium` findings remain: set `{new_status}` = `done`. Update the story file Status section to `done`.
 - If `patch` findings were left as action items, or unresolved issues remain: set `{new_status}` = `in-progress`. Update the story file Status section to `in-progress`.

@@ -34,7 +34,7 @@
    - **defer** -- Pre-existing issue not caused by the current change. Real but not actionable now.
    - **dismiss** -- Noise, false positive, or handled elsewhere.
 
-   If `{review_mode}` = `"no-spec"` and a finding would otherwise be `decision_needed`, reclassify it as `patch` (if the fix is unambiguous) or `defer` (if not).
+   If `{review_mode}` = `"no-plan"` and a finding would otherwise be `decision_needed`, reclassify it as `patch` (if the fix is unambiguous) or `defer` (if not).
 
 7. **Record** every dismissed finding and its reason in the summary; do not include it in the surviving groups.
 

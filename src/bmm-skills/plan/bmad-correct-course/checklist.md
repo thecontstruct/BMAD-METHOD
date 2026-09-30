@@ -1,6 +1,6 @@
 # Change Navigation Checklist
 
-<critical>This checklist is executed as part of: ./workflow.md</critical>
+<critical>This checklist is executed as part of: ./SKILL.md</critical>
 <critical>Work through each section systematically with the user, recording findings and impacts</critical>
 
 <checklist>
@@ -8,8 +8,8 @@
 <section n="1" title="Understand the Trigger and Context">
 
 <check-item id="1.1">
-<prompt>Identify the triggering story that revealed this issue</prompt>
-<action>Document story ID and brief description</action>
+<prompt>Identify the triggering ticket or legacy story that revealed this issue</prompt>
+<action>In ticket-tree mode, document the ticket ref, epic folder, current state, and brief description. Without a tree, document the story ID and brief description.</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
 </check-item>
 
@@ -39,43 +39,44 @@
 
 </section>
 
-<section n="2" title="Epic Impact Assessment">
+<section n="2" title="Ticket-tree or Epic Impact Assessment">
 
 <check-item id="2.1">
-<prompt>Evaluate current epic containing the trigger story</prompt>
-<action>Can this epic still be completed as originally planned?</action>
+<prompt>Evaluate the current epic folder containing the triggering ticket, or the legacy epic containing the trigger story</prompt>
+<action>In ticket-tree mode, resolve each affected ref and its prerequisites and dependents before assessing scope. Can this epic still be completed as originally planned?</action>
 <action>If no, what modifications are needed?</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
 </check-item>
 
 <check-item id="2.2">
-<prompt>Determine required epic-level changes</prompt>
+<prompt>Determine required epic-level and ticket-level changes</prompt>
 <action>Check each scenario:</action>
-  - Modify existing epic scope or acceptance criteria
+  - Rescope, split, resequence, or update prerequisites for planned ticket-tree work
   - Add new epic to address the issue
-  - Remove or defer epic that's no longer viable
+  - Drop or defer work that's no longer viable, including dependent remediation
+  - Modify existing epic scope or acceptance criteria in legacy mode
   - Completely redefine epic based on new understanding
-<action>Document specific epic changes needed</action>
+<action>Document specific changes needed. In ticket-tree mode, preserve ids and propose follow-on work instead of rewriting active, built, done, or dropped tickets.</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
 </check-item>
 
 <check-item id="2.3">
-<prompt>Review all remaining planned epics for required changes</prompt>
-<action>Check each future epic for impact</action>
+<prompt>Review remaining planned ticket-tree work or epics for required changes</prompt>
+<action>Check each future ticket or epic for impact</action>
 <action>Identify dependencies that may be affected</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
 </check-item>
 
 <check-item id="2.4">
-<prompt>Check if issue invalidates future epics or necessitates new ones</prompt>
-<action>Does this change make any planned epics obsolete?</action>
-<action>Are new epics needed to address gaps created by this change?</action>
+<prompt>Check if issue invalidates future tickets or epics, or necessitates new ones</prompt>
+<action>Does this change make any planned tickets or epics obsolete?</action>
+<action>Are new tickets or epics needed to address gaps created by this change?</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
 </check-item>
 
 <check-item id="2.5">
-<prompt>Consider if epic order or priority should change</prompt>
-<action>Should epics be resequenced based on this issue?</action>
+<prompt>Consider if ticket, epic order, or priority should change</prompt>
+<action>Should tickets or epics be resequenced based on this issue?</action>
 <action>Do priorities need adjustment?</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
 </check-item>
@@ -191,8 +192,8 @@
 </check-item>
 
 <check-item id="5.2">
-<prompt>Document epic impact and artifact adjustment needs</prompt>
-<action>Summarize findings from Epic Impact Assessment (Section 2)</action>
+<prompt>Document ticket-tree or epic impact and artifact adjustment needs</prompt>
+<action>Summarize findings from Ticket-tree or Epic Impact Assessment (Section 2)</action>
 <action>Summarize findings from Artifact Conflict Analysis (Section 3)</action>
 <action>Be specific about what changes are needed and why</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
@@ -217,6 +218,7 @@
 <check-item id="5.5">
 <prompt>Establish agent handoff plan</prompt>
 <action>Identify which roles/agents will execute the changes:</action>
+  - `bmad-preview-ticketing` (for approved ticket-tree operations)
   - Developer agent (for implementation)
   - Product Owner / Developer (for backlog changes)
   - Product Manager / Architect (for strategic changes)
@@ -253,17 +255,9 @@
 </check-item>
 
 <check-item id="6.4">
-<prompt>Update sprint-status.yaml to reflect approved epic changes</prompt>
-<action>If epics were added: Add new epic entries with status 'backlog'</action>
-<action>If epics were removed: Remove corresponding entries</action>
-<action>If epics were renumbered: Update epic IDs and story references</action>
-<action>If stories were added/removed: Update story entries within affected epics</action>
-<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>
-</check-item>
-
-<check-item id="6.5">
 <prompt>Confirm next steps and handoff plan</prompt>
 <action>Review handoff responsibilities with user</action>
+<action>In ticket-tree mode, hand the approved operations list to `bmad-preview-ticketing`; do not edit ticket files, plans, `tickets.toml`, or ticket status from Correct Course.</action>
 <action>Ensure all stakeholders understand their roles</action>
 <action>Confirm timeline and success criteria</action>
 <status>[ ] Done / [ ] N/A / [ ] Action-needed</status>

@@ -15,7 +15,7 @@ deferred_work_file: '{implementation_artifacts}/deferred-work.md'
 
 ### Implement
 
-Follow `./sync-sprint-status.md` with `{target_status}` = `in-progress`.
+When `{plan_file}` came from the ticket tree, its frontmatter is the only Build lifecycle write; do not update sprint status or a ticket file.
 
 Implement the clarified intent directly.
 
@@ -37,7 +37,7 @@ Deduplicate all review findings, then route each finding in this order:
 - **HALT** — HALT on every finding caused or exposed by this change that shows the same evidence but whose smallest fix fails any of those conditions. Present it to the human for decision before proceeding.
 - **defer** — Defer every other real finding, including pre-existing issues and improvement ideas. Append one new entry to `{deferred_work_file}` using this format. Do not modify existing entries or look for duplicates.
   ```markdown
-  - source_spec: `{spec_file}`
+  - source_plan: `{plan_file}`
     summary: <one sentence>
     evidence: <why this is real>
   ```
@@ -47,13 +47,13 @@ Deduplicate all review findings, then route each finding in this order:
 
 Set `{title}` = a concise title derived from the clarified intent.
 
-Write `{spec_file}` using `./spec-template.md`. Fill only these sections — delete all others:
+Write `{plan_file}` using `./plan-template.md`. Fill only these sections — delete all others:
 
-1. **Frontmatter** — set `title: '{title}'`, `type`, `created`, `status: 'done'`. Add `route: 'one-shot'`.
+1. **Frontmatter** — set `title: '{title}'`, `type`, `created`, `status: 'built'`. Add `route: 'one-shot'`.
 2. **Title and Intent** — `# {title}` heading and `## Intent` with **Problem** and **Approach** lines. Reuse the summary you already generated for the terminal.
-3. **Suggested Review Order** — append after Intent. Build using the same convention as `./step-05-present.md` § "Generate Suggested Review Order" (spec-file-relative links, concern-based ordering, ultra-concise framing).
+3. **Suggested Review Order** — append after Intent. Build using the same convention as `./step-05-present.md` § "Generate Suggested Review Order" (plan-file-relative links, concern-based ordering, ultra-concise framing).
 
-Follow `./sync-sprint-status.md` with `{target_status}` = `review`.
+For a ticket-tree plan, finish at `built`. `done` belongs only to the user or an orchestrator through `tickets.py mark`; do not advance it here.
 
 ### Commit
 
@@ -61,12 +61,12 @@ If version control is available and the tree is dirty, create a local commit wit
 
 ### Present
 
-{workflow.open_spec}
+{workflow.open_plan}
 
 Display a summary in conversation output, including:
 
 - The commit hash (if one was created).
-- List of files changed with one-line descriptions. Any file paths shown in conversation/terminal output must use CWD-relative format (no leading `/`) with `:line` notation (e.g., `src/path/file.ts:42`) for terminal clickability — this differs from spec-file links which use spec-file-relative paths.
+- List of files changed with one-line descriptions. Any file paths shown in conversation/terminal output must use CWD-relative format (no leading `/`) with `:line` notation (e.g., `src/path/file.ts:42`) for terminal clickability — this differs from spec-file links which use plan-file-relative paths.
 - Review findings breakdown: patches applied, items deferred, items rejected. If all findings were rejected, say so.
 
 Offer to push and/or create a pull request.
